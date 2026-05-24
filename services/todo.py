@@ -261,23 +261,43 @@ def render(todos, habits, user, readonly=False):
 <title>📋 Todo List</title>
 <link rel="stylesheet" href="/static/style.css">
 <style>
-/* badges */
-.badge {{ font-size: 0.78rem; padding: 2px 6px; border-radius: 4px; font-weight: 500; }}
-.badge.due {{ background: #e8f4fd; color: #2980b9; }}
-.badge.overdue {{ background: #fdecea; color: #c0392b; font-weight: 600; }}
-.badge.dday {{ background: #fff3cd; color: #d35400; font-weight: 600; }}
-.badge.early {{ background: #d4edda; color: #155724; font-weight: 600; }}
-.btn-undo {{ background: #fef9c3; color: #854d0e; }}
-.btn-habit {{ background: #f0fdf4; color: #166534; text-decoration: none; }}
-.btn-habit.linked {{ background: #dcfce7; }}
+.badge {{ font-size: 0.75rem; padding: 4px 8px; border-radius: 6px; font-weight: 600; letter-spacing: -0.02em; }}
+.badge.due {{ background: var(--slate-100); color: var(--blue-500); }}
+.badge.overdue {{ background: #fef2f2; color: #ef4444; border: 1px solid #fecaca; }}
+.badge.dday {{ background: #fffbeb; color: #f59e0b; border: 1px solid #fde68a; }}
+.badge.early {{ background: #f0fdf4; color: #10b981; }}
 
-/* habits section */
+.btn {{ padding: 6px 12px; border: none; border-radius: 8px; font-size: 0.85rem; font-weight: 600; cursor: pointer; transition: 0.2s; }}
+.btn-done {{ background: var(--slate-100); color: var(--slate-500); }}
+.btn-done:hover {{ background: var(--blue-500); color: white; }}
+.btn-undo {{ background: #fef9c3; color: #854d0e; }}
+.btn-habit {{ background: var(--slate-50); color: var(--slate-500); border: 1px solid var(--slate-200); text-decoration: none; }}
+.btn-habit.linked {{ background: #dcfce7; color: #166534; }}
+.btn-del {{ background: transparent; color: var(--slate-400); font-weight: 500; }}
+.btn-del:hover {{ color: #ef4444; background: #fef2f2; }}
+
+.todo-item {{
+  display: flex; align-items: center; gap: 16px;
+  background: white; padding: 16px 20px; border-radius: var(--radius-lg);
+  border: 1px solid var(--slate-200); margin-bottom: 8px;
+  transition: box-shadow 0.2s, transform 0.2s;
+  position: relative; overflow: hidden;
+}}
+.todo-item:hover {{ box-shadow: 0 4px 12px rgba(0,0,0,0.05); transform: translateY(-2px); }}
+.todo-item::before {{ content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--blue-500); }}
+.todo-item.done::before {{ background: var(--slate-200); }}
+.todo-item.done {{ opacity: 0.6; background: var(--slate-50); box-shadow: none; transform: none; }}
+.todo-item.done .title {{ text-decoration: line-through; color: var(--slate-400); }}
+.tid {{ font-size: 0.75rem; color: var(--slate-300); min-width: 28px; }}
+.title {{ flex: 1; font-size: 0.95rem; }}
+.date {{ font-size: 0.75rem; color: var(--slate-300); }}
+.due-date {{ font-size: 0.75rem; color: var(--slate-400); }}
+.actions {{ display: flex; gap: 6px; }}
+
 .habits-section {{
-  background: linear-gradient(135deg, #f0fdf4, #ecfdf5);
-  border: 1px solid #bbf7d0;
-  border-radius: 12px;
-  padding: 16px 20px;
-  margin-bottom: 20px;
+  background: white; border: 1px solid var(--slate-200);
+  border-radius: var(--radius-lg); padding: 20px; margin-bottom: 32px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.02);
 }}
 .habits-section.habits-empty {{
   display: flex; align-items: center; justify-content: space-between;
@@ -287,23 +307,26 @@ def render(todos, habits, user, readonly=False):
   display: flex; align-items: center; justify-content: space-between;
   margin-bottom: 12px;
 }}
-.habits-title {{ font-weight: 700; font-size: 0.95rem; color: #166534; }}
-.habits-meta {{ font-size: 0.78rem; color: #4ade80; font-weight: 500; }}
+.habits-title {{ font-weight: 800; font-size: 1.1rem; color: var(--slate-900); }}
+.habits-meta {{ font-size: 0.85rem; color: var(--slate-500); }}
 .habit-items {{ display: flex; flex-direction: column; gap: 8px; }}
 .habit-item {{
-  display: flex; align-items: center; gap: 10px;
-  background: white; padding: 10px 14px; border-radius: 8px;
-  border: 1px solid #d1fae5;
+  display: flex; align-items: center; gap: 12px;
+  background: var(--slate-50); padding: 12px 16px; border-radius: 12px;
+  border: 1px solid transparent; transition: 0.2s;
 }}
+.habit-item:hover {{ border-color: var(--slate-200); background: white; }}
 .habit-item.habit-checked {{ opacity: 0.6; }}
 .h-icon {{ font-size: 1.1rem; flex-shrink: 0; }}
-.h-name {{ flex: 1; font-size: 0.9rem; font-weight: 500; color: #1a1a1a; }}
-.h-streak {{ font-size: 0.8rem; color: #f97316; font-weight: 600; white-space: nowrap; }}
+.h-name {{ flex: 1; font-size: 0.9rem; font-weight: 500; color: var(--slate-900); }}
+.h-streak {{ font-size: 0.8rem; color: #f59e0b; font-weight: 700; white-space: nowrap; }}
 .h-actions {{ display: flex; gap: 6px; align-items: center; flex-shrink: 0; }}
-.hb-check {{ background: #16a34a; color: white; font-size: 0.78rem; padding: 4px 10px; }}
-.hb-done {{ font-size: 0.78rem; color: #16a34a; font-weight: 600; padding: 4px 6px; }}
-.hb-detail {{ background: #f0fdf4; color: #166534; font-size: 0.78rem; text-decoration: none; padding: 4px 10px; }}
-.habits-link {{ display: inline-block; margin-top: 12px; font-size: 0.82rem; color: #16a34a; text-decoration: none; font-weight: 500; }}
+.hb-check {{ background: var(--slate-900); color: white; font-size: 0.78rem; padding: 4px 10px; border-radius: 6px; border: none; cursor: pointer; font-weight: 600; transition: 0.2s; }}
+.hb-check:hover {{ opacity: 0.85; }}
+.hb-done {{ font-size: 0.78rem; color: #10b981; font-weight: 600; padding: 4px 6px; }}
+.hb-detail {{ background: var(--slate-50); color: var(--slate-600); font-size: 0.78rem; text-decoration: none; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--slate-200); transition: 0.2s; }}
+.hb-detail:hover {{ border-color: var(--blue-500); color: var(--blue-500); }}
+.habits-link {{ display: inline-block; margin-top: 12px; font-size: 0.82rem; color: var(--blue-500); text-decoration: none; font-weight: 500; }}
 .habits-link:hover {{ text-decoration: underline; }}
 </style>
 </head><body>
