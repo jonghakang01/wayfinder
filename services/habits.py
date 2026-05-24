@@ -31,6 +31,14 @@ def load(user):
                 data.setdefault("freq", "daily")
                 data.setdefault("icon", "✅")
                 data = [data]
+            for h in data:
+                # migrate checkins list → dict
+                if isinstance(h.get("checkins"), list):
+                    h["checkins"] = {d: 1 for d in h["checkins"]}
+                elif not isinstance(h.get("checkins"), dict):
+                    h["checkins"] = {}
+                h.setdefault("target", 1)
+                h.setdefault("unit", "회")
             return data
     except Exception:
         return []
@@ -49,26 +57,31 @@ def find_habit(habits, hid):
     return next((h for h in habits if h["id"] == hid), None)
 
 
-def compute_stats(checkins):
+def is_done(checkins, ds, target):
+    return checkins.get(ds, 0) >= max(1, target)
+
+
+def compute_stats(checkins, target=1):
     today = date.today()
-    cs = set(checkins)
+    cs = checkins if isinstance(checkins, dict) else {d: 1 for d in checkins}
+    t = max(1, target)
 
     streak, d = 0, today
-    while d.isoformat() in cs:
+    while is_done(cs, d.isoformat(), t):
         streak += 1
         d -= timedelta(days=1)
 
     longest, cur, prev_d = 0, 0, None
-    for ds in sorted(cs):
+    for ds in sorted(k for k, v in cs.items() if v >= t):
         d = date.fromisoformat(ds)
         cur = cur + 1 if prev_d and (d - prev_d).days == 1 else 1
         longest = max(longest, cur)
         prev_d = d
 
-    total = len(cs)
+    total = sum(1 for v in cs.values() if v >= t)
     start_12w = today - timedelta(weeks=12)
     days_12w = (today - start_12w).days + 1
-    done_12w = sum(1 for c in cs if date.fromisoformat(c) >= start_12w)
+    done_12w = sum(1 for ds, v in cs.items() if date.fromisoformat(ds) >= start_12w and v >= t)
     rate_12w = round(done_12w / days_12w * 100) if days_12w else 0
 
     return streak, longest, total, rate_12w, done_12w, days_12w
@@ -85,14 +98,21 @@ def handle(method, path, body, ctx=None):
             freq = body.get("freq", ["daily"])[0]
             if freq not in ("daily", "weekly"):
                 freq = "daily"
+            try:
+                target = max(1, int(body.get("target", ["1"])[0]))
+            except ValueError:
+                target = 1
+            unit = body.get("unit", ["회"])[0].strip() or "회"
             if name:
                 habits.append({
                     "id": next_id(habits),
                     "name": name,
                     "icon": "✅",
                     "freq": freq,
+                    "target": target,
+                    "unit": unit,
                     "started": date.today().isoformat(),
-                    "checkins": [],
+                    "checkins": {},
                 })
                 save(habits, user)
             return ("redirect", "/habit")
@@ -108,14 +128,23 @@ def handle(method, path, body, ctx=None):
                 if action == "checkin":
                     target_date = body.get("date", [date.today().isoformat()])[0]
                     try:
-                        target = date.fromisoformat(target_date)
-                        if target <= date.today():
-                            if target_date in habit["checkins"]:
-                                habit["checkins"].remove(target_date)
+                        target_d = date.fromisoformat(target_date)
+                        if target_d <= date.today():
+                            habit_target = habit.get("target", 1)
+                            current = habit["checkins"].get(target_date, 0)
+                            toggle = body.get("toggle", ["0"])[0] == "1"
+                            if toggle:
+                                # heatmap click: toggle done/undone
+                                new_count = 0 if current >= habit_target else habit_target
                             else:
-                                habit["checkins"].append(target_date)
+                                delta = int(body.get("delta", ["1"])[0])
+                                new_count = max(0, current + delta)
+                            if new_count <= 0:
+                                habit["checkins"].pop(target_date, None)
+                            else:
+                                habit["checkins"][target_date] = new_count
                             save(habits, user)
-                    except ValueError:
+                    except (ValueError, KeyError):
                         pass
                     next_url = body.get("next", [f"/habit/{hid}"])[0]
                     return ("redirect", next_url)
@@ -147,11 +176,14 @@ nav a{color:var(--text-muted);text-decoration:none;font-weight:500}
 nav a:hover{color:var(--accent)}
 .nav-user{color:var(--text-muted);font-size:12px}
 h2{font-size:18px;font-weight:700;margin-bottom:16px;color:var(--text)}
-.add-form{display:flex;gap:10px;flex-wrap:wrap}
-.add-form input[type=text]{flex:1;min-width:160px;padding:9px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:14px;transition:border-color 0.2s}
-.add-form input[type=text]:focus{border-color:var(--accent);outline:none}
+.add-form{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
+.add-form label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--text-muted);font-weight:600}
+.add-form input[type=text],.add-form input[type=number]{padding:9px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:14px;transition:border-color 0.2s}
+.add-form input[type=text]{flex:1;min-width:140px}
+.add-form input[type=number]{width:72px}
+.add-form input:focus{border-color:var(--accent);outline:none}
 .add-form select{padding:9px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:14px}
-.add-form button{padding:9px 18px;background:var(--text);color:white;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;transition:opacity 0.2s}
+.add-form button{padding:9px 18px;background:var(--text);color:white;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;transition:opacity 0.2s;align-self:flex-end}
 .add-form button:hover{opacity:0.85}
 .habit-row{display:flex;align-items:center;gap:14px;padding:14px 0;border-bottom:1px solid var(--border);transition:transform 0.2s}
 .habit-row:last-child{border-bottom:none}
@@ -159,10 +191,13 @@ h2{font-size:18px;font-weight:700;margin-bottom:16px;color:var(--text)}
 .habit-icon-sm{font-size:22px;width:36px;text-align:center;flex-shrink:0}
 .habit-info{flex:1}
 .habit-name{font-size:15px;font-weight:700;color:var(--text)}
-.habit-meta{font-size:12px;color:var(--text-muted);margin-top:2px}
+.habit-meta{font-size:12px;color:var(--text-muted);margin-top:2px;display:flex;gap:8px;align-items:center}
 .habit-actions{display:flex;gap:8px;align-items:center}
 .tag-freq{font-size:11px;padding:2px 8px;border-radius:12px;background:var(--border);color:var(--text-muted)}
+.tag-target{font-size:11px;padding:2px 8px;border-radius:12px;background:#eff6ff;color:var(--accent);font-weight:600}
 .streak-sm{font-size:13px;color:var(--streak);font-weight:600}
+.today-count{font-size:12px;color:var(--text-muted);font-weight:600}
+.today-count.done{color:#10b981}
 .btn-sm{padding:6px 14px;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;transition:0.2s}
 .btn-detail{background:var(--bg);color:var(--text-muted);text-decoration:none;padding:6px 14px;border-radius:6px;font-size:13px;font-weight:600;border:1px solid var(--border)}
 .btn-detail:hover{border-color:var(--accent);color:var(--accent)}
@@ -201,6 +236,9 @@ h1{font-size:20px;font-weight:700;color:var(--text)}
 .day-cell{width:var(--cell);height:var(--cell);border-radius:2px;cursor:pointer;transition:outline .1s}
 .day-cell:hover{outline:1px solid rgba(0,0,0,0.25);z-index:1}
 .day-cell[data-level="0"]{background:var(--cell-0);border:1px solid var(--border)}
+.day-cell[data-level="1"]{background:#e0f2fe}
+.day-cell[data-level="2"]{background:#bae6fd}
+.day-cell[data-level="3"]{background:#7dd3fc}
 .day-cell[data-level="4"]{background:var(--cell-4);box-shadow:0 0 8px rgba(56,189,248,0.3)}
 .day-cell.today{outline:2px solid var(--text);outline-offset:1px}
 .tooltip{position:fixed;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:12px;color:var(--text);pointer-events:none;opacity:0;transition:opacity .15s;z-index:100;white-space:nowrap;box-shadow:0 4px 12px rgba(0,0,0,0.08)}
@@ -210,30 +248,66 @@ h1{font-size:20px;font-weight:700;color:var(--text)}
 .btn-checkin:hover{opacity:0.85;transform:translateY(-1px)}
 .btn-checkin.checked{background:var(--bg);color:var(--text-muted);border:1px solid var(--border);cursor:default;box-shadow:none}
 .checkin-note{font-size:13px;color:var(--text-muted)}
-.activity-list{display:flex;flex-direction:column;gap:10px}
-.activity-item{display:flex;align-items:center;gap:12px;font-size:13px}
-.activity-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
-.activity-dot.done{background:var(--cell-4)}
-.activity-dot.miss{background:var(--border)}
-.activity-date{color:var(--text-muted);width:88px;flex-shrink:0}
-.activity-status{font-weight:500}
-.activity-status.done{color:var(--accent)}
-.activity-status.miss{color:var(--text-muted)}
+/* Counter UI for multi-metric */
+.counter-wrap{display:flex;align-items:center;gap:20px;flex-wrap:wrap}
+.counter-display{display:flex;align-items:baseline;gap:6px}
+.counter-num{font-size:3rem;font-weight:800;line-height:1;color:var(--text)}
+.counter-num.done{color:var(--accent)}
+.counter-sep{font-size:1.5rem;color:var(--text-muted)}
+.counter-target{font-size:1.1rem;color:var(--text-muted);font-weight:600}
+.counter-btns{display:flex;gap:8px}
+.btn-counter{width:44px;height:44px;border:2px solid var(--border);border-radius:12px;background:var(--bg);color:var(--text);font-size:1.4rem;font-weight:700;cursor:pointer;transition:0.15s;display:flex;align-items:center;justify-content:center}
+.btn-counter:hover{border-color:var(--accent);color:var(--accent);background:#eff6ff}
+.counter-progress{height:6px;background:var(--border);border-radius:9999px;overflow:hidden;width:180px;margin-top:8px}
+.counter-fill{height:100%;border-radius:9999px;background:linear-gradient(90deg,#bae6fd,var(--cell-4));transition:width .4s ease}
+/* Calendar */
+.cal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+.cal-title{font-size:15px;font-weight:700;color:var(--text)}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.cal-dow{text-align:center;font-size:11px;font-weight:600;color:var(--text-muted);padding:4px 0;text-transform:uppercase}
+.cal-day{aspect-ratio:1;display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;transition:0.15s;border:1px solid transparent;position:relative;gap:2px}
+.cal-day:hover{border-color:var(--accent);background:#eff6ff}
+.cal-day.empty{cursor:default;background:transparent;border:none}
+.cal-day.done{background:#eff6ff;border-color:#bae6fd}
+.cal-day.done .cal-count{color:var(--accent)}
+.cal-day.today{font-weight:800;border-color:var(--text)}
+.cal-day.future{opacity:0.3;cursor:default;pointer-events:none}
+.cal-count{font-size:10px;font-weight:600;color:var(--text-muted)}
+/* Trend chart */
+.trend-wrap{display:flex;gap:6px;align-items:flex-end;height:80px;padding-bottom:20px;position:relative}
+.trend-bar-wrap{display:flex;flex-direction:column;align-items:center;gap:4px;flex:1}
+.trend-bar{width:100%;border-radius:4px 4px 0 0;background:var(--cell-4);transition:height .4s ease;min-height:2px}
+.trend-bar.empty{background:var(--border)}
+.trend-label{font-size:9px;color:var(--text-muted);white-space:nowrap;transform:rotate(-30deg);transform-origin:top center;margin-top:4px}
+.trend-zero{position:absolute;bottom:20px;left:0;right:0;height:1px;background:var(--border)}
 .section-title{font-size:13px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:16px}
 .progress-wrap{margin-top:20px}
 .progress-label{display:flex;justify-content:space-between;font-size:12px;color:var(--text-muted);margin-bottom:6px}
 .progress-bar{height:6px;background:var(--border);border-radius:9999px;overflow:hidden}
 .progress-fill{height:100%;border-radius:9999px;background:linear-gradient(90deg,var(--cell-2),var(--cell-4));transition:width .6s ease}
 .empty{color:var(--text-muted);font-size:14px;text-align:center;padding:20px 0}
+.tab-row{display:flex;gap:4px;margin-bottom:20px}
+.tab-btn{padding:6px 14px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text-muted);font-size:13px;font-weight:600;cursor:pointer;transition:0.15s}
+.tab-btn.active{background:var(--text);color:white;border-color:var(--text)}
 """
 
 _HEATMAP_JS = """
 const MONTH_KO=['1월','2월','3월','4월','5월','6월','7월','8월','9월','10월','11월','12월'];
 const DAY_KO=['일','월','화','수','목','금','토'];
+const DAY_SHORT=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 const WEEKS=12;
 const today=new Date();today.setHours(0,0,0,0);
 const todayKey=today.toISOString().slice(0,10);
 function addDays(d,n){const r=new Date(d);r.setDate(r.getDate()+n);return r;}
+function levelOf(key){
+  const c=DATA[key]??0;
+  if(c<=0)return 0;
+  const r=c/TARGET;
+  if(r>=1)return 4;
+  if(r>=0.75)return 3;
+  if(r>=0.5)return 2;
+  return 1;
+}
 const startSunday=addDays(today,-(today.getDay()+(WEEKS-1)*7));
 const grid=document.getElementById('heatmapGrid');
 const monthLabels=document.getElementById('monthLabels');
@@ -247,12 +321,14 @@ for(let w=0;w<WEEKS;w++){
   for(let d=0;d<7;d++){
     const dt=addDays(startSunday,w*7+d);const key=dt.toISOString().slice(0,10);
     const cell=document.createElement('div');cell.className='day-cell';
+    const count=DATA[key]??0;
     if(dt>today){cell.dataset.level=0;cell.style.opacity='0.15';}
-    else{cell.dataset.level=DATA[key]??0;cell.style.cursor='pointer';}
+    else{cell.dataset.level=levelOf(key);cell.style.cursor='pointer';}
     if(key===todayKey)cell.classList.add('today');
     cell.dataset.date=key;
-    const isDone=(DATA[key]??0)>0;
-    cell.dataset.done=isDone?'✓ 완료':(dt>today?'—':'미완료 (클릭하여 추가)');
+    const isDone=count>=TARGET;
+    const countLabel=TARGET>1?` (${count}/${TARGET})`:'';
+    cell.dataset.done=isDone?`✓ 완료${countLabel}`:(dt>today?'—':`미완료${countLabel} · 클릭하여 토글`);
     cell.addEventListener('mouseenter',e=>{
       const d2=new Date(key+'T00:00:00');
       tooltip.textContent=`${d2.getMonth()+1}월 ${d2.getDate()}일 (${DAY_KO[d2.getDay()]}) · ${cell.dataset.done}`;
@@ -266,27 +342,103 @@ for(let w=0;w<WEEKS;w++){
       tooltip.classList.remove('show');
       const form=document.createElement('form');
       form.method='POST';form.action=`/habit/${HID}/checkin`;
-      const di=document.createElement('input');di.type='hidden';di.name='date';di.value=key;
-      const ni=document.createElement('input');ni.type='hidden';ni.name='next';ni.value=window.location.pathname;
-      form.appendChild(di);form.appendChild(ni);
+      [['date',key],['toggle','1'],['next',window.location.pathname]].forEach(([n,v])=>{
+        const i=document.createElement('input');i.type='hidden';i.name=n;i.value=v;form.appendChild(i);
+      });
       document.body.appendChild(form);form.submit();
     });
     col.appendChild(cell);
   }
   grid.appendChild(col);
 }
-const list=document.getElementById('activityList');
-for(let i=6;i>=0;i--){
-  const d=addDays(today,-i);const key=d.toISOString().slice(0,10);
-  const done=(DATA[key]??0)>0;
-  const label=i===0?'오늘':i===1?'어제':`${d.getMonth()+1}월 ${d.getDate()}일 (${DAY_KO[d.getDay()]})`;
-  const item=document.createElement('div');item.className='activity-item';
-  item.innerHTML=`
-    <div class="activity-dot ${done?'done':'miss'}"></div>
-    <span class="activity-date">${label}</span>
-    <span class="activity-status ${done?'done':'miss'}">${done?'✓ 완료':'— 미완료'}</span>`;
-  list.appendChild(item);
+
+// ── Calendar ──────────────────────────────────────────────
+function renderCalendar(monthOffset){
+  const calEl=document.getElementById('monthCalendar');
+  if(!calEl)return;
+  calEl.innerHTML='';
+  const yr=today.getFullYear(), mo=today.getMonth()+monthOffset;
+  const ref=new Date(yr,mo,1);
+  const year=ref.getFullYear(), month=ref.getMonth();
+  const firstDow=new Date(year,month,1).getDay();
+  const daysInMonth=new Date(year,month+1,0).getDate();
+  const titleEl=document.getElementById('calTitle');
+  if(titleEl)titleEl.textContent=`${year}년 ${month+1}월`;
+  const header=document.createElement('div');header.className='cal-grid';
+  ['일','월','화','수','목','금','토'].forEach(d=>{
+    const el=document.createElement('div');el.className='cal-dow';el.textContent=d;header.appendChild(el);
+  });
+  calEl.appendChild(header);
+  const grid=document.createElement('div');grid.className='cal-grid';
+  for(let i=0;i<firstDow;i++){
+    const el=document.createElement('div');el.className='cal-day empty';grid.appendChild(el);
+  }
+  for(let d=1;d<=daysInMonth;d++){
+    const key=`${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const dt=new Date(year,month,d);dt.setHours(0,0,0,0);
+    const count=DATA[key]??0;
+    const isDone=count>=TARGET;
+    const isFuture=dt>today;
+    const isToday=key===todayKey;
+    const el=document.createElement('div');
+    el.className='cal-day'+(isDone?' done':'')+(isToday?' today':'')+(isFuture?' future':'');
+    const dNum=document.createElement('span');dNum.textContent=d;el.appendChild(dNum);
+    if(TARGET>1&&count>0){
+      const cEl=document.createElement('span');cEl.className='cal-count';cEl.textContent=`${count}/${TARGET}`;el.appendChild(cEl);
+    }
+    el.title=`${month+1}/${d} · ${isDone?`완료 (${count})`:isFuture?'—':`미완료 (${count}/${TARGET})`}`;
+    if(!isFuture){
+      el.addEventListener('click',()=>{
+        const form=document.createElement('form');
+        form.method='POST';form.action=`/habit/${HID}/checkin`;
+        [['date',key],['toggle','1'],['next',window.location.pathname]].forEach(([n,v])=>{
+          const i=document.createElement('input');i.type='hidden';i.name=n;i.value=v;form.appendChild(i);
+        });
+        document.body.appendChild(form);form.submit();
+      });
+    }
+    grid.appendChild(el);
+  }
+  calEl.appendChild(grid);
 }
+let calOffset=0;
+renderCalendar(calOffset);
+document.getElementById('calPrev')?.addEventListener('click',()=>{calOffset--;renderCalendar(calOffset);});
+document.getElementById('calNext')?.addEventListener('click',()=>{if(calOffset<0){calOffset++;renderCalendar(calOffset);}});
+
+// ── Trend bars ────────────────────────────────────────────
+const trendEl=document.getElementById('trendChart');
+if(trendEl){
+  for(let w=0;w<WEEKS;w++){
+    const ws=addDays(startSunday,w*7);
+    let done=0;
+    for(let d=0;d<7;d++){
+      const key=addDays(ws,d).toISOString().slice(0,10);
+      if((DATA[key]??0)>=TARGET)done++;
+    }
+    const rate=done/7;
+    const wrap=document.createElement('div');wrap.className='trend-bar-wrap';
+    const bar=document.createElement('div');bar.className='trend-bar'+(done===0?' empty':'');
+    bar.style.height=`${Math.max(2,Math.round(rate*64))}px`;
+    bar.title=`${ws.getMonth()+1}/${ws.getDate()} 주 · ${done}일 달성`;
+    const lbl=document.createElement('div');lbl.className='trend-label';
+    lbl.textContent=`${ws.getMonth()+1}/${ws.getDate()}`;
+    wrap.appendChild(bar);wrap.appendChild(lbl);
+    trendEl.appendChild(wrap);
+  }
+}
+
+// ── Tab switching ─────────────────────────────────────────
+document.querySelectorAll('.tab-btn').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    const target=btn.dataset.tab;
+    document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    document.querySelectorAll('.tab-panel').forEach(p=>{
+      p.style.display=p.id===target?'':'none';
+    });
+  });
+});
 """
 
 
@@ -294,19 +446,37 @@ def render_list(habits, user, readonly=False):
     today_str = date.today().isoformat()
     rows = ""
     for h in habits:
-        streak, *_ = compute_stats(h.get("checkins", []))
-        checked = today_str in h.get("checkins", [])
+        target = h.get("target", 1)
+        unit = h.get("unit", "회")
+        streak, *_ = compute_stats(h.get("checkins", {}), target)
+        today_count = h.get("checkins", {}).get(today_str, 0)
+        checked = today_count >= target
         freq_lbl = FREQ_LABEL.get(h.get("freq", "daily"), "매일")
         started = h.get("started", "")[:7]
+        target_tag = f'<span class="tag-target">목표 {target}{unit}</span>' if target > 1 else ""
 
         if readonly:
-            checkin_btn = (
-                f'<span class="btn-sm btn-checkin-sm checked">{"✓ 완료" if checked else "미완료"}</span>'
-            )
+            checkin_btn = f'<span class="btn-sm btn-checkin-sm {"checked" if checked else ""}">{"✓ 완료" if checked else "미완료"}</span>'
             del_btn = ""
+        elif target > 1:
+            count_label = f'<span class="today-count {"done" if checked else ""}">{today_count}/{target}{unit}</span>'
+            checkin_btn = (
+                f'{count_label}'
+                f'<form method="POST" action="/habit/{h["id"]}/checkin" style="display:inline">'
+                f'<input type="hidden" name="delta" value="1">'
+                f'<input type="hidden" name="next" value="/habit">'
+                f'<button class="btn-sm btn-checkin-sm" type="submit">+1{unit}</button></form>'
+            )
+            del_btn = (
+                f'<form method="POST" action="/habit/{h["id"]}/delete" style="display:inline"'
+                f' onsubmit="return confirm(\'{h["name"]} 습관을 삭제할까요?\')">'
+                f'<button class="btn-sm btn-del-sm" type="submit">삭제</button></form>'
+            )
         else:
             checkin_btn = (
                 f'<form method="POST" action="/habit/{h["id"]}/checkin" style="display:inline">'
+                f'<input type="hidden" name="toggle" value="1">'
+                f'<input type="hidden" name="next" value="/habit">'
                 f'<button class="btn-sm btn-checkin-sm{"  checked" if checked else ""}" '
                 f'{"type=button" if checked else "type=submit"}>{"✓ 완료" if checked else "체크인"}</button></form>'
             )
@@ -320,7 +490,7 @@ def render_list(habits, user, readonly=False):
           <div class="habit-icon-sm">{h.get("icon", "✅")}</div>
           <div class="habit-info">
             <div class="habit-name">{h["name"]}</div>
-            <div class="habit-meta"><span class="tag-freq">{freq_lbl}</span>  {started} 시작</div>
+            <div class="habit-meta"><span class="tag-freq">{freq_lbl}</span>{target_tag}  {started} 시작</div>
           </div>
           <div class="habit-actions">
             <span class="streak-sm">🔥 {streak}일</span>
@@ -336,8 +506,10 @@ def render_list(habits, user, readonly=False):
     add_card = "" if readonly else (
         '<div class="card"><h2>새 습관 추가</h2>'
         '<form class="add-form" method="POST" action="/habit/add">'
-        '<input type="text" name="name" placeholder="습관 이름..." required autofocus>'
-        '<select name="freq"><option value="daily">매일</option><option value="weekly">주간</option></select>'
+        '<label>습관 이름<input type="text" name="name" placeholder="예: 물 마시기" required autofocus></label>'
+        '<label>빈도<select name="freq"><option value="daily">매일</option><option value="weekly">주간</option></select></label>'
+        '<label>목표 횟수<input type="number" name="target" value="1" min="1" max="99"></label>'
+        '<label>단위<input type="text" name="unit" value="회" placeholder="회, 잔, 분..." style="width:72px"></label>'
         '<button type="submit">추가</button>'
         '</form></div>'
     )
@@ -372,11 +544,15 @@ def render_list(habits, user, readonly=False):
 
 def render_detail(habit, user):
     today = date.today()
-    cs = set(habit.get("checkins", []))
-    today_checked = today.isoformat() in cs
+    cs = habit.get("checkins", {})
+    target = habit.get("target", 1)
+    unit = habit.get("unit", "회")
+    today_str = today.isoformat()
+    today_count = cs.get(today_str, 0)
+    today_done = today_count >= target
     hid = habit["id"]
 
-    streak, longest, total, rate_12w, done_12w, days_12w = compute_stats(habit.get("checkins", []))
+    streak, longest, total, rate_12w, done_12w, days_12w = compute_stats(cs, target)
 
     WEEKS = 12
     days_since_sun = today.weekday() + 1 if today.weekday() != 6 else 0
@@ -385,9 +561,16 @@ def render_detail(habit, user):
     d = start_sunday
     while d <= today:
         ds = d.isoformat()
-        heatmap[ds] = 4 if ds in cs else 0
+        count = cs.get(ds, 0)
+        if count > 0:
+            ratio = count / target
+            level = 4 if ratio >= 1 else (3 if ratio >= 0.75 else (2 if ratio >= 0.5 else 1))
+        else:
+            level = 0
+        heatmap[ds] = level
         d += timedelta(days=1)
     heatmap_json = json.dumps(heatmap)
+    checkins_json = json.dumps(cs)
 
     started = habit.get("started", "")
     started_display = (
@@ -398,17 +581,56 @@ def render_detail(habit, user):
     habit_icon = habit.get("icon", "✅")
     freq_lbl = FREQ_LABEL.get(habit.get("freq", "daily"), "매일")
 
-    checkin_block = (
-        f'<form method="POST" action="/habit/{hid}/checkin" style="display:inline">'
-        f'<button class="btn-checkin" type="submit">✓ 오늘 {habit_name} 완료!</button></form>'
-        if not today_checked else
-        '<button class="btn-checkin checked" type="button">✓ 오늘 완료!</button>'
-    )
-    checkin_note = (
-        f"오늘 {habit_name}을 완료했어요. 내일도 화이팅! {habit_icon}"
-        if today_checked else
-        f"오늘 아직 체크인하지 않았어요. {habit_name}을 마쳤다면 버튼을 누르세요."
-    )
+    # checkin block
+    if target == 1:
+        if not today_done:
+            checkin_block = (
+                f'<form method="POST" action="/habit/{hid}/checkin" style="display:inline">'
+                f'<input type="hidden" name="toggle" value="1">'
+                f'<button class="btn-checkin" type="submit">✓ 오늘 {habit_name} 완료!</button></form>'
+            )
+        else:
+            checkin_block = '<button class="btn-checkin checked" type="button">✓ 오늘 완료!</button>'
+        checkin_note = (
+            f"오늘 {habit_name}을 완료했어요. 내일도 화이팅! {habit_icon}"
+            if today_done else
+            f"오늘 아직 체크인하지 않았어요. {habit_name}을 마쳤다면 버튼을 누르세요."
+        )
+        checkin_section = f'''
+        <div class="checkin-wrap">
+          {checkin_block}
+          <div class="checkin-note">{checkin_note}</div>
+        </div>'''
+    else:
+        pct = min(100, round(today_count / target * 100))
+        minus_btn = (
+            f'<form method="POST" action="/habit/{hid}/checkin" style="display:inline">'
+            f'<input type="hidden" name="delta" value="-1">'
+            f'<input type="hidden" name="next" value="/habit/{hid}">'
+            f'<button class="btn-counter" type="submit">−</button></form>'
+        )
+        plus_btn = (
+            f'<form method="POST" action="/habit/{hid}/checkin" style="display:inline">'
+            f'<input type="hidden" name="delta" value="1">'
+            f'<input type="hidden" name="next" value="/habit/{hid}">'
+            f'<button class="btn-counter" type="submit">＋</button></form>'
+        )
+        note = f"목표 {target}{unit} 달성! 잘 하셨어요 {habit_icon}" if today_done else f"오늘 {today_count}/{target}{unit} 완료. {target - today_count}{unit} 남았어요."
+        checkin_section = f'''
+        <div class="counter-wrap">
+          <div>
+            <div class="counter-display">
+              <span class="counter-num {"done" if today_done else ""}">{today_count}</span>
+              <span class="counter-sep">/</span>
+              <span class="counter-target">{target}{unit}</span>
+            </div>
+            <div class="counter-progress">
+              <div class="counter-fill" style="width:{pct}%"></div>
+            </div>
+          </div>
+          <div class="counter-btns">{minus_btn}{plus_btn}</div>
+          <div class="checkin-note">{note}</div>
+        </div>'''
 
     return f'''<!DOCTYPE html>
 <html lang="ko">
@@ -432,7 +654,7 @@ def render_detail(habit, user):
         <div class="habit-icon-lg">{habit_icon}</div>
         <div>
           <h1>{habit_name}</h1>
-          <div class="habit-sub">{started_display} · {freq_lbl}</div>
+          <div class="habit-sub">{started_display} · {freq_lbl} · 목표 {target}{unit}</div>
         </div>
       </div>
       <div class="streak-badge">🔥 {streak}일 연속</div>
@@ -457,11 +679,12 @@ def render_detail(habit, user):
     <div class="heatmap-header">
       <span class="heatmap-title">Activity — 최근 12주</span>
       <div class="legend">
-        <span>적음</span>
-        <div class="legend-cell" style="background:var(--cell-0);border:1px solid rgba(255,255,255,.08)"></div>
-        <div class="legend-cell" style="background:var(--cell-2)"></div>
+        <span>0</span>
+        <div class="legend-cell" style="background:var(--cell-0);border:1px solid var(--border)"></div>
+        <div class="legend-cell" style="background:#e0f2fe"></div>
+        <div class="legend-cell" style="background:#bae6fd"></div>
         <div class="legend-cell" style="background:var(--cell-4)"></div>
-        <span>많음</span>
+        <span>목표</span>
       </div>
     </div>
     <div class="heatmap-wrap">
@@ -482,22 +705,39 @@ def render_detail(habit, user):
 
   <div class="card">
     <div class="section-title">오늘 체크인</div>
-    <div class="checkin-wrap">
-      {checkin_block}
-      <div class="checkin-note">{checkin_note}</div>
-    </div>
+    {checkin_section}
   </div>
 
   <div class="card">
-    <div class="section-title">최근 7일</div>
-    <div class="activity-list" id="activityList"></div>
+    <div class="tab-row">
+      <button class="tab-btn active" data-tab="tabCalendar">📅 달력</button>
+      <button class="tab-btn" data-tab="tabTrend">📈 트렌드</button>
+    </div>
+
+    <div id="tabCalendar" class="tab-panel">
+      <div class="cal-header">
+        <button id="calPrev" style="background:none;border:none;cursor:pointer;font-size:16px;color:var(--text-muted)">‹</button>
+        <span class="cal-title" id="calTitle"></span>
+        <button id="calNext" style="background:none;border:none;cursor:pointer;font-size:16px;color:var(--text-muted)">›</button>
+      </div>
+      <div id="monthCalendar"></div>
+    </div>
+
+    <div id="tabTrend" class="tab-panel" style="display:none">
+      <div class="section-title" style="margin-bottom:8px">주간 달성 트렌드 (12주)</div>
+      <div style="position:relative">
+        <div class="trend-zero"></div>
+        <div class="trend-wrap" id="trendChart"></div>
+      </div>
+    </div>
   </div>
 
 </div>
 <div class="tooltip" id="tooltip"></div>
 <script>
-const DATA = {heatmap_json};
+const DATA = {checkins_json};
 const HID = {hid};
+const TARGET = {target};
 {_HEATMAP_JS}
 </script>
 </body>
