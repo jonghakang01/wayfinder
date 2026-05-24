@@ -31,45 +31,56 @@ def load_services():
 SERVICES = load_services()
 
 STYLE = """
+@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css');
+:root {
+  --slate-50: #f8fafc; --slate-100: #f1f5f9; --slate-200: #e2e8f0;
+  --slate-400: #94a3b8; --slate-500: #64748b; --slate-900: #0f172a;
+  --blue-500: #3b82f6; --sky-400: #38bdf8;
+  --radius-xl: 20px; --radius-lg: 16px; --radius-md: 12px;
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0/0.1), 0 4px 6px -4px rgb(0 0 0/0.1);
+}
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f8fafc; min-height: 100vh; }
+body { font-family: 'Pretendard Variable', Pretendard, -apple-system, system-ui, sans-serif; background: var(--slate-50); color: var(--slate-900); line-height: 1.5; -webkit-font-smoothing: antialiased; min-height: 100vh; }
 
 /* Nav */
-nav { background: #0f172a; padding: 14px 28px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
-nav a { color: #94a3b8; text-decoration: none; font-size: 0.875rem; transition: color 0.15s; }
+nav { background: rgba(15,23,42,0.92); backdrop-filter: blur(12px); padding: 13px 32px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; border-bottom: 1px solid rgba(255,255,255,0.07); }
+nav a { color: var(--slate-400); text-decoration: none; font-size: 0.875rem; transition: color 0.15s; }
 nav a:hover { color: white; }
-.nav-brand { color: white; font-weight: 700; font-size: 1rem; letter-spacing: -0.01em; }
-.nav-user { color: #64748b; font-size: 0.82rem; display: flex; align-items: center; gap: 10px; }
-.nav-user a { color: #64748b; }
-.nav-user a:hover { color: #94a3b8; }
-.nav-back { color: #94a3b8; font-size: 0.82rem; text-decoration: none; display: flex; align-items: center; gap: 4px; }
+.nav-brand { color: white; font-weight: 800; font-size: 1.05rem; letter-spacing: -0.02em; }
+.nav-user { color: var(--slate-500); font-size: 0.82rem; display: flex; align-items: center; gap: 10px; }
+.nav-user a { color: var(--slate-400); padding: 5px 11px; border-radius: 8px; background: rgba(255,255,255,0.05); transition: 0.2s; }
+.nav-user a:hover { color: white; background: rgba(255,255,255,0.1); }
+.nav-back { color: var(--slate-400); font-size: 0.82rem; text-decoration: none; display: flex; align-items: center; gap: 4px; }
 .nav-back:hover { color: white; }
 
 /* Layout */
-.container { max-width: 860px; margin: 0 auto; padding: 40px 24px 80px; }
-h1 { font-size: 1.75rem; color: #0f172a; margin-bottom: 6px; font-weight: 700; letter-spacing: -0.02em; }
+.container { max-width: 880px; margin: 0 auto; padding: 44px 24px 80px; }
+h1 { font-size: 1.75rem; color: var(--slate-900); margin-bottom: 6px; font-weight: 800; letter-spacing: -0.03em; }
 
 /* Dashboard widget */
-.dashboard { background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 100%); border-radius: 16px; padding: 28px 32px; margin-bottom: 40px; color: white; display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
-.dashboard-greeting h2 { font-size: 1.4rem; font-weight: 700; margin-bottom: 4px; }
-.dashboard-greeting p { color: #94a3b8; font-size: 0.875rem; }
-.dashboard-stats { display: flex; gap: 16px; flex-wrap: wrap; }
-.stat-card { background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.12); border-radius: 10px; padding: 12px 20px; text-align: center; min-width: 80px; }
-.stat-card .stat-num { font-size: 1.6rem; font-weight: 700; line-height: 1; }
-.stat-card .stat-label { font-size: 0.72rem; color: #94a3b8; margin-top: 4px; }
-.stat-card.highlight .stat-num { color: #38bdf8; }
+.dashboard { background: var(--slate-900); background-image: radial-gradient(at 0% 0%, rgba(56,189,248,0.15) 0, transparent 50%), radial-gradient(at 100% 100%, rgba(59,130,246,0.15) 0, transparent 50%); border-radius: var(--radius-xl); padding: 36px 40px; margin-bottom: 48px; color: white; display: flex; justify-content: space-between; align-items: center; gap: 24px; flex-wrap: wrap; box-shadow: var(--shadow-lg); border: 1px solid rgba(255,255,255,0.05); }
+.dashboard-greeting h2 { font-size: 1.6rem; font-weight: 800; margin-bottom: 6px; letter-spacing: -0.03em; }
+.dashboard-greeting p { color: var(--slate-400); font-size: 0.95rem; font-weight: 500; }
+.dashboard-stats { display: flex; gap: 14px; flex-wrap: wrap; }
+.stat-card { background: rgba(255,255,255,0.04); backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.08); border-radius: var(--radius-lg); padding: 16px 24px; text-align: center; min-width: 100px; transition: 0.2s; }
+.stat-card:hover { transform: translateY(-3px); background: rgba(255,255,255,0.07); }
+.stat-card .stat-num { font-size: 2rem; font-weight: 800; line-height: 1; margin-bottom: 6px; }
+.stat-card .stat-label { font-size: 0.7rem; color: var(--slate-400); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
+.stat-card.highlight .stat-num { color: var(--sky-400); text-shadow: 0 0 20px rgba(56,189,248,0.3); }
 
 /* Category */
-.category-section { margin-bottom: 36px; }
-.category-title { font-size: 0.72rem; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 12px; padding-left: 2px; }
+.category-section { margin-bottom: 40px; }
+.category-title { font-size: 0.7rem; font-weight: 700; color: var(--slate-400); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 14px; padding-left: 2px; }
 
 /* Wayfinder cards */
-.service-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
-.service-card { background: white; border-radius: 12px; padding: 20px; border: 1px solid #e2e8f0; text-decoration: none; color: inherit; transition: box-shadow 0.15s, transform 0.15s, border-color 0.15s; display: block; }
-.service-card:hover { box-shadow: 0 8px 24px rgba(0,0,0,0.08); transform: translateY(-2px); border-color: #cbd5e1; }
-.service-icon { font-size: 1.75rem; margin-bottom: 10px; }
-.service-name { font-weight: 600; font-size: 0.9rem; color: #0f172a; margin-bottom: 3px; }
-.service-desc { font-size: 0.78rem; color: #94a3b8; line-height: 1.4; }
+.service-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(185px, 1fr)); gap: 14px; }
+.service-card { background: white; border-radius: var(--radius-lg); padding: 24px; border: 1px solid var(--slate-200); text-decoration: none; color: inherit; transition: all 0.25s cubic-bezier(0.4,0,0.2,1); display: flex; flex-direction: column; position: relative; overflow: hidden; }
+.service-card::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--blue-500); opacity: 0; transition: 0.2s; }
+.service-card:hover { box-shadow: var(--shadow-lg); transform: translateY(-4px); border-color: var(--blue-500); }
+.service-card:hover::before { opacity: 1; }
+.service-icon { font-size: 2rem; margin-bottom: 14px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.08)); }
+.service-name { font-weight: 700; font-size: 0.95rem; color: var(--slate-900); margin-bottom: 5px; }
+.service-desc { font-size: 0.78rem; color: var(--slate-400); line-height: 1.5; }
 
 /* Todo */
 .add-form { display: flex; gap: 8px; margin-bottom: 20px; }
@@ -112,12 +123,14 @@ def wayfinder(user):
     todo_done_today = len([t for t in todos if t.get("done") and t.get("done_at", "").startswith(datetime.now().strftime("%Y-%m-%d"))])
 
     hour = datetime.now().hour
-    if hour < 12:
-        greeting = "좋은 아침이에요"
+    if hour < 6:
+        greeting, greeting_icon = "늦은 밤이에요", "🌙"
+    elif hour < 12:
+        greeting, greeting_icon = "좋은 아침이에요", "☀️"
     elif hour < 18:
-        greeting = "안녕하세요"
+        greeting, greeting_icon = "안녕하세요", "🌤️"
     else:
-        greeting = "좋은 저녁이에요"
+        greeting, greeting_icon = "좋은 저녁이에요", "🌙"
 
     today_str = datetime.now().strftime("%Y년 %m월 %d일")
 
@@ -179,7 +192,7 @@ def wayfinder(user):
 <div class="container">
   <div class="dashboard">
     <div class="dashboard-greeting">
-      <h2>{greeting}, {user}님</h2>
+      <h2>{greeting_icon} {greeting}, {user}님</h2>
       <p>{today_str}</p>
     </div>
     <div class="dashboard-stats">
