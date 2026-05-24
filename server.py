@@ -102,7 +102,97 @@ h1 { font-size: 1.75rem; color: var(--slate-900); margin-bottom: 6px; font-weigh
 .btn-done { background: #dcfce7; color: #16a34a; }
 .btn-del { background: #fee2e2; color: #dc2626; }
 .empty { text-align: center; color: #94a3b8; padding: 48px 0; }
+
+/* Mobile responsive */
+@media (max-width: 600px) {
+  .container { padding: 24px 16px 60px; }
+  nav { padding: 10px 16px; }
+  .dashboard { padding: 24px 20px; flex-direction: column; gap: 16px; }
+  .dashboard-greeting h2 { font-size: 1.25rem; }
+  .service-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .service-card { padding: 16px; }
+  .service-icon { font-size: 1.5rem; margin-bottom: 8px; }
+  .service-name { font-size: 0.85rem; }
+  .service-desc { display: none; }
+  .add-form { flex-direction: column; }
+  .add-form input, .add-form button { width: 100%; }
+  .todo-item { flex-wrap: wrap; padding: 12px 14px; }
+  .actions { width: 100%; justify-content: flex-end; margin-top: 4px; }
+  .btn { padding: 8px 12px; font-size: 0.85rem; min-height: 36px; }
+  .stat-card { padding: 12px 16px; min-width: 80px; }
+  .stat-card .stat-num { font-size: 1.6rem; }
+}
+@media (max-width: 400px) {
+  .service-grid { grid-template-columns: 1fr 1fr; }
+  .dashboard-stats { gap: 8px; }
+}
 """
+
+ICON_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192">
+  <rect width="192" height="192" rx="40" fill="#0f172a"/>
+  <circle cx="96" cy="96" r="56" fill="none" stroke="#38bdf8" stroke-width="4"/>
+  <polygon points="96,44 104,96 96,90 88,96" fill="#38bdf8"/>
+  <polygon points="96,148 88,96 96,102 104,96" fill="#64748b"/>
+  <circle cx="96" cy="96" r="8" fill="white"/>
+</svg>"""
+
+MANIFEST = json.dumps({
+    "name": "Wayfinder",
+    "short_name": "Wayfinder",
+    "description": "개인 생산성 허브",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#f8fafc",
+    "theme_color": "#0f172a",
+    "orientation": "portrait-primary",
+    "icons": [
+        {"src": "/icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"}
+    ],
+    "shortcuts": [
+        {"name": "Todo List", "url": "/todo", "description": "할 일 관리"},
+        {"name": "Habit Tracker", "url": "/habit", "description": "습관 추적"}
+    ]
+}, ensure_ascii=False, indent=2)
+
+SW_JS = """
+const CACHE = 'wayfinder-v1';
+const STATIC = ['/static/style.css', '/manifest.json', '/icons/icon.svg'];
+
+self.addEventListener('install', e => {
+  e.waitUntil(caches.open(CACHE).then(c => c.addAll(STATIC)));
+  self.skipWaiting();
+});
+self.addEventListener('activate', e => {
+  e.waitUntil(caches.keys().then(keys =>
+    Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))
+  ));
+  self.clients.claim();
+});
+self.addEventListener('fetch', e => {
+  const url = new URL(e.request.url);
+  if (e.request.method !== 'GET' || url.origin !== location.origin) return;
+  if (STATIC.includes(url.pathname)) {
+    e.respondWith(caches.match(e.request).then(c => c || fetch(e.request)));
+    return;
+  }
+  e.respondWith(
+    fetch(e.request).catch(() =>
+      new Response('<h2 style="font-family:sans-serif;padding:40px">오프라인 상태입니다. 인터넷 연결을 확인해주세요.</h2>',
+        {headers: {'Content-Type': 'text/html; charset=utf-8'}})
+    )
+  );
+});
+"""
+
+PWA_INJECT = (
+    '<link rel="manifest" href="/manifest.json">'
+    '<meta name="theme-color" content="#0f172a">'
+    '<meta name="apple-mobile-web-app-capable" content="yes">'
+    '<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">'
+    '<meta name="apple-mobile-web-app-title" content="Wayfinder">'
+    '<link rel="apple-touch-icon" href="/icons/icon.svg">'
+    "<script>if('serviceWorker'in navigator)navigator.serviceWorker.register('/sw.js');</script>"
+)
 
 CATEGORIES = {
     "생산성": ["/todo", "/habit"],
@@ -215,6 +305,7 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
 
     def send_html(self, html, code=200):
+        html = html.replace('</head>', PWA_INJECT + '</head>', 1)
         b = html.encode()
         self.send_response(code)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -235,6 +326,15 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "text/css")
         self.send_header("Content-Length", len(b))
+        self.end_headers()
+        self.wfile.write(b)
+
+    def send_text(self, text, mime):
+        b = text.strip().encode()
+        self.send_response(200)
+        self.send_header("Content-Type", mime)
+        self.send_header("Content-Length", len(b))
+        self.send_header("Cache-Control", "public, max-age=86400")
         self.end_headers()
         self.wfile.write(b)
 
@@ -281,6 +381,12 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/static/style.css":
             return self.send_css()
+        if path == "/manifest.json":
+            return self.send_text(MANIFEST, "application/manifest+json")
+        if path == "/sw.js":
+            return self.send_text(SW_JS, "application/javascript")
+        if path == "/icons/icon.svg":
+            return self.send_text(ICON_SVG, "image/svg+xml")
         if path in ("/login", "/logout"):
             return self.dispatch(auth.handle("GET", path, {}, ctx))
         if not ctx["user"]:

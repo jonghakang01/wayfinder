@@ -148,6 +148,23 @@ def handle(method, path, body, ctx=None):
                         pass
                     next_url = body.get("next", [f"/habit/{hid}"])[0]
                     return ("redirect", next_url)
+                elif action == "edit":
+                    name = body.get("name", [""])[0].strip()
+                    freq = body.get("freq", ["daily"])[0]
+                    if freq not in ("daily", "weekly"):
+                        freq = "daily"
+                    try:
+                        target = max(1, int(body.get("target", ["1"])[0]))
+                    except ValueError:
+                        target = habit.get("target", 1)
+                    unit = body.get("unit", ["회"])[0].strip() or "회"
+                    if name:
+                        habit["name"] = name
+                        habit["freq"] = freq
+                        habit["target"] = target
+                        habit["unit"] = unit
+                        save(habits, user)
+                    return ("redirect", f"/habit/{hid}")
                 elif action == "delete":
                     save([h for h in habits if h["id"] != hid], user)
             return ("redirect", "/habit")
@@ -506,10 +523,14 @@ def render_list(habits, user, readonly=False):
     add_card = "" if readonly else (
         '<div class="card"><h2>새 습관 추가</h2>'
         '<form class="add-form" method="POST" action="/habit/add">'
-        '<label>습관 이름<input type="text" name="name" placeholder="예: 물 마시기" required autofocus></label>'
+        '<label>습관 이름<input type="text" name="name" placeholder="예: 물 마시기, 운동, 독서" required autofocus></label>'
         '<label>빈도<select name="freq"><option value="daily">매일</option><option value="weekly">주간</option></select></label>'
-        '<label>목표 횟수<input type="number" name="target" value="1" min="1" max="99"></label>'
-        '<label>단위<input type="text" name="unit" value="회" placeholder="회, 잔, 분..." style="width:72px"></label>'
+        '<label>목표 횟수<input type="number" name="target" value="1" min="1" max="999"></label>'
+        '<label>단위<input type="text" name="unit" value="회" placeholder="회" list="unit-examples" style="width:72px"></label>'
+        '<datalist id="unit-examples">'
+        '<option value="회"><option value="잔"><option value="분"><option value="km">'
+        '<option value="페이지"><option value="세트"><option value="개"><option value="시간">'
+        '</datalist>'
         '<button type="submit">추가</button>'
         '</form></div>'
     )
@@ -657,8 +678,27 @@ def render_detail(habit, user):
           <div class="habit-sub">{started_display} · {freq_lbl} · 목표 {target}{unit}</div>
         </div>
       </div>
-      <div class="streak-badge">🔥 {streak}일 연속</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <div class="streak-badge">🔥 {streak}일 연속</div>
+        <button id="editToggle" onclick="var f=document.getElementById('editForm');f.style.display=f.style.display==='none'?'block':'none';this.textContent=f.style.display==='none'?'편집':'취소'" style="background:none;border:1px solid var(--border);border-radius:8px;padding:6px 12px;font-size:13px;color:var(--text-muted);cursor:pointer">편집</button>
+      </div>
     </div>
+    <form id="editForm" method="POST" action="/habit/{hid}/edit" style="display:none;margin-top:20px;padding-top:20px;border-top:1px solid var(--border)">
+      <div class="add-form">
+        <label>이름<input type="text" name="name" value="{habit_name}" required></label>
+        <label>빈도<select name="freq">
+          <option value="daily" {"selected" if habit.get("freq","daily")=="daily" else ""}>매일</option>
+          <option value="weekly" {"selected" if habit.get("freq","daily")=="weekly" else ""}>주간</option>
+        </select></label>
+        <label>목표<input type="number" name="target" value="{target}" min="1" max="999"></label>
+        <label>단위<input type="text" name="unit" value="{unit}" list="unit-edit" style="width:72px"></label>
+        <datalist id="unit-edit">
+          <option value="회"><option value="잔"><option value="분"><option value="km">
+          <option value="페이지"><option value="세트"><option value="개"><option value="시간">
+        </datalist>
+        <button type="submit">저장</button>
+      </div>
+    </form>
     <div style="height:20px"></div>
     <div class="stats">
       <div class="stat"><span class="stat-value streak-c">{streak}</span><span class="stat-label">현재 스트릭</span></div>
