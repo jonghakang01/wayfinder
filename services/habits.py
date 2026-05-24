@@ -106,11 +106,18 @@ def handle(method, path, body, ctx=None):
             habit = find_habit(habits, hid)
             if habit:
                 if action == "checkin":
-                    today_str = date.today().isoformat()
-                    if today_str not in habit["checkins"]:
-                        habit["checkins"].append(today_str)
-                        save(habits, user)
-                    next_url = body.get("next", ["/habit"])[0]
+                    target_date = body.get("date", [date.today().isoformat()])[0]
+                    try:
+                        target = date.fromisoformat(target_date)
+                        if target <= date.today():
+                            if target_date in habit["checkins"]:
+                                habit["checkins"].remove(target_date)
+                            else:
+                                habit["checkins"].append(target_date)
+                            save(habits, user)
+                    except ValueError:
+                        pass
+                    next_url = body.get("next", [f"/habit/{hid}"])[0]
                     return ("redirect", next_url)
                 elif action == "delete":
                     save([h for h in habits if h["id"] != hid], user)
@@ -241,10 +248,11 @@ for(let w=0;w<WEEKS;w++){
     const dt=addDays(startSunday,w*7+d);const key=dt.toISOString().slice(0,10);
     const cell=document.createElement('div');cell.className='day-cell';
     if(dt>today){cell.dataset.level=0;cell.style.opacity='0.15';}
-    else{cell.dataset.level=DATA[key]??0;}
+    else{cell.dataset.level=DATA[key]??0;cell.style.cursor='pointer';}
     if(key===todayKey)cell.classList.add('today');
     cell.dataset.date=key;
-    cell.dataset.done=(DATA[key]??0)>0?'✓ 완료':(dt>today?'—':'미완료');
+    const isDone=(DATA[key]??0)>0;
+    cell.dataset.done=isDone?'✓ 완료':(dt>today?'—':'미완료 (클릭하여 추가)');
     cell.addEventListener('mouseenter',e=>{
       const d2=new Date(key+'T00:00:00');
       tooltip.textContent=`${d2.getMonth()+1}월 ${d2.getDate()}일 (${DAY_KO[d2.getDay()]}) · ${cell.dataset.done}`;
@@ -253,6 +261,16 @@ for(let w=0;w<WEEKS;w++){
     });
     cell.addEventListener('mousemove',e=>{tooltip.style.left=(e.clientX+14)+'px';tooltip.style.top=(e.clientY-28)+'px';});
     cell.addEventListener('mouseleave',()=>tooltip.classList.remove('show'));
+    cell.addEventListener('click',()=>{
+      if(dt>today)return;
+      tooltip.classList.remove('show');
+      const form=document.createElement('form');
+      form.method='POST';form.action=`/habit/${HID}/checkin`;
+      const di=document.createElement('input');di.type='hidden';di.name='date';di.value=key;
+      const ni=document.createElement('input');ni.type='hidden';ni.name='next';ni.value=window.location.pathname;
+      form.appendChild(di);form.appendChild(ni);
+      document.body.appendChild(form);form.submit();
+    });
     col.appendChild(cell);
   }
   grid.appendChild(col);
@@ -479,6 +497,7 @@ def render_detail(habit, user):
 <div class="tooltip" id="tooltip"></div>
 <script>
 const DATA = {heatmap_json};
+const HID = {hid};
 {_HEATMAP_JS}
 </script>
 </body>
