@@ -32,21 +32,44 @@ SERVICES = load_services()
 
 STYLE = """
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: -apple-system, sans-serif; background: #f5f5f5; min-height: 100vh; }
-nav { background: #1e293b; padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; }
-nav a { color: #94a3b8; text-decoration: none; font-size: 0.9rem; }
-nav a:hover { color: white; }
-.nav-user { color: #94a3b8; font-size: 0.85rem; }
-.container { max-width: 640px; margin: 40px auto; padding: 0 16px; }
-h1 { font-size: 1.8rem; color: #1a1a1a; margin-bottom: 24px; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f8fafc; min-height: 100vh; }
 
-/* Wayfinder */
-.service-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; }
-.service-card { background: white; border-radius: 12px; padding: 24px; border: 1px solid #e2e8f0; text-decoration: none; color: inherit; transition: box-shadow 0.15s, transform 0.15s; display: block; }
-.service-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.1); transform: translateY(-2px); }
-.service-icon { font-size: 2rem; margin-bottom: 12px; }
-.service-name { font-weight: 600; font-size: 1rem; color: #1a1a1a; margin-bottom: 4px; }
-.service-desc { font-size: 0.85rem; color: #64748b; }
+/* Nav */
+nav { background: #0f172a; padding: 14px 28px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
+nav a { color: #94a3b8; text-decoration: none; font-size: 0.875rem; transition: color 0.15s; }
+nav a:hover { color: white; }
+.nav-brand { color: white; font-weight: 700; font-size: 1rem; letter-spacing: -0.01em; }
+.nav-user { color: #64748b; font-size: 0.82rem; display: flex; align-items: center; gap: 10px; }
+.nav-user a { color: #64748b; }
+.nav-user a:hover { color: #94a3b8; }
+.nav-back { color: #94a3b8; font-size: 0.82rem; text-decoration: none; display: flex; align-items: center; gap: 4px; }
+.nav-back:hover { color: white; }
+
+/* Layout */
+.container { max-width: 860px; margin: 0 auto; padding: 40px 24px 80px; }
+h1 { font-size: 1.75rem; color: #0f172a; margin-bottom: 6px; font-weight: 700; letter-spacing: -0.02em; }
+
+/* Dashboard widget */
+.dashboard { background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 100%); border-radius: 16px; padding: 28px 32px; margin-bottom: 40px; color: white; display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
+.dashboard-greeting h2 { font-size: 1.4rem; font-weight: 700; margin-bottom: 4px; }
+.dashboard-greeting p { color: #94a3b8; font-size: 0.875rem; }
+.dashboard-stats { display: flex; gap: 16px; flex-wrap: wrap; }
+.stat-card { background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.12); border-radius: 10px; padding: 12px 20px; text-align: center; min-width: 80px; }
+.stat-card .stat-num { font-size: 1.6rem; font-weight: 700; line-height: 1; }
+.stat-card .stat-label { font-size: 0.72rem; color: #94a3b8; margin-top: 4px; }
+.stat-card.highlight .stat-num { color: #38bdf8; }
+
+/* Category */
+.category-section { margin-bottom: 36px; }
+.category-title { font-size: 0.72rem; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 12px; padding-left: 2px; }
+
+/* Wayfinder cards */
+.service-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
+.service-card { background: white; border-radius: 12px; padding: 20px; border: 1px solid #e2e8f0; text-decoration: none; color: inherit; transition: box-shadow 0.15s, transform 0.15s, border-color 0.15s; display: block; }
+.service-card:hover { box-shadow: 0 8px 24px rgba(0,0,0,0.08); transform: translateY(-2px); border-color: #cbd5e1; }
+.service-icon { font-size: 1.75rem; margin-bottom: 10px; }
+.service-name { font-weight: 600; font-size: 0.9rem; color: #0f172a; margin-bottom: 3px; }
+.service-desc { font-size: 0.78rem; color: #94a3b8; line-height: 1.4; }
 
 /* Todo */
 .add-form { display: flex; gap: 8px; margin-bottom: 20px; }
@@ -70,23 +93,79 @@ h1 { font-size: 1.8rem; color: #1a1a1a; margin-bottom: 24px; }
 .empty { text-align: center; color: #94a3b8; padding: 48px 0; }
 """
 
+CATEGORIES = {
+    "생산성": ["/todo", "/habit"],
+    "팀 도구": ["/terminals", "/workspace"],
+    "분석": ["/aeo", "/llm-check"],
+    "관리": ["/admin"],
+}
+
 def wayfinder(user):
+    from datetime import datetime
+    import services.todo as todo_svc
+
     user_is_admin = auth.is_admin(user)
-    cards = ""
+
+    # 대시보드 통계
+    todos = todo_svc.load(user)
+    todo_total = len([t for t in todos if not t.get("done")])
+    todo_done_today = len([t for t in todos if t.get("done") and t.get("done_at", "").startswith(datetime.now().strftime("%Y-%m-%d"))])
+
+    hour = datetime.now().hour
+    if hour < 12:
+        greeting = "좋은 아침이에요"
+    elif hour < 18:
+        greeting = "안녕하세요"
+    else:
+        greeting = "좋은 저녁이에요"
+
+    today_str = datetime.now().strftime("%Y년 %m월 %d일")
+
+    # 서비스 path → META 매핑
+    svc_map = {}
     for path, svc in SERVICES.items():
         m = svc.META
-        if m.get("admin_only") and not user_is_admin:
-            continue
         if m.get("hidden"):
             continue
-        cards += f'''
-        <a class="service-card" href="{m["path"]}">
+        if m.get("admin_only") and not user_is_admin:
+            continue
+        svc_map[path] = m
+
+    # 카테고리별 렌더링
+    sections_html = ""
+    rendered = set()
+    for cat_name, paths in CATEGORIES.items():
+        cards = ""
+        for p in paths:
+            if p in svc_map:
+                m = svc_map[p]
+                cards += f'''<a class="service-card" href="{m["path"]}">
           <div class="service-icon">{m["icon"]}</div>
           <div class="service-name">{m["name"]}</div>
           <div class="service-desc">{m["description"]}</div>
         </a>'''
-    if not cards:
-        cards = '<p style="color:#94a3b8">등록된 서비스가 없습니다.</p>'
+                rendered.add(p)
+        if cards:
+            sections_html += f'''<div class="category-section">
+      <div class="category-title">{cat_name}</div>
+      <div class="service-grid">{cards}</div>
+    </div>'''
+
+    # 카테고리 미분류 서비스
+    extra = ""
+    for p, m in svc_map.items():
+        if p not in rendered:
+            extra += f'''<a class="service-card" href="{m["path"]}">
+          <div class="service-icon">{m["icon"]}</div>
+          <div class="service-name">{m["name"]}</div>
+          <div class="service-desc">{m["description"]}</div>
+        </a>'''
+    if extra:
+        sections_html += f'''<div class="category-section">
+      <div class="category-title">기타</div>
+      <div class="service-grid">{extra}</div>
+    </div>'''
+
     return f'''<!DOCTYPE html>
 <html lang="ko"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -94,12 +173,27 @@ def wayfinder(user):
 <link rel="stylesheet" href="/static/style.css">
 </head><body>
 <nav>
-  <span style="color:white;font-weight:600">🧭 Wayfinder</span>
+  <span class="nav-brand">🧭 Wayfinder</span>
   <span class="nav-user">👤 {user} &nbsp;·&nbsp; <a href="/logout">로그아웃</a></span>
 </nav>
 <div class="container">
-  <h1 style="margin-top:0;padding-top:40px">서비스</h1>
-  <div class="service-grid">{cards}</div>
+  <div class="dashboard">
+    <div class="dashboard-greeting">
+      <h2>{greeting}, {user}님</h2>
+      <p>{today_str}</p>
+    </div>
+    <div class="dashboard-stats">
+      <div class="stat-card highlight">
+        <div class="stat-num">{todo_total}</div>
+        <div class="stat-label">남은 할 일</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num">{todo_done_today}</div>
+        <div class="stat-label">오늘 완료</div>
+      </div>
+    </div>
+  </div>
+  {sections_html}
 </div>
 </body></html>'''
 
