@@ -209,7 +209,7 @@ PWA_INJECT = (
 )
 
 CATEGORIES = {
-    "생산성": ["/todo", "/habit"],
+    "생산성": ["/dashboard", "/todo", "/habit"],
     "팀 도구": ["/terminals", "/workspace"],
     "분석": ["/aeo", "/llm-check"],
     "관리": ["/admin"],
