@@ -201,7 +201,7 @@ def handle(method, path, body, ctx=None):
                                             val = max(0.0, float(val_str))
                                         except (ValueError, TypeError):
                                             val = 0.0
-                                        if lbl or val > 0:
+                                        if lbl and val > 0:
                                             entries.append({"label": lbl, "value": val})
                                     if entries:
                                         existing = current if isinstance(current, dict) else {}
@@ -430,6 +430,16 @@ h1{font-size:20px;font-weight:700;color:var(--text)}
 .cat-bar-track{flex:1;height:20px;background:var(--cell-0);border-radius:6px;overflow:hidden}
 .cat-bar-fill{height:100%;background:linear-gradient(90deg,#bae6fd,var(--cell-4));border-radius:6px;min-width:4px;transition:width .5s ease}
 .cat-bar-val{font-size:12px;font-weight:700;color:var(--text-muted);min-width:52px}
+.tag-pill-wrap{display:flex;flex-wrap:wrap;gap:6px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);min-height:42px;cursor:text;align-items:center;width:100%}
+.tag-pill-wrap:focus-within{border-color:var(--accent)}
+.tag-pill{display:inline-flex;align-items:center;gap:4px;background:#eff6ff;color:var(--accent);border-radius:20px;padding:3px 10px;font-size:13px;font-weight:600}
+.tag-pill-del{background:none;border:none;color:var(--accent);cursor:pointer;font-size:15px;line-height:1;padding:0 2px;opacity:.7;transition:.15s}
+.tag-pill-del:hover{opacity:1}
+.tag-pill-inp{border:none;outline:none;background:transparent;font-size:13px;color:var(--text);min-width:80px;flex:1;padding:2px 0}
+.add-form .tag-pill-inp{min-width:0;flex:1}
+.field-hint{font-size:11px;color:var(--text-muted);margin-top:3px}
+.btn-add-new{padding:6px 16px;background:var(--text);color:white;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;transition:opacity .15s;white-space:nowrap}
+.btn-add-new:hover{opacity:.8}
 @media (max-width:600px){
   .container{padding:12px 12px calc(80px + env(safe-area-inset-bottom,0px))}
   nav{padding:8px 14px}
@@ -676,22 +686,38 @@ def render_list(habits, user, readonly=False):
     if not habits:
         rows = '<div class="empty">No habits yet. Add your first habit!</div>'
 
+    _add_display = 'block' if not habits else 'none'
     add_card = "" if readonly else (
-        '<div class="card"><h2>Add New Habit</h2>'
+        f'<div class="card" id="addHabitCard" style="display:{_add_display}">'
+        '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">'
+        '<h2 style="margin:0">Add New Habit</h2>'
+        '<button type="button" onclick="toggleAddForm()" style="background:none;border:none;cursor:pointer;font-size:22px;color:var(--text-muted);padding:0 4px;line-height:1">×</button>'
+        '</div>'
         '<form class="add-form" method="POST" action="/habit/add">'
-        '<label>Habit name<input type="text" name="name" placeholder="e.g. Exercise, Read, Drink water" required autofocus></label>'
+        '<label>Habit name<input type="text" name="name" placeholder="e.g. Exercise, Read, Drink water" required></label>'
         '<label>Frequency<select name="freq"><option value="daily">Daily</option><option value="weekly">Weekly</option></select></label>'
         '<label>Goal<input type="number" name="target" value="1" min="1" max="999"></label>'
-        '<label>Unit<input type="text" name="unit" value="times" placeholder="times" list="unit-examples" style="width:72px"></label>'
-        '<datalist id="unit-examples">'
-        '<option value="times"><option value="cups"><option value="min"><option value="km">'
-        '<option value="pages"><option value="sets"><option value="hrs">'
-        '</datalist>'
+        '<label>Unit'
+        '<input type="hidden" name="unit" id="unitHiddenAdd" value="times">'
+        '<select id="unitSelAdd" onchange="unitSelChange(this,\'unitHiddenAdd\',\'unitCustomAdd\')">'
+        '<option value="times" selected>times</option>'
+        '<option value="cups">cups</option><option value="min">min</option>'
+        '<option value="km">km</option><option value="pages">pages</option>'
+        '<option value="sets">sets</option><option value="hrs">hrs</option>'
+        '<option value="__custom">Custom...</option>'
+        '</select>'
+        '<input type="text" id="unitCustomAdd" placeholder="e.g. reps" style="display:none;width:90px;min-width:0;margin-top:4px" oninput="document.getElementById(\'unitHiddenAdd\').value=this.value">'
+        '<span class="field-hint">type your own</span>'
+        '</label>'
         '<label style="width:100%">Tracking<select name="track">'
         '<option value="count">Simple (done / count)</option>'
         '<option value="detail">Detailed (log each activity)</option>'
         '</select></label>'
-        '<label style="width:100%">Categories (optional, comma-separated)<input type="text" name="categories" placeholder="e.g. Running, Walking, Cycling"></label>'
+        '<label style="width:100%">Activity Labels'
+        '<span style="font-size:11px;color:var(--text-muted);margin-left:6px">(optional — press Enter or , to add)</span>'
+        '<input type="hidden" name="categories" id="catsHiddenAdd" value="">'
+        '<div class="tag-pill-wrap" id="catPillsAdd"><input type="text" id="catInpAdd" class="tag-pill-inp" placeholder="e.g. Running, Walking..."></div>'
+        '</label>'
         '<button type="submit">Add</button>'
         '</form></div>'
     )
@@ -717,7 +743,10 @@ def render_list(habits, user, readonly=False):
   {add_card}
 
   <div class="card">
-    <h2>{"🏃 " + user + "'s " if readonly else ""}Habits</h2>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <h2 style="margin:0">{"🏃 " + user + "'s " if readonly else ""}Habits</h2>
+      {"" if readonly else '<button type="button" onclick="toggleAddForm()" class="btn-add-new">＋ New Habit</button>'}
+    </div>
     {rows}
   </div>
 
@@ -728,6 +757,7 @@ document.addEventListener('keydown', function(e) {{
   if (e.key !== 'Enter' || e.target.tagName !== 'INPUT') return;
   var t = e.target.type;
   if (t === 'submit' || t === 'button' || t === 'checkbox' || t === 'radio') return;
+  if (e.target.classList.contains('tag-pill-inp')) return;
   e.preventDefault();
   var form = e.target.closest('form');
   if (!form) return;
@@ -735,6 +765,97 @@ document.addEventListener('keydown', function(e) {{
   var idx = inputs.indexOf(e.target);
   if (idx < inputs.length - 1) inputs[idx + 1].focus();
 }});
+function initTagPills(pillsId, textId, hiddenId) {{
+  var pillsEl = document.getElementById(pillsId);
+  var textEl = document.getElementById(textId);
+  var hiddenEl = document.getElementById(hiddenId);
+  if (!pillsEl || !textEl || !hiddenEl) return;
+  function getTags() {{
+    return hiddenEl.value ? hiddenEl.value.split(',').map(function(s){{return s.trim();}}).filter(Boolean) : [];
+  }}
+  function setTags(tags) {{
+    hiddenEl.value = tags.join(',');
+    render();
+  }}
+  function render() {{
+    var tags = getTags();
+    while (pillsEl.firstChild) pillsEl.removeChild(pillsEl.firstChild);
+    tags.forEach(function(t, i) {{
+      var pill = document.createElement('span');
+      pill.className = 'tag-pill';
+      var txt = document.createElement('span'); txt.textContent = t;
+      var del = document.createElement('button');
+      del.type = 'button'; del.className = 'tag-pill-del'; del.textContent = '×';
+      (function(idx) {{
+        del.addEventListener('click', function() {{
+          var arr = getTags(); arr.splice(idx, 1); setTags(arr);
+        }});
+      }})(i);
+      pill.appendChild(txt); pill.appendChild(del);
+      pillsEl.appendChild(pill);
+    }});
+    pillsEl.appendChild(textEl);
+  }}
+  textEl.addEventListener('keydown', function(e) {{
+    if (e.key === 'Enter' || e.key === ',') {{
+      e.preventDefault(); e.stopPropagation();
+      var val = textEl.value.trim().replace(/,$/, '');
+      if (val) {{
+        var tags = getTags();
+        if (tags.indexOf(val) === -1) tags.push(val);
+        setTags(tags); textEl.value = '';
+      }}
+    }} else if (e.key === 'Backspace' && textEl.value === '') {{
+      var tags = getTags();
+      if (tags.length > 0) {{ tags.pop(); setTags(tags); }}
+    }}
+  }});
+  pillsEl.addEventListener('click', function() {{ textEl.focus(); }});
+  render();
+}}
+function unitSelChange(sel, hiddenId, customId) {{
+  var hidden = document.getElementById(hiddenId);
+  var custom = document.getElementById(customId);
+  if (!hidden || !custom) return;
+  if (sel.value === '__custom') {{
+    custom.style.display = 'inline-block';
+    custom.focus();
+  }} else {{
+    custom.style.display = 'none';
+    hidden.value = sel.value;
+  }}
+}}
+function initUnitSel(selId, hiddenId, customId) {{
+  var presets = ['times','cups','min','km','pages','sets','hrs'];
+  var hidden = document.getElementById(hiddenId);
+  var sel = document.getElementById(selId);
+  var custom = document.getElementById(customId);
+  if (!hidden || !sel || !custom) return;
+  var val = hidden.value;
+  if (presets.indexOf(val) >= 0) {{
+    sel.value = val;
+  }} else {{
+    sel.value = '__custom';
+    custom.style.display = 'inline-block';
+    custom.value = val;
+  }}
+}}
+initTagPills('catPillsAdd', 'catInpAdd', 'catsHiddenAdd');
+initUnitSel('unitSelAdd', 'unitHiddenAdd', 'unitCustomAdd');
+function toggleAddForm() {{
+  var card = document.getElementById('addHabitCard');
+  if (!card) return;
+  if (card.style.display === 'none') {{
+    card.style.display = 'block';
+    card.scrollIntoView({{behavior:'smooth', block:'nearest'}});
+    setTimeout(function() {{
+      var inp = card.querySelector('input[name=name]');
+      if (inp) inp.focus();
+    }}, 250);
+  }} else {{
+    card.style.display = 'none';
+  }}
+}}
 </script>
 </body>
 </html>'''
@@ -806,6 +927,24 @@ def render_detail(habit, user):
             f'<input type="hidden" name="next" value="/habit/{hid}">'
             f'<button class="btn-clear-rich" type="submit">Clear today</button></form>'
         ) if today_entries else ""
+        if categories:
+            initial_rows_html = "".join(
+                f'<div class="entry-row">'
+                f'<input type="text" name="label" value="{c}" list="cats-{hid}" class="entry-label-inp">'
+                f'<input type="number" name="value" value="" min="0" step="any" class="entry-val-inp" placeholder="0">'
+                f'<span class="entry-unit-lbl">{unit}</span>'
+                f'<button type="button" class="entry-del-btn" onclick="this.closest(\'.entry-row\').remove()">×</button>'
+                f'</div>'
+                for c in categories
+            )
+        else:
+            initial_rows_html = (
+                f'<div class="entry-row">'
+                f'<input type="text" name="label" placeholder="e.g. {habit_name}" list="cats-{hid}" class="entry-label-inp">'
+                f'<input type="number" name="value" value="" min="0" step="any" class="entry-val-inp" placeholder="0">'
+                f'<span class="entry-unit-lbl">{unit}</span>'
+                f'</div>'
+            )
         checkin_section = f'''
         <div class="rich-checkin">
           {today_entries_html}
@@ -813,11 +952,7 @@ def render_detail(habit, user):
             <input type="hidden" name="next" value="/habit/{hid}">
             <datalist id="cats-{hid}">{cat_options}</datalist>
             <div class="entry-rows" id="entryRows">
-              <div class="entry-row">
-                <input type="text" name="label" placeholder="e.g. {categories[0] if categories else habit_name}" list="cats-{hid}" class="entry-label-inp">
-                <input type="number" name="value" value="1" min="0" step="any" class="entry-val-inp">
-                <span class="entry-unit-lbl">{unit}</span>
-              </div>
+              {initial_rows_html}
             </div>
             <div class="rich-actions" style="margin-top:10px">
               <button type="button" class="btn-add-row" onclick="addEntryRow()">+ Add entry</button>
@@ -884,7 +1019,7 @@ def render_detail(habit, user):
         cat_json = _json.dumps(cat_stats)
         by_cat_section = f'''
   <div class="card">
-    <div class="section-title">By Category</div>
+    <div class="section-title">By Activity Label</div>
     <div class="cat-period-row">
       <button class="cat-period-btn active" onclick="showCatPeriod(this,'week')">This week</button>
       <button class="cat-period-btn" onclick="showCatPeriod(this,'month')">This month</button>
@@ -961,16 +1096,26 @@ def render_detail(habit, user):
           <option value="weekly" {"selected" if habit.get("freq","daily")=="weekly" else ""}>Weekly</option>
         </select></label>
         <label>Goal<input type="number" name="target" value="{target}" min="1" max="999"></label>
-        <label>Unit<input type="text" name="unit" value="{unit}" list="unit-edit" style="width:72px"></label>
-        <datalist id="unit-edit">
-          <option value="times"><option value="cups"><option value="min"><option value="km">
-          <option value="pages"><option value="sets"><option value="hrs">
-        </datalist>
+        <label>Unit
+        <input type="hidden" name="unit" id="unitHiddenEdit" value="{unit}">
+        <select id="unitSelEdit" onchange="unitSelChange(this,'unitHiddenEdit','unitCustomEdit')">
+          <option value="times">times</option><option value="cups">cups</option>
+          <option value="min">min</option><option value="km">km</option>
+          <option value="pages">pages</option><option value="sets">sets</option>
+          <option value="hrs">hrs</option><option value="__custom">Custom...</option>
+        </select>
+        <input type="text" id="unitCustomEdit" placeholder="e.g. reps" style="display:none;width:90px;min-width:0;margin-top:4px" oninput="document.getElementById('unitHiddenEdit').value=this.value">
+        <span class="field-hint">type your own</span>
+        </label>
         <label style="width:100%">Tracking mode<select name="track">
           <option value="count" {"selected" if track=="count" else ""}>Simple (count / done)</option>
           <option value="detail" {"selected" if track=="detail" else ""}>Detailed (log entries per activity)</option>
         </select></label>
-        <label style="width:100%">Categories (comma-separated, for quick-select)<input type="text" name="categories" value="{", ".join(categories)}" placeholder="e.g. Running, Walking, Cycling"></label>
+        <label style="width:100%">Activity Labels
+        <span style="font-size:11px;color:var(--text-muted);margin-left:6px">(press Enter or , to add)</span>
+        <input type="hidden" name="categories" id="catsHiddenEdit" value="{", ".join(categories)}">
+        <div class="tag-pill-wrap" id="catPillsEdit"><input type="text" id="catInpEdit" class="tag-pill-inp" placeholder="e.g. Running, Walking..."></div>
+        </label>
         <button type="submit">Save</button>
       </div>
     </form>
@@ -1057,6 +1202,60 @@ const HID = {hid};
 const TARGET = {target};
 const TRACK = "{track}";
 {_HEATMAP_JS}
+// Tag pill widget
+function initTagPills(pillsId, textId, hiddenId) {{
+  var pillsEl = document.getElementById(pillsId);
+  var textEl = document.getElementById(textId);
+  var hiddenEl = document.getElementById(hiddenId);
+  if (!pillsEl || !textEl || !hiddenEl) return;
+  function getTags() {{
+    return hiddenEl.value ? hiddenEl.value.split(',').map(function(s){{return s.trim();}}).filter(Boolean) : [];
+  }}
+  function setTags(tags) {{ hiddenEl.value = tags.join(','); render(); }}
+  function render() {{
+    var tags = getTags();
+    while (pillsEl.firstChild) pillsEl.removeChild(pillsEl.firstChild);
+    tags.forEach(function(t, i) {{
+      var pill = document.createElement('span'); pill.className = 'tag-pill';
+      var txt = document.createElement('span'); txt.textContent = t;
+      var del = document.createElement('button');
+      del.type = 'button'; del.className = 'tag-pill-del'; del.textContent = '×';
+      (function(idx) {{
+        del.addEventListener('click', function() {{ var a=getTags(); a.splice(idx,1); setTags(a); }});
+      }})(i);
+      pill.appendChild(txt); pill.appendChild(del); pillsEl.appendChild(pill);
+    }});
+    pillsEl.appendChild(textEl);
+  }}
+  textEl.addEventListener('keydown', function(e) {{
+    if (e.key === 'Enter' || e.key === ',') {{
+      e.preventDefault(); e.stopPropagation();
+      var val = textEl.value.trim().replace(/,$/, '');
+      if (val) {{ var t=getTags(); if(t.indexOf(val)===-1) t.push(val); setTags(t); textEl.value=''; }}
+    }} else if (e.key === 'Backspace' && textEl.value === '') {{
+      var t=getTags(); if(t.length>0){{ t.pop(); setTags(t); }}
+    }}
+  }});
+  pillsEl.addEventListener('click', function() {{ textEl.focus(); }});
+  render();
+}}
+function unitSelChange(sel, hiddenId, customId) {{
+  var hidden = document.getElementById(hiddenId);
+  var custom = document.getElementById(customId);
+  if (!hidden || !custom) return;
+  if (sel.value === '__custom') {{ custom.style.display='inline-block'; custom.focus(); }}
+  else {{ custom.style.display='none'; hidden.value=sel.value; }}
+}}
+function initUnitSel(selId, hiddenId, customId) {{
+  var presets=['times','cups','min','km','pages','sets','hrs'];
+  var hidden=document.getElementById(hiddenId), sel=document.getElementById(selId), custom=document.getElementById(customId);
+  if(!hidden||!sel||!custom) return;
+  var val=hidden.value;
+  if(presets.indexOf(val)>=0){{ sel.value=val; }}
+  else{{ sel.value='__custom'; custom.style.display='inline-block'; custom.value=val; }}
+}}
+initTagPills('catPillsEdit','catInpEdit','catsHiddenEdit');
+initUnitSel('unitSelEdit','unitHiddenEdit','unitCustomEdit');
 // Rich check-in: add entry row
 function addEntryRow(){{
   const rows = document.getElementById('entryRows');
@@ -1065,7 +1264,7 @@ function addEntryRow(){{
   if(!first)return;
   const clone = first.cloneNode(true);
   clone.querySelector('.entry-label-inp').value='';
-  clone.querySelector('.entry-val-inp').value='1';
+  clone.querySelector('.entry-val-inp').value='';
   // add delete button if not present
   if(!clone.querySelector('.entry-del-btn')){{
     const del=document.createElement('button');
