@@ -321,10 +321,11 @@ def render(todos, habits, user, readonly=False):
                 f'<option value="{g}" {"selected" if g == t_group else ""}>{g}</option>'
                 for g in all_groups
             )
+            t_group_label = t_group if t_group else "No group"
             group_sel = (
-                f'<form method="POST" action="/todo/set_group" style="display:inline">'
+                f'<form method="POST" action="/todo/set_group" class="group-sel-form">'
                 f'<input type="hidden" name="id" value="{t["id"]}">'
-                f'<select name="group" onchange="this.form.submit()" class="group-select-inline">'
+                f'<select name="group" onchange="this.form.submit()" class="group-select-inline" title="Move to group">'
                 f'{group_opts}'
                 f'</select></form>'
             )
@@ -462,6 +463,7 @@ def render(todos, habits, user, readonly=False):
 .date {{ font-size: 0.75rem; color: var(--slate-300); }}
 .due-date {{ font-size: 0.75rem; color: var(--slate-400); }}
 .actions {{ display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }}
+.group-sel-form {{ display: inline-flex; align-items: center; }}
 .group-select-inline {{
   font-size: 0.75rem; padding: 3px 6px; border-radius: 6px;
   border: 1px solid var(--slate-200); background: var(--slate-50);
@@ -559,18 +561,25 @@ def render(todos, habits, user, readonly=False):
 .habits-link:hover {{ text-decoration: underline; }}
 
 @media (max-width: 600px) {{
-  .todo-item {{ flex-wrap: wrap; padding: 10px 12px; gap: 10px; }}
-  .actions {{ width: 100%; justify-content: flex-end; margin-top: 6px; flex-wrap: wrap; gap: 6px; }}
-  .title {{ font-size: 0.9rem; }}
-  .date, .due-date {{ font-size: 0.72rem; }}
+  .todo-item {{ flex-wrap: wrap; padding: 10px 12px; gap: 8px; }}
+  .actions {{ width: 100%; justify-content: flex-start; margin-top: 4px; flex-wrap: wrap; gap: 6px; }}
+  .title {{ font-size: 0.9rem; min-width: 0; word-break: break-word; }}
+  .date {{ display: none; }}
+  .due-date {{ font-size: 0.72rem; }}
   .tid {{ display: none; }}
-  .btn {{ min-height: 44px; padding: 8px 12px; display: inline-flex; align-items: center; justify-content: center; }}
+  .btn {{ min-height: 44px; padding: 8px 14px; display: inline-flex; align-items: center; justify-content: center; }}
+  .btn-habit:not(.linked) {{ display: none; }}
+  .btn-habit.linked {{ font-size: 0.78rem; padding: 6px 10px; min-height: 36px; }}
+  .group-sel-form {{ order: 10; width: 100%; margin-top: 2px; display: flex; }}
+  .group-select-inline {{ width: 100%; min-height: 40px; font-size: 0.88rem; padding: 8px 10px; border-radius: 8px; }}
   .habit-item {{ flex-wrap: wrap; gap: 8px; padding: 10px 12px; }}
   .h-actions {{ width: 100%; justify-content: flex-end; margin-top: 4px; flex-wrap: wrap; gap: 6px; }}
   .hb-check, .hb-detail {{ min-height: 40px; padding: 8px 12px; font-size: 0.8rem; }}
   .add-form {{ flex-direction: column; gap: 8px; }}
   .add-form input, .add-form select, .add-form button {{ width: 100%; min-height: 44px; font-size: 1rem; }}
   .group-add-form {{ flex-direction: column; }}
+  .group-summary {{ padding: 12px 14px; }}
+  .group-body {{ padding: 8px 8px 4px; }}
 }}
 </style>
 </head><body>

@@ -303,6 +303,17 @@ h2{font-size:18px;font-weight:700;margin-bottom:16px;color:var(--text)}
 .tag-target{font-size:11px;padding:2px 8px;border-radius:12px;background:#eff6ff;color:var(--accent);font-weight:600}
 .today-entries.list-entries{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
 .entry-pill{font-size:11px;padding:2px 8px;border-radius:99px;background:#eff6ff;color:var(--accent);font-weight:600;white-space:nowrap}
+.inline-log-panel{background:var(--bg);border:1px solid var(--border);border-top:none;border-radius:0 0 12px 12px;padding:12px 16px;margin-top:-4px;margin-bottom:8px}
+.inline-log-form{display:flex;flex-direction:column;gap:8px}
+.inline-log-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.log-label-inp{flex:1;min-width:100px;padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;background:white;color:var(--text)}
+.log-val-inp{width:80px;padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;background:white;color:var(--text)}
+.btn-log-ok{background:var(--accent);color:white;border:none;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap}
+.btn-log-ok:hover{opacity:.88}
+.log-clear-form{margin-top:6px}
+.btn-log-clear{background:none;border:1px solid var(--border);color:var(--text-muted);border-radius:8px;padding:5px 12px;font-size:12px;cursor:pointer}
+.btn-log-clear:hover{border-color:#ef4444;color:#ef4444}
+@media(max-width:600px){.inline-log-row{flex-direction:column}.log-label-inp,.log-val-inp{width:100%}.btn-log-ok{width:100%;min-height:44px}}
 .streak-sm{font-size:13px;color:var(--streak);font-weight:600}
 .today-count{font-size:12px;color:var(--text-muted);font-weight:600}
 .today-count.done{color:#10b981}
@@ -645,14 +656,43 @@ def render_list(habits, user, readonly=False):
             f'<button class="btn-sm btn-del-sm" type="submit">Delete</button></form>'
         )
 
+        inline_log_html = ""
         if readonly:
             checkin_btn = f'<span class="btn-sm btn-checkin-sm {"checked" if checked else ""}">{"✓ Done" if checked else "Not done"}</span>'
         elif h.get("track") == "detail":
             count_label = f'<span class="today-count {"done" if checked else ""}">{today_count}/{target}{unit}</span>'
             checkin_btn = (
                 f'{count_label}'
-                f'<a href="/habit/{h["id"]}" class="btn-sm btn-checkin-sm" style="text-decoration:none">{"✓ Logged" if checked else "+ Log"}</a>'
+                f'<button type="button" class="btn-sm btn-checkin-sm" onclick="toggleLog({h[\'id\']})">'
+                f'{"✓ Logged" if checked else "+ Log"}'
+                f'</button>'
             )
+            cats = h.get("categories", [])
+            if cats:
+                label_inp = (
+                    '<select name="label[]" class="log-label-inp">'
+                    + "".join(f'<option value="{c}">{c}</option>' for c in cats)
+                    + '</select>'
+                )
+            else:
+                label_inp = f'<input type="text" name="label[]" placeholder="Activity" class="log-label-inp">'
+            clear_btn = (
+                f'<form method="POST" action="/habit/{h["id"]}/checkin" class="log-clear-form">'
+                f'<input type="hidden" name="clear" value="1">'
+                f'<input type="hidden" name="next" value="/habit">'
+                f'<button type="submit" class="btn-sm btn-log-clear">Clear today</button></form>'
+            ) if today_count > 0 else ""
+            inline_log_html = f'''<div class="inline-log-panel" id="log-{h["id"]}" style="display:none">
+          <form method="POST" action="/habit/{h["id"]}/checkin" class="inline-log-form">
+            <input type="hidden" name="next" value="/habit">
+            <div class="inline-log-row">
+              {label_inp}
+              <input type="number" name="value[]" placeholder="{unit}" class="log-val-inp" min="0" step="0.1" required>
+              <button type="submit" class="btn-sm btn-log-ok">+ Add</button>
+            </div>
+          </form>
+          {clear_btn}
+        </div>'''
         elif target > 1:
             count_label = f'<span class="today-count {"done" if checked else ""}">{today_count}/{target}{unit}</span>'
             checkin_btn = (
@@ -695,7 +735,8 @@ def render_list(habits, user, readonly=False):
             <a class="btn-detail" href="/habit/{h["id"]}">Detail</a>
             {del_btn}
           </div>
-        </div>'''
+        </div>
+        {inline_log_html}'''
 
     if not habits:
         rows = '<div class="empty">No habits yet. Add your first habit!</div>'
@@ -868,6 +909,17 @@ function toggleAddForm() {{
     }}, 250);
   }} else {{
     card.style.display = 'none';
+  }}
+}}
+function toggleLog(id) {{
+  var panel = document.getElementById('log-' + id);
+  if (!panel) return;
+  var open = panel.style.display !== 'none';
+  document.querySelectorAll('.inline-log-panel').forEach(function(p) {{ p.style.display = 'none'; }});
+  if (!open) {{
+    panel.style.display = 'block';
+    var inp = panel.querySelector('input[type=text],input[type=number],select');
+    if (inp) setTimeout(function() {{ inp.focus(); }}, 50);
   }}
 }}
 </script>
