@@ -15,9 +15,6 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            cd ~/webapp
-            git pull origin main
-            pkill -f "python3 /root/webapp/server.py" || true
-            sleep 1
-            nohup python3 /root/webapp/server.py > /tmp/webapp.log 2>&1 &
+            cd ~/webapp && git pull origin main
+            systemctl restart wayfinder
             echo "Deployed at $(date)"

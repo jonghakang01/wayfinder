@@ -126,6 +126,15 @@ h1 { font-size: 1.75rem; color: var(--slate-900); margin-bottom: 6px; font-weigh
   .stat-card { padding: 12px 16px; min-width: 80px; }
   .stat-card .stat-num { font-size: 1.6rem; }
   h1 { font-size: 1.4rem; }
+  /* PWA Install Banner */
+  .pwa-banner { display: none; background: white; border: 1px solid var(--slate-200); border-radius: var(--radius-lg); padding: 16px; margin-bottom: 24px; box-shadow: var(--shadow-lg); position: relative; align-items: center; gap: 16px; }
+  .pwa-banner.show { display: flex; }
+  .pwa-icon { font-size: 2rem; }
+  .pwa-text { flex: 1; }
+  .pwa-title { font-weight: 700; font-size: 0.95rem; color: var(--slate-900); margin-bottom: 4px; }
+  .pwa-desc { font-size: 0.8rem; color: var(--slate-500); line-height: 1.4; }
+  .pwa-close { position: absolute; top: 12px; right: 12px; background: none; border: none; color: var(--slate-400); font-size: 1.2rem; cursor: pointer; padding: 4px; line-height: 1; min-height: 32px; min-width: 32px; display: flex; align-items: center; justify-content: center; }
+  .pwa-close:hover { color: var(--slate-900); }
 }
 @media (max-width: 400px) {
   .service-grid { grid-template-columns: 1fr 1fr; }
@@ -301,8 +310,43 @@ def wayfinder(user):
       </div>
     </div>
   </div>
+  
+  <div id="pwa-banner" class="pwa-banner">
+    <div class="pwa-icon">📱</div>
+    <div class="pwa-text">
+      <div class="pwa-title">앱으로 설치하기</div>
+      <div id="pwa-desc" class="pwa-desc">바탕화면에 추가하여 빠르게 접속하세요.</div>
+    </div>
+    <button class="pwa-close" onclick="closePwaBanner()">×</button>
+  </div>
+  
   {sections_html}
 </div>
+<script>
+  function closePwaBanner() {{
+    document.getElementById('pwa-banner').classList.remove('show');
+    localStorage.setItem('pwa-banner-closed', 'true');
+  }}
+
+  document.addEventListener('DOMContentLoaded', () => {{
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+    const isClosed = localStorage.getItem('pwa-banner-closed') === 'true';
+    const isMobile = window.innerWidth <= 600;
+
+    if (isMobile && !isStandalone && !isClosed) {{
+      const banner = document.getElementById('pwa-banner');
+      const desc = document.getElementById('pwa-desc');
+      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+      
+      if (isIOS) {{
+        desc.innerHTML = 'Safari 하단의 <b>공유</b> 버튼을 누르고<br><b>홈 화면에 추가</b>를 선택하세요.';
+      }} else {{
+        desc.innerHTML = 'Chrome 메뉴(⋮)를 누르고<br><b>홈 화면에 추가</b>를 선택하세요.';
+      }}
+      banner.classList.add('show');
+    }}
+  }});
+</script>
 </body></html>'''
 
 
