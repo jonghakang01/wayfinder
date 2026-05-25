@@ -1,11 +1,13 @@
 import hashlib, json, os, secrets, shutil
 
-DATA_ROOT    = os.path.expanduser("~/.appdata")
-USERS_FILE   = os.path.join(DATA_ROOT, "users.json")
+DATA_ROOT     = os.path.expanduser("~/.appdata")
+USERS_FILE    = os.path.join(DATA_ROOT, "users.json")
 SESSIONS_FILE = os.path.join(DATA_ROOT, "sessions.json")
+SETTINGS_FILE = os.path.join(DATA_ROOT, "settings.json")
 SESSIONS = {}  # token -> username  (persisted to SESSIONS_FILE)
 
-ADMIN_USERNAME = "jongha.kang"
+ADMIN_USERNAME    = "jongha.kang"
+CONTROLLED_SERVICES = {"todo", "habit"}
 
 
 def _load_sessions():
@@ -39,12 +41,41 @@ def data_dir(username):
     return d
 
 
+def load_settings():
+    os.makedirs(DATA_ROOT, exist_ok=True)
+    defaults = {"available_services": sorted(CONTROLLED_SERVICES)}
+    if not os.path.exists(SETTINGS_FILE):
+        save_settings(defaults)
+        return defaults
+    try:
+        with open(SETTINGS_FILE) as f:
+            return json.load(f)
+    except Exception:
+        return defaults
+
+
+def save_settings(settings):
+    os.makedirs(DATA_ROOT, exist_ok=True)
+    with open(SETTINGS_FILE, "w") as f:
+        json.dump(settings, f, ensure_ascii=False, indent=2)
+
+
 def _migrate_format(data):
     changed = False
     for k, v in list(data.items()):
         if isinstance(v, str):
-            data[k] = {"pw": v, "role": "admin" if k == ADMIN_USERNAME else "user"}
+            data[k] = {
+                "pw": v, "role": "admin" if k == ADMIN_USERNAME else "user",
+                "email": "", "services": sorted(CONTROLLED_SERVICES),
+            }
             changed = True
+        else:
+            if "email" not in v:
+                v["email"] = ""
+                changed = True
+            if "services" not in v:
+                v["services"] = sorted(CONTROLLED_SERVICES)
+                changed = True
     return data, changed
 
 
@@ -93,6 +124,16 @@ def is_admin(username):
     return get_role(username) == "admin"
 
 
+def has_service_access(username, service_path):
+    service_name = service_path.lstrip("/").split("/")[0]
+    if service_name not in CONTROLLED_SERVICES:
+        return True
+    if is_admin(username):
+        return True
+    users = load_users()
+    return service_name in users.get(username, {}).get("services", [])
+
+
 def set_role(username, role):
     if role not in ("admin", "user"):
         return
@@ -126,7 +167,13 @@ def handle(method, path, body, ctx=None):
                 return ("html", render_login("비밀번호가 틀렸습니다."))
         else:
             role = "admin" if username == ADMIN_USERNAME else "user"
-            users[username] = {"pw": pw_hash, "role": role}
+            email = body.get("email", [""])[0].strip()
+            services_raw = body.get("services", [])
+            services_list = [s for s in services_raw if s in CONTROLLED_SERVICES]
+            users[username] = {
+                "pw": pw_hash, "role": role,
+                "email": email, "services": services_list,
+            }
             save_users(users)
 
         data_dir(username)
@@ -140,6 +187,21 @@ def handle(method, path, body, ctx=None):
 
 
 def render_login(error=""):
+    settings = load_settings()
+    available = settings.get("available_services", [])
+    svc_labels = {"todo": "📋 Todo", "habit": "🏃 습관 트래커"}
+
+    svc_html = ""
+    if available:
+        checks = "".join(
+            f'<label class="svc-check"><input type="checkbox" name="services" value="{s}" checked> {svc_labels.get(s, s)}</label>'
+            for s in available
+        )
+        svc_html = f'''<div class="field">
+      <label>서비스 선택 <span class="hint-inline">(신규 가입 시 적용)</span></label>
+      <div class="svc-checks">{checks}</div>
+    </div>'''
+
     err = f'<div class="error">{error}</div>' if error else ""
     return f'''<!DOCTYPE html>
 <html lang="ko"><head>
@@ -154,12 +216,16 @@ h1{{font-size:22px;font-weight:700;margin-bottom:6px;text-align:center}}
 .sub{{font-size:13px;color:#8b949e;text-align:center;margin-bottom:28px}}
 .field{{margin-bottom:16px}}
 label{{display:block;font-size:13px;color:#8b949e;margin-bottom:6px}}
-input{{width:100%;padding:10px 14px;background:#0d1117;border:1px solid #30363d;border-radius:8px;color:#e6edf3;font-size:14px;outline:none;transition:border-color .15s}}
-input:focus{{border-color:#58a6ff}}
+input[type=text],input[type=password],input[type=email]{{width:100%;padding:10px 14px;background:#0d1117;border:1px solid #30363d;border-radius:8px;color:#e6edf3;font-size:14px;outline:none;transition:border-color .15s}}
+input[type=text]:focus,input[type=password]:focus,input[type=email]:focus{{border-color:#58a6ff}}
 button{{width:100%;padding:11px;background:linear-gradient(135deg,#238636,#2ea043);color:#fff;border:none;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;margin-top:8px;transition:filter .15s}}
 button:hover{{filter:brightness(1.1)}}
 .error{{background:rgba(248,81,73,.12);border:1px solid rgba(248,81,73,.4);color:#f85149;border-radius:6px;padding:10px 14px;font-size:13px;margin-bottom:16px}}
 .hint{{font-size:12px;color:#8b949e;text-align:center;margin-top:16px;line-height:1.5}}
+.hint-inline{{font-size:11px;color:#6e7681}}
+.svc-checks{{display:flex;gap:12px;flex-wrap:wrap;margin-top:6px}}
+.svc-check{{display:flex;align-items:center;gap:6px;font-size:13px;color:#c9d1d9;cursor:pointer}}
+.svc-check input{{width:auto}}
 </style>
 </head><body>
 <div class="box">
@@ -167,8 +233,10 @@ button:hover{{filter:brightness(1.1)}}
   <p class="sub">로그인하거나 새 계정을 만드세요</p>
   {err}
   <form method="POST" action="/login">
-    <div class="field"><label>아이디</label><input name="username" autofocus autocomplete="username" placeholder="username"></div>
-    <div class="field"><label>비밀번호</label><input name="password" type="password" autocomplete="current-password" placeholder="••••••••"></div>
+    <div class="field"><label>아이디</label><input type="text" name="username" autofocus autocomplete="username" placeholder="username"></div>
+    <div class="field"><label>비밀번호</label><input type="password" name="password" autocomplete="current-password" placeholder="••••••••"></div>
+    <div class="field"><label>이메일 <span class="hint-inline">(선택)</span></label><input type="email" name="email" autocomplete="email" placeholder="you@example.com"></div>
+    {svc_html}
     <button type="submit">로그인 / 가입</button>
   </form>
   <p class="hint">처음 입력하는 아이디는 자동으로 계정이 생성됩니다</p>
