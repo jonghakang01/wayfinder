@@ -212,8 +212,8 @@ self.addEventListener('fetch', e => {
 
 APP_TAB_CSS = """
 <style>
-.app-tabs{position:fixed;bottom:0;left:0;right:0;background:rgba(15,23,42,0.96);backdrop-filter:blur(16px);border-top:1px solid rgba(255,255,255,0.08);display:flex;z-index:200;padding-bottom:env(safe-area-inset-bottom,0)}
-.app-tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:10px 4px 8px;color:rgba(148,163,184,0.7);text-decoration:none;font-size:0.65rem;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;transition:.15s;cursor:pointer}
+.app-tabs{position:fixed!important;top:auto!important;bottom:0!important;left:0;right:0;height:auto;background:rgba(15,23,42,0.96);backdrop-filter:blur(16px);border-top:1px solid rgba(255,255,255,0.08);border-bottom:none;display:flex!important;justify-content:stretch;z-index:200;padding:0 0 env(safe-area-inset-bottom,0)}
+.app-tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:10px 4px 8px;color:rgba(148,163,184,0.7);text-decoration:none;font-size:0.65rem;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;transition:.15s}
 .app-tab:hover{color:rgba(255,255,255,0.8)}
 .app-tab.active{color:#38bdf8}
 .app-tab-icon{font-size:1.3rem;line-height:1}
