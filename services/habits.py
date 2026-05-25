@@ -39,6 +39,8 @@ def load(user):
                     h["checkins"] = {}
                 h.setdefault("target", 1)
                 h.setdefault("unit", "times")
+                h.setdefault("track", "count")
+                h.setdefault("categories", [])
             return data
     except Exception:
         return []
@@ -57,17 +59,60 @@ def find_habit(habits, hid):
     return next((h for h in habits if h["id"] == hid), None)
 
 
+def _day_total(checkins, ds):
+    v = checkins.get(ds, 0)
+    return v.get("total", 0) if isinstance(v, dict) else (v or 0)
+
+
+def _day_entries(checkins, ds):
+    v = checkins.get(ds)
+    return v.get("entries", []) if isinstance(v, dict) else []
+
+
+def _flat_checkins(checkins):
+    """Return {date: number} normalizing rich entries to totals."""
+    result = {}
+    for ds, v in (checkins or {}).items():
+        result[ds] = v.get("total", 0) if isinstance(v, dict) else (v or 0)
+    return result
+
+
+def _category_stats(checkins):
+    today = date.today()
+    week_start = today - timedelta(days=6)
+    month_start = today - timedelta(days=29)
+    by_label = {}
+    for ds, v in (checkins or {}).items():
+        if not isinstance(v, dict):
+            continue
+        try:
+            d = date.fromisoformat(ds)
+        except Exception:
+            continue
+        for entry in v.get("entries", []):
+            lbl = (entry.get("label") or "Other").strip() or "Other"
+            val = float(entry.get("value") or 0)
+            if lbl not in by_label:
+                by_label[lbl] = {"week": 0.0, "month": 0.0, "all": 0.0}
+            by_label[lbl]["all"] += val
+            if d >= week_start:
+                by_label[lbl]["week"] += val
+            if d >= month_start:
+                by_label[lbl]["month"] += val
+    return by_label
+
+
 def is_done(checkins, ds, target):
-    return checkins.get(ds, 0) >= max(1, target)
+    return _day_total(checkins, ds) >= max(1, target)
 
 
 def compute_stats(checkins, target=1):
     today = date.today()
-    cs = checkins if isinstance(checkins, dict) else {d: 1 for d in checkins}
+    cs = _flat_checkins(checkins)
     t = max(1, target)
 
     streak, d = 0, today
-    while is_done(cs, d.isoformat(), t):
+    while cs.get(d.isoformat(), 0) >= t:
         streak += 1
         d -= timedelta(days=1)
 
@@ -103,6 +148,11 @@ def handle(method, path, body, ctx=None):
             except ValueError:
                 target = 1
             unit = body.get("unit", ["times"])[0].strip() or "times"
+            track = body.get("track", ["count"])[0]
+            if track not in ("count", "detail"):
+                track = "count"
+            cats_raw = body.get("categories", [""])[0].strip()
+            categories = [c.strip() for c in cats_raw.split(",") if c.strip()]
             if name:
                 habits.append({
                     "id": next_id(habits),
@@ -111,6 +161,8 @@ def handle(method, path, body, ctx=None):
                     "freq": freq,
                     "target": target,
                     "unit": unit,
+                    "track": track,
+                    "categories": categories,
                     "started": date.today().isoformat(),
                     "checkins": {},
                 })
@@ -127,23 +179,50 @@ def handle(method, path, body, ctx=None):
             if habit:
                 if action == "checkin":
                     target_date = body.get("date", [date.today().isoformat()])[0]
+                    track = habit.get("track", "count")
                     try:
                         target_d = date.fromisoformat(target_date)
                         if target_d <= date.today():
                             habit_target = habit.get("target", 1)
                             current = habit["checkins"].get(target_date, 0)
-                            toggle = body.get("toggle", ["0"])[0] == "1"
-                            if toggle:
-                                # heatmap click: toggle done/undone
-                                new_count = 0 if current >= habit_target else habit_target
+                            current_total = _day_total(habit["checkins"], target_date)
+
+                            if track == "detail" and body.get("toggle", ["0"])[0] != "1":
+                                # Rich check-in: receive label[] and value[] arrays
+                                labels = body.get("label", [])
+                                values = body.get("value", [])
+                                if body.get("clear", ["0"])[0] == "1":
+                                    habit["checkins"].pop(target_date, None)
+                                else:
+                                    entries = []
+                                    for lbl, val_str in zip(labels, values):
+                                        lbl = lbl.strip()
+                                        try:
+                                            val = max(0.0, float(val_str))
+                                        except (ValueError, TypeError):
+                                            val = 0.0
+                                        if lbl or val > 0:
+                                            entries.append({"label": lbl, "value": val})
+                                    if entries:
+                                        existing = current if isinstance(current, dict) else {}
+                                        all_entries = existing.get("entries", []) + entries
+                                        habit["checkins"][target_date] = {
+                                            "total": sum(e["value"] for e in all_entries),
+                                            "entries": all_entries,
+                                        }
+                                save(habits, user)
                             else:
-                                delta = int(body.get("delta", ["1"])[0])
-                                new_count = max(0, current + delta)
-                            if new_count <= 0:
-                                habit["checkins"].pop(target_date, None)
-                            else:
-                                habit["checkins"][target_date] = new_count
-                            save(habits, user)
+                                toggle = body.get("toggle", ["0"])[0] == "1"
+                                if toggle:
+                                    new_count = 0 if current_total >= habit_target else habit_target
+                                else:
+                                    delta = int(body.get("delta", ["1"])[0])
+                                    new_count = max(0, current_total + delta)
+                                if new_count <= 0:
+                                    habit["checkins"].pop(target_date, None)
+                                else:
+                                    habit["checkins"][target_date] = new_count
+                                save(habits, user)
                     except (ValueError, KeyError):
                         pass
                     next_url = body.get("next", [f"/habit/{hid}"])[0]
@@ -158,11 +237,18 @@ def handle(method, path, body, ctx=None):
                     except ValueError:
                         target = habit.get("target", 1)
                     unit = body.get("unit", ["times"])[0].strip() or "times"
+                    track = body.get("track", ["count"])[0]
+                    if track not in ("count", "detail"):
+                        track = habit.get("track", "count")
+                    cats_raw = body.get("categories", [""])[0].strip()
+                    categories = [c.strip() for c in cats_raw.split(",") if c.strip()]
                     if name:
                         habit["name"] = name
                         habit["freq"] = freq
                         habit["target"] = target
                         habit["unit"] = unit
+                        habit["track"] = track
+                        habit["categories"] = categories
                         save(habits, user)
                     return ("redirect", f"/habit/{hid}")
                 elif action == "delete":
@@ -311,6 +397,39 @@ h1{font-size:20px;font-weight:700;color:var(--text)}
 .tab-btn.active{background:var(--text);color:white;border-color:var(--text)}
 .btn-cal-nav{background:none;border:1px solid var(--border);border-radius:8px;cursor:pointer;font-size:18px;color:var(--text-muted);width:44px;height:44px;display:inline-flex;align-items:center;justify-content:center;transition:0.15s}
 .btn-cal-nav:hover{border-color:var(--accent);color:var(--accent)}
+/* Rich check-in */
+.rich-checkin{display:flex;flex-direction:column;gap:14px}
+.today-entries{display:flex;flex-direction:column;gap:6px;margin-bottom:4px}
+.today-entry{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:var(--bg);border-radius:8px;font-size:14px;border:1px solid var(--border)}
+.today-entry-label{font-weight:600;color:var(--text)}
+.today-entry-val{color:var(--accent);font-weight:700}
+.today-total{font-size:14px;font-weight:700;color:var(--text);padding:8px 4px;border-top:1px solid var(--border)}
+.entry-rows{display:flex;flex-direction:column;gap:8px}
+.entry-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.entry-label-inp{flex:1;min-width:120px;padding:9px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--bg);color:var(--text);transition:.2s}
+.entry-label-inp:focus{border-color:var(--accent);outline:none}
+.entry-val-inp{width:80px;padding:9px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--bg);color:var(--text);transition:.2s}
+.entry-val-inp:focus{border-color:var(--accent);outline:none}
+.entry-unit-lbl{font-size:13px;color:var(--text-muted);font-weight:600;min-width:28px}
+.entry-del-btn{background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:18px;line-height:1;padding:4px;transition:.15s}
+.entry-del-btn:hover{color:#ef4444}
+.rich-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.btn-add-row{padding:8px 16px;background:var(--bg);border:1px solid var(--border);border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;color:var(--text-muted);transition:.2s}
+.btn-add-row:hover{border-color:var(--accent);color:var(--accent)}
+.btn-save-rich{padding:10px 24px;background:var(--text);color:white;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;transition:opacity .15s}
+.btn-save-rich:hover{opacity:.85}
+.btn-clear-rich{padding:8px 14px;background:transparent;border:1px solid #fecaca;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;color:#ef4444;transition:.2s}
+.btn-clear-rich:hover{background:#fef2f2}
+/* By Category */
+.cat-period-row{display:flex;gap:4px;margin-bottom:16px}
+.cat-period-btn{padding:5px 14px;border:1px solid var(--border);border-radius:20px;background:var(--bg);color:var(--text-muted);font-size:12px;font-weight:600;cursor:pointer;transition:.15s}
+.cat-period-btn.active{background:var(--text);color:white;border-color:var(--text)}
+.cat-bars{display:flex;flex-direction:column;gap:10px}
+.cat-bar-row{display:flex;align-items:center;gap:10px}
+.cat-bar-lbl{font-size:13px;font-weight:600;color:var(--text);width:90px;text-align:right;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cat-bar-track{flex:1;height:20px;background:var(--cell-0);border-radius:6px;overflow:hidden}
+.cat-bar-fill{height:100%;background:linear-gradient(90deg,#bae6fd,var(--cell-4));border-radius:6px;min-width:4px;transition:width .5s ease}
+.cat-bar-val{font-size:12px;font-weight:700;color:var(--text-muted);min-width:52px}
 @media (max-width:600px){
   .container{padding:12px 12px calc(80px + env(safe-area-inset-bottom,0px))}
   nav{padding:8px 14px}
@@ -508,9 +627,20 @@ def render_list(habits, user, readonly=False):
         started = h.get("started", "")[:7]
         target_tag = f'<span class="tag-target">Goal: {target} {unit}</span>' if target > 1 else ""
 
+        del_btn = "" if readonly else (
+            f'<form method="POST" action="/habit/{h["id"]}/delete" style="display:inline"'
+            f' onsubmit="return confirm(\'Delete habit: {h["name"]}?\')">'
+            f'<button class="btn-sm btn-del-sm" type="submit">Delete</button></form>'
+        )
+
         if readonly:
             checkin_btn = f'<span class="btn-sm btn-checkin-sm {"checked" if checked else ""}">{"✓ Done" if checked else "Not done"}</span>'
-            del_btn = ""
+        elif h.get("track") == "detail":
+            count_label = f'<span class="today-count {"done" if checked else ""}">{today_count}/{target}{unit}</span>'
+            checkin_btn = (
+                f'{count_label}'
+                f'<a href="/habit/{h["id"]}" class="btn-sm btn-checkin-sm" style="text-decoration:none">{"✓ Logged" if checked else "+ Log"}</a>'
+            )
         elif target > 1:
             count_label = f'<span class="today-count {"done" if checked else ""}">{today_count}/{target}{unit}</span>'
             checkin_btn = (
@@ -520,11 +650,6 @@ def render_list(habits, user, readonly=False):
                 f'<input type="hidden" name="next" value="/habit">'
                 f'<button class="btn-sm btn-checkin-sm" type="submit">+1{unit}</button></form>'
             )
-            del_btn = (
-                f'<form method="POST" action="/habit/{h["id"]}/delete" style="display:inline"'
-                f' onsubmit="return confirm(\'Delete habit: {h["name"]}?\')">'
-                f'<button class="btn-sm btn-del-sm" type="submit">Delete</button></form>'
-            )
         else:
             checkin_btn = (
                 f'<form method="POST" action="/habit/{h["id"]}/checkin" style="display:inline">'
@@ -532,11 +657,6 @@ def render_list(habits, user, readonly=False):
                 f'<input type="hidden" name="next" value="/habit">'
                 f'<button class="btn-sm btn-checkin-sm{"  checked" if checked else ""}" '
                 f'{"type=button" if checked else "type=submit"}>{"✓ Done" if checked else "Check in"}</button></form>'
-            )
-            del_btn = (
-                f'<form method="POST" action="/habit/{h["id"]}/delete" style="display:inline"'
-                f' onsubmit="return confirm(\'Delete habit: {h["name"]}?\')">'
-                f'<button class="btn-sm btn-del-sm" type="submit">Delete</button></form>'
             )
         rows += f'''
         <div class="habit-row">
@@ -567,6 +687,11 @@ def render_list(habits, user, readonly=False):
         '<option value="times"><option value="cups"><option value="min"><option value="km">'
         '<option value="pages"><option value="sets"><option value="hrs">'
         '</datalist>'
+        '<label style="width:100%">Tracking<select name="track">'
+        '<option value="count">Simple (done / count)</option>'
+        '<option value="detail">Detailed (log each activity)</option>'
+        '</select></label>'
+        '<label style="width:100%">Categories (optional, comma-separated)<input type="text" name="categories" placeholder="e.g. Running, Walking, Cycling"></label>'
         '<button type="submit">Add</button>'
         '</form></div>'
     )
@@ -620,9 +745,12 @@ def render_detail(habit, user):
     cs = habit.get("checkins", {})
     target = habit.get("target", 1)
     unit = habit.get("unit", "times")
+    track = habit.get("track", "count")
+    categories = habit.get("categories", [])
     today_str = today.isoformat()
-    today_count = cs.get(today_str, 0)
+    today_count = _day_total(cs, today_str)
     today_done = today_count >= target
+    today_entries = _day_entries(cs, today_str)
     hid = habit["id"]
 
     streak, longest, total, rate_12w, done_12w, days_12w = compute_stats(cs, target)
@@ -634,7 +762,7 @@ def render_detail(habit, user):
     d = start_sunday
     while d <= today:
         ds = d.isoformat()
-        count = cs.get(ds, 0)
+        count = _day_total(cs, ds)
         if count > 0:
             ratio = count / target
             level = 4 if ratio >= 1 else (3 if ratio >= 0.75 else (2 if ratio >= 0.5 else 1))
@@ -643,7 +771,8 @@ def render_detail(habit, user):
         heatmap[ds] = level
         d += timedelta(days=1)
     heatmap_json = json.dumps(heatmap)
-    checkins_json = json.dumps(cs)
+    # Normalize checkins to totals for JS (heatmap/calendar use numbers)
+    checkins_json = json.dumps(_flat_checkins(cs))
 
     started = habit.get("started", "")
     started_display = (
@@ -654,8 +783,50 @@ def render_detail(habit, user):
     habit_icon = habit.get("icon", "✅")
     freq_lbl = FREQ_LABEL.get(habit.get("freq", "daily"), "Daily")
 
-    # checkin block
-    if target == 1:
+    # ── Check-in section ─────────────────────────────────────
+    if track == "detail":
+        # Rich mode: entry log
+        cat_options = "".join(f'<option value="{c}">' for c in categories)
+        today_entries_html = ""
+        if today_entries:
+            rows_html = "".join(
+                f'<div class="today-entry"><span class="today-entry-label">{e.get("label","—")}</span>'
+                f'<span class="today-entry-val">{e.get("value",0):g} {unit}</span></div>'
+                for e in today_entries
+            )
+            total_pct = min(100, round(today_count / target * 100)) if target > 0 else 0
+            today_entries_html = f'''
+            <div class="today-entries">
+              {rows_html}
+              <div class="today-total">Total today: {today_count:g} / {target} {unit} ({total_pct}%)</div>
+            </div>'''
+        clear_btn = (
+            f'<form method="POST" action="/habit/{hid}/checkin" style="display:inline">'
+            f'<input type="hidden" name="clear" value="1">'
+            f'<input type="hidden" name="next" value="/habit/{hid}">'
+            f'<button class="btn-clear-rich" type="submit">Clear today</button></form>'
+        ) if today_entries else ""
+        checkin_section = f'''
+        <div class="rich-checkin">
+          {today_entries_html}
+          <form method="POST" action="/habit/{hid}/checkin" id="richForm">
+            <input type="hidden" name="next" value="/habit/{hid}">
+            <datalist id="cats-{hid}">{cat_options}</datalist>
+            <div class="entry-rows" id="entryRows">
+              <div class="entry-row">
+                <input type="text" name="label" placeholder="e.g. {categories[0] if categories else habit_name}" list="cats-{hid}" class="entry-label-inp">
+                <input type="number" name="value" value="1" min="0" step="any" class="entry-val-inp">
+                <span class="entry-unit-lbl">{unit}</span>
+              </div>
+            </div>
+            <div class="rich-actions" style="margin-top:10px">
+              <button type="button" class="btn-add-row" onclick="addEntryRow()">+ Add entry</button>
+              <button type="submit" class="btn-save-rich">Save</button>
+              {clear_btn}
+            </div>
+          </form>
+        </div>'''
+    elif target == 1:
         if not today_done:
             checkin_block = (
                 f'<form method="POST" action="/habit/{hid}/checkin" style="display:inline">'
@@ -705,6 +876,53 @@ def render_detail(habit, user):
           <div class="checkin-note">{note}</div>
         </div>'''
 
+    # ── By Category stats ─────────────────────────────────────
+    cat_stats = _category_stats(cs)
+    if cat_stats and track == "detail":
+        # Build JSON for JS rendering
+        import json as _json
+        cat_json = _json.dumps(cat_stats)
+        by_cat_section = f'''
+  <div class="card">
+    <div class="section-title">By Category</div>
+    <div class="cat-period-row">
+      <button class="cat-period-btn active" onclick="showCatPeriod(this,'week')">This week</button>
+      <button class="cat-period-btn" onclick="showCatPeriod(this,'month')">This month</button>
+      <button class="cat-period-btn" onclick="showCatPeriod(this,'all')">All time</button>
+    </div>
+    <div class="cat-bars" id="catBars"></div>
+  </div>
+  <script>
+  (function(){{
+    const CAT={cat_json};
+    const UNIT="{unit}";
+    function showCatPeriod(btn,period){{
+      document.querySelectorAll('.cat-period-btn').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      renderCat(period);
+    }}
+    function renderCat(period){{
+      const el=document.getElementById('catBars');
+      if(!el)return;
+      const entries=Object.entries(CAT).sort((a,b)=>b[1][period]-a[1][period]);
+      const maxVal=entries.reduce((m,[,v])=>Math.max(m,v[period]),0)||1;
+      el.innerHTML=entries.map(([lbl,v])=>{{
+        const val=v[period];
+        const pct=Math.max(2,Math.round(val/maxVal*100));
+        const disp=Number.isInteger(val)?val:val.toFixed(1);
+        return `<div class="cat-bar-row">
+          <div class="cat-bar-lbl" title="${{lbl}}">${{lbl}}</div>
+          <div class="cat-bar-track"><div class="cat-bar-fill" style="width:${{pct}}%"></div></div>
+          <div class="cat-bar-val">${{disp}} ${{UNIT}}</div>
+        </div>`;
+      }}).join('');
+    }}
+    renderCat('week');
+  }})();
+  </script>'''
+    else:
+        by_cat_section = ""
+
     return f'''<!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -748,6 +966,11 @@ def render_detail(habit, user):
           <option value="times"><option value="cups"><option value="min"><option value="km">
           <option value="pages"><option value="sets"><option value="hrs">
         </datalist>
+        <label style="width:100%">Tracking mode<select name="track">
+          <option value="count" {"selected" if track=="count" else ""}>Simple (count / done)</option>
+          <option value="detail" {"selected" if track=="detail" else ""}>Detailed (log entries per activity)</option>
+        </select></label>
+        <label style="width:100%">Categories (comma-separated, for quick-select)<input type="text" name="categories" value="{", ".join(categories)}" placeholder="e.g. Running, Walking, Cycling"></label>
         <button type="submit">Save</button>
       </div>
     </form>
@@ -824,13 +1047,35 @@ def render_detail(habit, user):
     </div>
   </div>
 
+  {by_cat_section}
+
 </div>
 <div class="tooltip" id="tooltip"></div>
 <script>
 const DATA = {checkins_json};
 const HID = {hid};
 const TARGET = {target};
+const TRACK = "{track}";
 {_HEATMAP_JS}
+// Rich check-in: add entry row
+function addEntryRow(){{
+  const rows = document.getElementById('entryRows');
+  if(!rows)return;
+  const first = rows.querySelector('.entry-row');
+  if(!first)return;
+  const clone = first.cloneNode(true);
+  clone.querySelector('.entry-label-inp').value='';
+  clone.querySelector('.entry-val-inp').value='1';
+  // add delete button if not present
+  if(!clone.querySelector('.entry-del-btn')){{
+    const del=document.createElement('button');
+    del.type='button'; del.className='entry-del-btn'; del.textContent='×';
+    del.onclick=function(){{clone.remove();}};
+    clone.appendChild(del);
+  }}
+  rows.appendChild(clone);
+  clone.querySelector('.entry-label-inp').focus();
+}}
 </script>
 </body>
 </html>'''
