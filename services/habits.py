@@ -301,6 +301,8 @@ h2{font-size:18px;font-weight:700;margin-bottom:16px;color:var(--text)}
 .habit-actions{display:flex;gap:8px;align-items:center}
 .tag-freq{font-size:11px;padding:2px 8px;border-radius:12px;background:var(--border);color:var(--text-muted)}
 .tag-target{font-size:11px;padding:2px 8px;border-radius:12px;background:#eff6ff;color:var(--accent);font-weight:600}
+.today-entries.list-entries{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
+.entry-pill{font-size:11px;padding:2px 8px;border-radius:99px;background:#eff6ff;color:var(--accent);font-weight:600;white-space:nowrap}
 .streak-sm{font-size:13px;color:var(--streak);font-weight:600}
 .today-count{font-size:12px;color:var(--text-muted);font-weight:600}
 .today-count.done{color:#10b981}
@@ -668,12 +670,24 @@ def render_list(habits, user, readonly=False):
                 f'<button class="btn-sm btn-checkin-sm{"  checked" if checked else ""}" '
                 f'{"type=button" if checked else "type=submit"}>{"✓ Done" if checked else "Check in"}</button></form>'
             )
+        # Sub-activity entries for today
+        today_entries = _day_entries(h.get("checkins", {}), today_str)
+        entries_html = ""
+        if today_entries:
+            pills = "".join(
+                f'<span class="entry-pill">{e.get("label", "")}: {e.get("value", "")}</span>'
+                for e in today_entries if e.get("label") or e.get("value")
+            )
+            if pills:
+                entries_html = f'<div class="today-entries list-entries">{pills}</div>'
+
         rows += f'''
         <div class="habit-row">
           <div class="habit-icon-sm">{h.get("icon", "✅")}</div>
           <div class="habit-info">
             <div class="habit-name">{h["name"]}</div>
             <div class="habit-meta"><span class="tag-freq">{freq_lbl}</span>{target_tag}  {started}</div>
+            {entries_html}
           </div>
           <div class="habit-actions">
             <span class="streak-sm">🔥 {streak}d</span>

@@ -216,7 +216,7 @@ def render(user):
 .quick-btn{{display:inline-flex;align-items:center;gap:8px;padding:10px 20px;background:white;border:1px solid var(--slate-200);border-radius:var(--radius-md);font-size:.875rem;font-weight:600;color:var(--slate-900);text-decoration:none;transition:.2s}}
 .quick-btn:hover{{border-color:#3b82f6;color:#3b82f6;transform:translateY(-2px)}}
 @media(max-width:600px){{
-  .db-grid{{grid-template-columns:1fr 1fr;gap:12px}}
+  .db-grid{{grid-template-columns:1fr;gap:12px}}
   .db-card{{padding:16px}}
   .db-hero{{padding:20px}}
   .big-num{{font-size:2.2rem}}

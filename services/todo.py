@@ -17,6 +17,12 @@ def _files(user):
     return os.path.join(d, "todo.json"), os.path.join(d, "habits.json")
 
 
+def _groups_file(user):
+    d = os.path.join(DATA_ROOT, user or "guest")
+    os.makedirs(d, exist_ok=True)
+    return os.path.join(d, "task_groups.json")
+
+
 def load(user):
     todo_file, _ = _files(user)
     if not os.path.exists(todo_file):
@@ -32,6 +38,22 @@ def save(todos, user):
     todo_file, _ = _files(user)
     with open(todo_file, "w") as f:
         json.dump(todos, f, ensure_ascii=False, indent=2)
+
+
+def load_groups(user):
+    f = _groups_file(user)
+    if not os.path.exists(f):
+        return []
+    try:
+        with open(f) as fp:
+            return json.load(fp)
+    except Exception:
+        return []
+
+
+def save_groups(groups, user):
+    with open(_groups_file(user), "w") as f:
+        json.dump(groups, f, ensure_ascii=False)
 
 
 def load_habits(user):
@@ -94,6 +116,14 @@ def handle(method, path, body, ctx=None):
             title = body.get("title", [""])[0].strip()
             due_date_raw = body.get("due_date", [""])[0].strip()
             due_date = due_date_raw if due_date_raw else None
+            new_group = body.get("new_group", [""])[0].strip()
+            group = body.get("group", [""])[0].strip()
+            actual_group = new_group if new_group else (group if group else None)
+            if new_group:
+                groups = load_groups(user)
+                if new_group not in groups:
+                    groups.append(new_group)
+                    save_groups(groups, user)
             if title:
                 todos.append({
                     "id": next_id(todos),
@@ -101,6 +131,7 @@ def handle(method, path, body, ctx=None):
                     "done": False,
                     "created_at": datetime.now().isoformat(),
                     "due_date": due_date,
+                    "group": actual_group,
                 })
                 save(todos, user)
         elif path == "/todo/done":
@@ -151,6 +182,28 @@ def handle(method, path, body, ctx=None):
                 except (ValueError, KeyError):
                     pass
             return ("json", {"ok": True})
+        elif path == "/todo/group/add":
+            name = body.get("name", [""])[0].strip()
+            if name:
+                groups = load_groups(user)
+                if name not in groups:
+                    groups.append(name)
+                    save_groups(groups, user)
+        elif path == "/todo/group/delete":
+            name = body.get("name", [""])[0].strip()
+            groups = load_groups(user)
+            save_groups([g for g in groups if g != name], user)
+            for t in todos:
+                if t.get("group") == name:
+                    t["group"] = None
+            save(todos, user)
+        elif path == "/todo/set_group":
+            tid = int(body.get("id", [0])[0])
+            g = body.get("group", [""])[0].strip() or None
+            for t in todos:
+                if t["id"] == tid:
+                    t["group"] = g
+            save(todos, user)
         return ("redirect", "/todo")
 
     return ("html", render(load(user), load_habits(user), user))
@@ -158,12 +211,36 @@ def handle(method, path, body, ctx=None):
 
 def render(todos, habits, user, readonly=False):
     today_str = date.today().isoformat()
-    # Active items on top, done items at bottom
-    todos = [t for t in todos if not t.get("done")] + [t for t in todos if t.get("done")]
-    total = len(todos)
-    done_count = sum(1 for t in todos if t["done"])
+    groups = load_groups(user)
 
-    # ── Habit section ────────────────────────────────────────
+    # Sort active tasks: soonest due first, no due date → bottom
+    def _due_key(t):
+        d = t.get("due_date")
+        return d if d else "9999-99-99"
+
+    active = sorted([t for t in todos if not t.get("done")], key=_due_key)
+    done_list = [t for t in todos if t.get("done")]
+    total = len(todos)
+    done_count = len(done_list)
+
+    # Group active tasks
+    task_by_group = {}
+    ungrouped = []
+    seen_groups = []
+    for t in active:
+        g = t.get("group") or ""
+        if g:
+            if g not in task_by_group:
+                task_by_group[g] = []
+                if g not in seen_groups:
+                    seen_groups.append(g)
+            task_by_group[g].append(t)
+        else:
+            ungrouped.append(t)
+
+    all_groups = groups + [g for g in seen_groups if g not in groups]
+
+    # ── Habit section (at BOTTOM of page) ─────────────────────
     habit_index = {h["id"]: h for h in habits}
     if habits:
         habit_rows = ""
@@ -172,11 +249,10 @@ def render(todos, habits, user, readonly=False):
             checked = today_str in h.get("checkins", [])
             streak = 0
             d = date.today()
-            cs = set(h.get("checkins", []))
+            cs = set(h.get("checkins", []) if isinstance(h.get("checkins"), list) else h.get("checkins", {}).keys())
             while d.isoformat() in cs:
                 streak += 1
                 d -= timedelta(days=1)
-
             if checked:
                 checkin_html = '<span class="hb-done">✓ Done</span>'
             elif readonly:
@@ -187,7 +263,6 @@ def render(todos, habits, user, readonly=False):
                     f'<input type="hidden" name="next" value="/todo">'
                     f'<button class="btn hb-check">Check in</button></form>'
                 )
-
             habit_rows += f'''
             <div class="habit-item {"habit-checked" if checked else ""}">
               <span class="h-icon">{h.get("icon","✅")}</span>
@@ -198,40 +273,38 @@ def render(todos, habits, user, readonly=False):
                 <a href="/habit/{h["id"]}" class="btn hb-detail">Detail</a>
               </div>
             </div>'''
-
         habit_section = f'''
-        <div class="habits-section">
-          <div class="habits-header">
-            <span class="habits-title">🔄 Today's Habits</span>
-            <span class="habits-meta">{today_str} &nbsp; {checked_count}/{len(habits)} done</span>
-          </div>
+        <details class="habits-accordion">
+          <summary class="habits-header">
+            <span class="habits-title">🔄 Today\'s Habits</span>
+            <span class="habits-meta">{today_str} &nbsp;·&nbsp; {checked_count}/{len(habits)} done</span>
+          </summary>
           <div class="habit-items">{habit_rows}</div>
           <a href="/habit" class="habits-link">+ Manage Habits →</a>
-        </div>'''
+        </details>'''
     else:
         habit_section = f'''
         <div class="habits-section habits-empty">
-          <span>🔄 Today's Habits</span>
+          <span>🔄 Today\'s Habits</span>
           <a href="/habit" class="habits-link">Add Habit →</a>
         </div>'''
 
-    # ── Todo items ───────────────────────────────────────────
-    items = ""
-    for t in todos:
+    # ── Item renderer ──────────────────────────────────────────
+    def item_html(t):
         created = t.get("created_at", "")[:10]
         due_date = t.get("due_date")
         due_str = due_date or ""
         done_at = t.get("done_at")
         habit_id = t.get("habit_id")
+        t_group = t.get("group") or ""
 
         if readonly:
             badge = early_badge(due_date, done_at) if t["done"] else due_badge(due_date, t["done"])
             actions_html = ""
         elif t["done"]:
             badge = early_badge(due_date, done_at)
-            action_btn = f'<form method="POST" action="/todo/undone" style="display:inline"><input type="hidden" name="id" value="{t["id"]}"><button class="btn btn-undo">Restore</button></form>'
             actions_html = f'''
-              {action_btn}
+              <form method="POST" action="/todo/undone" style="display:inline"><input type="hidden" name="id" value="{t["id"]}"><button class="btn btn-undo">Restore</button></form>
               <form method="POST" action="/todo/delete" style="display:inline">
                 <input type="hidden" name="id" value="{t["id"]}">
                 <button class="btn btn-del">Delete</button>
@@ -244,9 +317,21 @@ def render(todos, habits, user, readonly=False):
                 habit_btn = f'<a href="/habit/{habit_id}" class="btn btn-habit linked">🏃 View Habit</a>'
             else:
                 habit_btn = f'<form method="POST" action="/todo/to_habit" style="display:inline"><input type="hidden" name="id" value="{t["id"]}"><button class="btn btn-habit">🏃 Make Habit</button></form>'
+            group_opts = '<option value="">No group</option>' + "".join(
+                f'<option value="{g}" {"selected" if g == t_group else ""}>{g}</option>'
+                for g in all_groups
+            )
+            group_sel = (
+                f'<form method="POST" action="/todo/set_group" style="display:inline">'
+                f'<input type="hidden" name="id" value="{t["id"]}">'
+                f'<select name="group" onchange="this.form.submit()" class="group-select-inline">'
+                f'{group_opts}'
+                f'</select></form>'
+            )
             actions_html = f'''
               {done_btn}
               {habit_btn}
+              {group_sel}
               <form method="POST" action="/todo/delete" style="display:inline">
                 <input type="hidden" name="id" value="{t["id"]}">
                 <button class="btn btn-del">Delete</button>
@@ -254,7 +339,7 @@ def render(todos, habits, user, readonly=False):
 
         drag_attr = 'draggable="true"' if not t["done"] else ""
         drag_handle = '<span class="drag-handle" title="Drag to reorder">⠿</span>' if not t["done"] else ""
-        items += f'''
+        return f'''
         <div class="todo-item {"done" if t["done"] else ""}" data-id="{t["id"]}" {drag_attr}>
           {drag_handle}
           <span class="tid">#{t["id"]}</span>
@@ -265,16 +350,73 @@ def render(todos, habits, user, readonly=False):
           <div class="actions">{actions_html}</div>
         </div>'''
 
-    if not todos:
-        items = '<div class="empty">No tasks yet 🎉</div>'
+    # ── Build task sections ────────────────────────────────────
+    todo_sections = ""
 
-    add_form = "" if readonly else (
-        '<form class="add-form" method="POST" action="/todo/add">'
-        '<input type="text" name="title" placeholder="New task..." autofocus required>'
-        '<input type="date" name="due_date">'
-        '<button type="submit">Add</button>'
-        '</form>'
-    )
+    # Ungrouped tasks (no accordion wrapper)
+    if ungrouped:
+        items_html = "".join(item_html(t) for t in ungrouped)
+        todo_sections += f'<div class="todo-list" data-group="">{items_html}</div>'
+    elif not active and not done_list and not all_groups:
+        todo_sections += '<div class="empty">No tasks yet 🎉</div>'
+
+    # Named groups
+    for g in all_groups:
+        tasks = task_by_group.get(g, [])
+        count = len(tasks)
+        count_badge = f'<span class="group-count-badge">{count}</span>' if count else '<span class="group-count-badge empty">0</span>'
+        items_html = "".join(item_html(t) for t in tasks) if tasks else '<div class="group-empty">No tasks in this group</div>'
+        del_form = "" if readonly else (
+            f'<form method="POST" action="/todo/group/delete" style="display:inline;margin-left:auto" '
+            f'onsubmit="return confirm(\'Delete group &quot;{g}&quot;?\')">'
+            f'<input type="hidden" name="name" value="{g}">'
+            f'<button class="group-del-btn" type="submit" title="Delete group">×</button></form>'
+        )
+        todo_sections += f'''
+        <details open class="group-accordion">
+          <summary class="group-summary">
+            <span class="group-chevron">▶</span>
+            <span class="group-name-lbl">{g}</span>
+            {count_badge}
+            {del_form}
+          </summary>
+          <div class="todo-list group-body" data-group="{g}">{items_html}</div>
+        </details>'''
+
+    # Done section (collapsed by default)
+    if done_list:
+        done_items = "".join(item_html(t) for t in done_list)
+        todo_sections += f'''
+        <details class="group-accordion done-accordion">
+          <summary class="group-summary done-summary">
+            <span class="group-chevron">▶</span>
+            <span class="group-name-lbl">✓ Completed</span>
+            <span class="group-count-badge">{done_count}</span>
+          </summary>
+          <div class="todo-list group-body">{done_items}</div>
+        </details>'''
+
+    # ── Add form ───────────────────────────────────────────────
+    if not readonly:
+        group_options = '<option value="">No group</option>' + "".join(
+            f'<option value="{g}">{g}</option>' for g in all_groups
+        ) + '<option value="__new__">+ New group...</option>'
+        add_form = f'''
+        <form class="add-form" method="POST" action="/todo/add" id="addTaskForm">
+          <input type="text" name="title" placeholder="New task..." autofocus required>
+          <input type="date" name="due_date">
+          <select name="group" id="groupSelect" onchange="toggleNewGroup(this)">
+            {group_options}
+          </select>
+          <input type="text" name="new_group" id="newGroupInput" placeholder="Group name" style="display:none;flex:0 0 120px">
+          <button type="submit">Add</button>
+        </form>
+        <form class="group-add-form" method="POST" action="/todo/group/add">
+          <input type="text" name="name" placeholder="New group name..." required>
+          <button type="submit" class="btn-add-group">+ Group</button>
+        </form>'''
+    else:
+        add_form = ""
 
     from server import app_tabs
     tabs_html = app_tabs("/todo")
@@ -312,7 +454,6 @@ def render(todos, habits, user, readonly=False):
 .todo-item.done {{ opacity: 0.6; background: var(--slate-50); box-shadow: none; transform: none; }}
 .todo-item.done .title {{ text-decoration: line-through; color: var(--slate-400); }}
 .todo-item.dragging {{ opacity: 0.4; box-shadow: 0 8px 24px rgba(0,0,0,0.15); transform: scale(1.02); border-color: var(--blue-500); }}
-.todo-item.drag-over {{ border-top: 2px solid var(--blue-500); }}
 .drag-handle {{ cursor: grab; color: var(--slate-300); font-size: 1rem; padding: 0 2px; flex-shrink: 0; user-select: none; touch-action: none; }}
 .drag-handle:hover {{ color: var(--slate-500); }}
 .drag-handle:active {{ cursor: grabbing; }}
@@ -320,24 +461,84 @@ def render(todos, habits, user, readonly=False):
 .title {{ flex: 1; font-size: 0.95rem; }}
 .date {{ font-size: 0.75rem; color: var(--slate-300); }}
 .due-date {{ font-size: 0.75rem; color: var(--slate-400); }}
-.actions {{ display: flex; gap: 6px; }}
-
-.habits-section {{
-  background: white; border: 1px solid var(--slate-200);
-  border-radius: var(--radius-lg); padding: 20px; margin-bottom: 32px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.02);
+.actions {{ display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }}
+.group-select-inline {{
+  font-size: 0.75rem; padding: 3px 6px; border-radius: 6px;
+  border: 1px solid var(--slate-200); background: var(--slate-50);
+  color: var(--slate-500); cursor: pointer;
 }}
+
+/* Group accordion */
+.group-accordion {{
+  background: white; border: 1px solid var(--slate-200);
+  border-radius: var(--radius-lg); margin-bottom: 12px;
+  overflow: hidden;
+}}
+.group-accordion[open] > .group-summary .group-chevron {{ transform: rotate(90deg); }}
+.group-summary {{
+  display: flex; align-items: center; gap: 10px;
+  padding: 14px 20px; cursor: pointer; list-style: none;
+  user-select: none; background: var(--slate-50);
+  border-bottom: 1px solid transparent;
+}}
+.group-accordion[open] > .group-summary {{ border-bottom-color: var(--slate-100); }}
+.group-summary::-webkit-details-marker {{ display: none; }}
+.group-chevron {{ font-size: 0.7rem; color: var(--slate-400); transition: transform 0.2s; display: inline-block; }}
+.group-name-lbl {{ font-weight: 700; font-size: 0.9rem; color: var(--slate-700); flex: 1; }}
+.group-count-badge {{
+  font-size: 0.72rem; font-weight: 700; padding: 2px 8px;
+  background: var(--blue-500); color: white; border-radius: 99px; min-width: 20px; text-align: center;
+}}
+.group-count-badge.empty {{ background: var(--slate-200); color: var(--slate-500); }}
+.group-del-btn {{
+  background: transparent; border: none; color: var(--slate-300);
+  font-size: 1.1rem; cursor: pointer; padding: 0 4px; line-height: 1;
+  transition: color 0.2s;
+}}
+.group-del-btn:hover {{ color: #ef4444; }}
+.group-body {{ padding: 12px 12px 4px; }}
+.group-empty {{ color: var(--slate-400); font-size: 0.85rem; padding: 12px 8px; text-align: center; }}
+.done-accordion {{ opacity: 0.9; }}
+.done-summary {{ background: var(--slate-50); }}
+.done-summary .group-name-lbl {{ color: var(--slate-500); }}
+.done-summary .group-count-badge {{ background: var(--slate-300); }}
+
+/* Group add form */
+.group-add-form {{
+  display: flex; gap: 8px; margin-bottom: 16px; align-items: center;
+}}
+.group-add-form input {{
+  flex: 1; padding: 8px 12px; border: 1px solid var(--slate-200);
+  border-radius: var(--radius-md); font-size: 0.85rem; background: white;
+}}
+.btn-add-group {{
+  padding: 8px 14px; background: var(--slate-100); color: var(--slate-600);
+  border: 1px solid var(--slate-200); border-radius: var(--radius-md);
+  font-size: 0.85rem; font-weight: 600; cursor: pointer; white-space: nowrap;
+  transition: 0.2s;
+}}
+.btn-add-group:hover {{ background: var(--blue-500); color: white; border-color: var(--blue-500); }}
+
+/* Habits accordion (at bottom) */
+.habits-accordion {{
+  background: white; border: 1px solid var(--slate-200);
+  border-radius: var(--radius-lg); margin-top: 24px; overflow: hidden;
+}}
+.habits-accordion > .habits-header {{
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 20px; cursor: pointer; list-style: none;
+  background: var(--slate-50); user-select: none;
+}}
+.habits-accordion > .habits-header::-webkit-details-marker {{ display: none; }}
+.habits-accordion[open] > .habits-header {{ border-bottom: 1px solid var(--slate-100); }}
+.habits-accordion .habit-items {{ display: flex; flex-direction: column; gap: 8px; padding: 12px 20px; }}
 .habits-section.habits-empty {{
   display: flex; align-items: center; justify-content: space-between;
-  padding: 14px 20px;
+  padding: 14px 20px; background: white; border: 1px solid var(--slate-200);
+  border-radius: var(--radius-lg); margin-top: 24px;
 }}
-.habits-header {{
-  display: flex; align-items: center; justify-content: space-between;
-  margin-bottom: 12px;
-}}
-.habits-title {{ font-weight: 800; font-size: 1.1rem; color: var(--slate-900); }}
+.habits-title {{ font-weight: 800; font-size: 1rem; color: var(--slate-900); }}
 .habits-meta {{ font-size: 0.85rem; color: var(--slate-500); }}
-.habit-items {{ display: flex; flex-direction: column; gap: 8px; }}
 .habit-item {{
   display: flex; align-items: center; gap: 12px;
   background: var(--slate-50); padding: 12px 16px; border-radius: 12px;
@@ -354,7 +555,7 @@ def render(todos, habits, user, readonly=False):
 .hb-done {{ font-size: 0.78rem; color: #10b981; font-weight: 600; padding: 4px 6px; }}
 .hb-detail {{ background: var(--slate-50); color: var(--slate-600); font-size: 0.78rem; text-decoration: none; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--slate-200); transition: 0.2s; }}
 .hb-detail:hover {{ border-color: var(--blue-500); color: var(--blue-500); }}
-.habits-link {{ display: inline-block; margin-top: 12px; font-size: 0.82rem; color: var(--blue-500); text-decoration: none; font-weight: 500; }}
+.habits-link {{ display: inline-block; margin: 8px 20px 16px; font-size: 0.82rem; color: var(--blue-500); text-decoration: none; font-weight: 500; }}
 .habits-link:hover {{ text-decoration: underline; }}
 
 @media (max-width: 600px) {{
@@ -367,12 +568,9 @@ def render(todos, habits, user, readonly=False):
   .habit-item {{ flex-wrap: wrap; gap: 8px; padding: 10px 12px; }}
   .h-actions {{ width: 100%; justify-content: flex-end; margin-top: 4px; flex-wrap: wrap; gap: 6px; }}
   .hb-check, .hb-detail {{ min-height: 40px; padding: 8px 12px; font-size: 0.8rem; }}
-  .habits-section {{ padding: 14px 16px; }}
-  .habits-title {{ font-size: 1rem; }}
-  .h-name {{ font-size: 0.85rem; }}
-  .h-streak {{ font-size: 0.78rem; }}
   .add-form {{ flex-direction: column; gap: 8px; }}
-  .add-form input, .add-form button {{ width: 100%; min-height: 44px; font-size: 1rem; }}
+  .add-form input, .add-form select, .add-form button {{ width: 100%; min-height: 44px; font-size: 1rem; }}
+  .group-add-form {{ flex-direction: column; }}
 }}
 </style>
 </head><body>
@@ -381,15 +579,30 @@ def render(todos, habits, user, readonly=False):
   <span class="nav-user">👤 {user} &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
 </nav>
 <div class="container">
-  {habit_section}
   {add_form}
   <div class="stats">
     <span>Total {total}</span><span class="done-c">Done {done_count}</span><span>Remaining {total - done_count}</span>
   </div>
-  <div class="todo-list">{items}</div>
+  {todo_sections}
+  {habit_section}
 </div>
 {tabs_html}
 <script>
+function toggleNewGroup(sel) {{
+  var inp = document.getElementById('newGroupInput');
+  if (!inp) return;
+  if (sel.value === '__new__') {{
+    inp.style.display = 'block';
+    inp.required = true;
+    inp.focus();
+    sel.value = '';
+  }} else {{
+    inp.style.display = 'none';
+    inp.required = false;
+    inp.value = '';
+  }}
+}}
+
 document.addEventListener('keydown', function(e) {{
   if (e.key !== 'Enter' || e.target.tagName !== 'INPUT') return;
   var t = e.target.type;
@@ -403,13 +616,15 @@ document.addEventListener('keydown', function(e) {{
 }});
 
 (function() {{
-  var list = document.querySelector('.todo-list');
-  if (!list) return;
   var dragged = null;
   var clone = null;
   var offsetY = 0;
 
-  function saveOrder() {{
+  function getList(el) {{
+    return el.closest('.todo-list');
+  }}
+
+  function saveOrder(list) {{
     var ids = Array.from(list.querySelectorAll('.todo-item[draggable]')).map(function(el) {{ return el.dataset.id; }});
     if (ids.length > 0) {{
       fetch('/todo/reorder', {{
@@ -420,7 +635,7 @@ document.addEventListener('keydown', function(e) {{
     }}
   }}
 
-  function insertAt(clientY) {{
+  function insertAt(list, clientY) {{
     var items = Array.from(list.querySelectorAll('.todo-item[draggable]')).filter(function(el) {{ return el !== dragged; }});
     var after = null;
     for (var i = 0; i < items.length; i++) {{
@@ -430,27 +645,27 @@ document.addEventListener('keydown', function(e) {{
     list.insertBefore(dragged, after);
   }}
 
-  // ── Desktop drag ──────────────────────────────────────────
-  list.addEventListener('dragstart', function(e) {{
+  document.addEventListener('dragstart', function(e) {{
     dragged = e.target.closest('.todo-item[draggable]');
     if (!dragged) return;
     dragged.classList.add('dragging');
     e.dataTransfer.effectAllowed = 'move';
   }});
-  list.addEventListener('dragend', function() {{
+  document.addEventListener('dragend', function() {{
     if (!dragged) return;
     dragged.classList.remove('dragging');
-    saveOrder();
+    var list = getList(dragged);
+    if (list) saveOrder(list);
     dragged = null;
   }});
-  list.addEventListener('dragover', function(e) {{
+  document.addEventListener('dragover', function(e) {{
     e.preventDefault();
     if (!dragged) return;
-    insertAt(e.clientY);
+    var list = getList(e.target.closest('.todo-item') || e.target);
+    if (list) insertAt(list, e.clientY);
   }});
 
-  // ── Mobile touch ──────────────────────────────────────────
-  list.addEventListener('touchstart', function(e) {{
+  document.addEventListener('touchstart', function(e) {{
     var handle = e.target.closest('.drag-handle');
     if (!handle) return;
     dragged = handle.closest('.todo-item[draggable]');
@@ -472,7 +687,10 @@ document.addEventListener('keydown', function(e) {{
     clone.style.display = 'none';
     var under = document.elementFromPoint(touch.clientX, touch.clientY);
     clone.style.display = '';
-    if (under) insertAt(touch.clientY);
+    if (under) {{
+      var list = getList(under.closest('.todo-item') || under);
+      if (list) insertAt(list, touch.clientY);
+    }}
     e.preventDefault();
   }}, {{passive: false}});
 
@@ -480,7 +698,8 @@ document.addEventListener('keydown', function(e) {{
     if (!dragged) return;
     dragged.style.opacity = '';
     if (clone) {{ clone.remove(); clone = null; }}
-    saveOrder();
+    var list = getList(dragged);
+    if (list) saveOrder(list);
     dragged = null;
   }});
 }})();
