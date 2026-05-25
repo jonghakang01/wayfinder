@@ -1,0 +1,23 @@
+name: Deploy to Server
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            cd ~/webapp
+            git pull origin main
+            pkill -f "python3 /root/webapp/server.py" || true
+            sleep 1
+            nohup python3 /root/webapp/server.py > /tmp/webapp.log 2>&1 &
+            echo "Deployed at $(date)"
