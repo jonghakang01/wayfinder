@@ -4,10 +4,10 @@ from datetime import date, timedelta, datetime
 DATA_ROOT = os.path.expanduser("~/.appdata")
 
 META = {
-    "name": "대시보드",
+    "name": "Overview",
     "path": "/dashboard",
     "icon": "📊",
-    "description": "오늘의 현황 한눈에 보기",
+    "description": "Today at a glance",
 }
 
 
@@ -116,11 +116,11 @@ def render(user):
 
     # Render todo bar chart
     todo_bars = ""
-    day_labels = ["월", "화", "수", "목", "금", "토", "일"]
+    day_labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
     for i, (d, count) in enumerate(todo_weekly):
         height = int((count / max_todo_week) * 60) if count else 4
         is_today = d == today
-        label = "오늘" if is_today else day_labels[d.weekday()]
+        label = "Today" if is_today else day_labels[d.weekday()]
         bar_cls = "bar today" if is_today else "bar"
         todo_bars += f'''<div class="bar-col">
           <div class="bar-val">{count if count else ""}</div>
@@ -148,26 +148,29 @@ def render(user):
 
     week_label_html = "".join(
         f'<div class="wlabel {"today-lbl" if d == today else ""}">'
-        + ("오늘" if d == today else ["월","화","수","목","금","토","일"][d.weekday()])
+        + ("T" if d == today else ["M","Tu","W","Th","F","Sa","Su"][d.weekday()])
         + "</div>"
         for d in week_dates
     )
 
+    from server import app_tabs
+    tabs_html = app_tabs("/dashboard")
+
     now_hour = datetime.now().hour
     if now_hour < 6:
-        greeting = "늦은 밤"
+        greeting = "Good night"
     elif now_hour < 12:
-        greeting = "좋은 아침"
+        greeting = "Good morning"
     elif now_hour < 18:
-        greeting = "안녕하세요"
+        greeting = "Hello"
     else:
-        greeting = "좋은 저녁"
+        greeting = "Good evening"
 
     return f'''<!DOCTYPE html>
 <html lang="ko"><head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>대시보드 · Wayfinder</title>
+<title>📊 Overview · Wayfinder</title>
 <link rel="stylesheet" href="/static/style.css">
 <style>
 .db-hero{{background:var(--slate-900);background-image:radial-gradient(at 0% 0%,rgba(56,189,248,.18) 0,transparent 55%),radial-gradient(at 100% 100%,rgba(59,130,246,.18) 0,transparent 55%);border-radius:var(--radius-xl);padding:32px 36px;color:white;margin-bottom:28px;border:1px solid rgba(255,255,255,.05)}}
@@ -216,47 +219,43 @@ def render(user):
 </style>
 </head><body>
 <nav>
-  <a class="nav-back" href="/">← Wayfinder</a>
-  <span class="nav-user">👤 {user} &nbsp;·&nbsp; <a href="/logout">로그아웃</a></span>
+  <span class="nav-brand">📊 Overview</span>
+  <span class="nav-user">👤 {user} &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
 </nav>
 <div class="container">
   <div class="db-hero">
-    <h2>📊 {greeting}, {user}님</h2>
-    <p>{today.strftime("%Y년 %m월 %d일")} &nbsp;·&nbsp; 오늘의 현황</p>
+    <h2>{greeting}, {user}</h2>
+    <p>{today.strftime("%B %d, %Y")} &nbsp;·&nbsp; Today at a glance</p>
   </div>
 
   <div class="db-grid">
     <div class="db-card">
-      <h3>오늘 할 일</h3>
+      <h3>Tasks Today</h3>
       <div class="big-num">{done_today}<span>/ {done_today + total_active}</span></div>
       <div class="rate-bar"><div class="rate-fill" style="width:{todo_rate}%"></div></div>
-      <div class="rate-label">완료율 {todo_rate}% &nbsp;·&nbsp; 남은 항목 {total_active}개</div>
+      <div class="rate-label">{todo_rate}% complete &nbsp;·&nbsp; {total_active} remaining</div>
     </div>
     <div class="db-card">
-      <h3>오늘 습관</h3>
+      <h3>Habits Today</h3>
       <div class="big-num">{done_habits_today}<span>/ {total_habits}</span></div>
       <div class="rate-bar"><div class="rate-fill" style="width:{habit_rate}%"></div></div>
-      <div class="rate-label">달성률 {habit_rate}% &nbsp;·&nbsp; 총 {total_habits}개</div>
+      <div class="rate-label">{habit_rate}% done &nbsp;·&nbsp; {total_habits} total</div>
     </div>
   </div>
 
   <div class="db-card" style="margin-bottom:20px">
-    <h3>이번 주 할 일 완료</h3>
+    <h3>Tasks This Week</h3>
     <div style="margin-top:12px">
       <div class="bar-chart">{todo_bars}</div>
     </div>
   </div>
 
   <div class="habit-grid-card">
-    <h3>습관 주간 현황</h3>
+    <h3>Habits This Week</h3>
     <div class="week-labels"><div style="flex:1"></div>{week_label_html}</div>
     {habit_grid_html}
   </div>
 
-  <div class="quick-links">
-    <a class="quick-btn" href="/todo">📋 할 일 관리</a>
-    <a class="quick-btn" href="/habit">🏃 습관 트래커</a>
-    <a class="quick-btn" href="/">🧭 홈으로</a>
-  </div>
 </div>
+{tabs_html}
 </body></html>'''

@@ -4,10 +4,10 @@ from datetime import datetime, date, timedelta
 DATA_ROOT = os.path.expanduser("~/.appdata")
 
 META = {
-    "name": "Todo List",
+    "name": "Tasks",
     "path": "/todo",
-    "icon": "📋",
-    "description": "할 일 관리",
+    "icon": "✅",
+    "description": "Task management",
 }
 
 
@@ -255,10 +255,12 @@ def render(todos, habits, user, readonly=False):
         '</form>'
     )
 
+    from server import app_tabs
+    tabs_html = app_tabs("/todo")
     return f'''<!DOCTYPE html>
 <html lang="ko"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>📋 Todo List</title>
+<title>✅ Tasks</title>
 <link rel="stylesheet" href="/static/style.css">
 <style>
 .badge {{ font-size: 0.75rem; padding: 4px 8px; border-radius: 6px; font-weight: 600; letter-spacing: -0.02em; }}
@@ -349,16 +351,16 @@ def render(todos, habits, user, readonly=False):
 </style>
 </head><body>
 <nav>
-  <a href="/">← Wayfinder</a>
-  <span class="nav-user">👤 {user} &nbsp;·&nbsp; <a href="/logout">로그아웃</a></span>
+  <span class="nav-brand">✅ Tasks</span>
+  <span class="nav-user">👤 {user} &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
 </nav>
 <div class="container">
-  <h1>📋 Todo List{" — " + user if readonly else ""}</h1>
   {habit_section}
   {add_form}
   <div class="stats">
-    <span>전체 {total}개</span><span class="done-c">완료 {done_count}개</span><span>미완료 {total - done_count}개</span>
+    <span>Total {total}</span><span class="done-c">Done {done_count}</span><span>Remaining {total - done_count}</span>
   </div>
   <div class="todo-list">{items}</div>
 </div>
+{tabs_html}
 </body></html>'''

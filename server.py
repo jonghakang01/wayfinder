@@ -198,6 +198,32 @@ self.addEventListener('fetch', e => {
 });
 """
 
+APP_TAB_CSS = """
+<style>
+.app-tabs{position:fixed;bottom:0;left:0;right:0;background:rgba(15,23,42,0.96);backdrop-filter:blur(16px);border-top:1px solid rgba(255,255,255,0.08);display:flex;z-index:200;padding-bottom:env(safe-area-inset-bottom,0)}
+.app-tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:10px 4px 8px;color:rgba(148,163,184,0.7);text-decoration:none;font-size:0.65rem;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;transition:.15s;cursor:pointer}
+.app-tab:hover{color:rgba(255,255,255,0.8)}
+.app-tab.active{color:#38bdf8}
+.app-tab-icon{font-size:1.3rem;line-height:1}
+.app-tab.active .app-tab-icon{filter:drop-shadow(0 0 6px rgba(56,189,248,0.6))}
+body{padding-bottom:calc(64px + env(safe-area-inset-bottom,0px))!important}
+</style>
+"""
+
+def app_tabs(active):
+    tabs = [
+        ("/todo",      "✅", "Tasks"),
+        ("/habit",     "🏃", "Habits"),
+        ("/dashboard", "📊", "Overview"),
+    ]
+    html = APP_TAB_CSS + '<nav class="app-tabs">'
+    for path, icon, label in tabs:
+        cls = "app-tab active" if active == path else "app-tab"
+        html += f'<a href="{path}" class="{cls}"><span class="app-tab-icon">{icon}</span>{label}</a>'
+    html += "</nav>"
+    return html
+
+
 PWA_INJECT = (
     '<link rel="manifest" href="/manifest.json">'
     '<meta name="theme-color" content="#0f172a">'
@@ -441,7 +467,7 @@ class Handler(BaseHTTPRequestHandler):
         if not ctx["user"]:
             return self.redirect("/login")
         if path == "/":
-            return self.send_html(wayfinder(ctx["user"]))
+            return self.redirect("/todo")
         for svc_path, svc in SERVICES.items():
             if path == svc_path or path.startswith(svc_path + "/"):
                 if not auth.has_service_access(ctx["user"], svc_path):

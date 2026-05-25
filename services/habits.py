@@ -4,10 +4,10 @@ from datetime import date, timedelta
 DATA_ROOT = os.path.expanduser("~/.appdata")
 
 META = {
-    "name": "Habit Tracker",
+    "name": "Habits",
     "path": "/habit",
     "icon": "🏃",
-    "description": "습관 추적기",
+    "description": "Build lasting habits",
 }
 
 FREQ_LABEL = {"daily": "매일", "weekly": "주간"}
@@ -568,30 +568,33 @@ def render_list(habits, user, readonly=False):
         '</form></div>'
     )
 
+    from server import app_tabs
+    tabs_html = app_tabs("/habit")
     return f'''<!DOCTYPE html>
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>🏃 Habit Tracker</title>
+<title>🏃 Habits</title>
 <link rel="stylesheet" href="/static/style.css">
 <style>{_CSS}</style>
 </head>
 <body>
 <nav>
-  <a href="/">← Wayfinder</a>
-  <span class="nav-user">👤 {user} &nbsp;·&nbsp; <a href="/logout">로그아웃</a></span>
+  <span class="nav-brand">🏃 Habits</span>
+  <span class="nav-user">👤 {user} &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
 </nav>
 <div class="container">
 
   {add_card}
 
   <div class="card">
-    <h2>{"🏃 " + user + "님의 " if readonly else ""}습관 목록</h2>
+    <h2>{"🏃 " + user + "'s " if readonly else ""}Habits</h2>
     {rows}
   </div>
 
 </div>
+{tabs_html}
 </body>
 </html>'''
 
