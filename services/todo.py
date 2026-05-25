@@ -403,13 +403,6 @@ def render(todos, habits, user, readonly=False):
             f'<option value="{g}">{g}</option>' for g in all_groups
         ) + '<option value="__new__">+ New group...</option>'
         add_form = f'''
-        <div class="add-task-bar">
-          <button type="button" class="btn-add-task" onclick="toggleAddTask()">＋ Task</button>
-          <form class="group-add-form" method="POST" action="/todo/group/add">
-            <input type="text" name="name" placeholder="New group..." required>
-            <button type="submit" class="btn-add-group">+ Group</button>
-          </form>
-        </div>
         <div id="addTaskCard" style="display:none">
           <form class="add-form" method="POST" action="/todo/add" id="addTaskForm">
             <input type="text" name="title" placeholder="Task name..." id="taskTitleInput" required>
@@ -511,43 +504,26 @@ def render(todos, habits, user, readonly=False):
 .done-summary .group-name-lbl {{ color: var(--slate-500); }}
 .done-summary .group-count-badge {{ background: var(--slate-300); }}
 
-/* Add task bar */
-.add-task-bar {{
-  display: flex; gap: 10px; align-items: center; margin-bottom: 16px;
+.btn-add-new {{
+  padding: 6px 16px; background: var(--slate-900); color: white;
+  border: none; border-radius: 8px; font-size: 13px; font-weight: 700;
+  cursor: pointer; transition: opacity .15s; white-space: nowrap;
 }}
-.btn-add-task {{
-  padding: 10px 20px; background: var(--blue-500); color: white;
-  border: none; border-radius: var(--radius-md); font-size: 0.95rem;
-  font-weight: 700; cursor: pointer; transition: 0.2s; white-space: nowrap;
-  letter-spacing: -0.01em;
-}}
-.btn-add-task:hover {{ background: #2563eb; transform: translateY(-1px); }}
+.btn-add-new:hover {{ opacity: .8; }}
 .btn-cancel-task {{
   padding: 6px 12px; background: transparent; color: var(--slate-400);
   border: 1px solid var(--slate-200); border-radius: 8px; font-size: 0.85rem;
   cursor: pointer; transition: 0.2s;
 }}
 .btn-cancel-task:hover {{ color: #ef4444; border-color: #ef4444; }}
+.task-list-header {{
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 16px;
+}}
 #addTaskCard {{
   background: white; border: 1px solid var(--slate-200); border-radius: var(--radius-lg);
   padding: 20px; margin-bottom: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.06);
 }}
-
-/* Group add form */
-.group-add-form {{
-  display: flex; gap: 8px; flex: 1; align-items: center;
-}}
-.group-add-form input {{
-  flex: 1; padding: 8px 12px; border: 1px solid var(--slate-200);
-  border-radius: var(--radius-md); font-size: 0.85rem; background: white;
-}}
-.btn-add-group {{
-  padding: 8px 14px; background: var(--slate-100); color: var(--slate-600);
-  border: 1px solid var(--slate-200); border-radius: var(--radius-md);
-  font-size: 0.85rem; font-weight: 600; cursor: pointer; white-space: nowrap;
-  transition: 0.2s;
-}}
-.btn-add-group:hover {{ background: var(--blue-500); color: white; border-color: var(--blue-500); }}
 
 /* Habits accordion (at bottom) */
 .habits-accordion {{
@@ -606,10 +582,7 @@ def render(todos, habits, user, readonly=False):
   .add-form {{ flex-direction: column; gap: 8px; }}
   .add-form input, .add-form select {{ width: 100%; min-height: 44px; font-size: 1rem; }}
   .add-form button {{ min-height: 44px; font-size: 1rem; }}
-  .btn-add-task {{ min-height: 48px; flex: 1; font-size: 1rem; }}
-  .group-add-form {{ flex: 1; }}
-  .group-add-form input {{ min-height: 44px; font-size: 1rem; }}
-  .btn-add-group {{ min-height: 44px; }}
+  .btn-add-new {{ min-height: 40px; padding: 8px 16px; }}
   .group-summary {{ padding: 12px 14px; }}
   .group-body {{ padding: 8px 8px 4px; }}
 }}
@@ -621,8 +594,11 @@ def render(todos, habits, user, readonly=False):
 </nav>
 <div class="container">
   {add_form}
-  <div class="stats">
-    <span>Total {total}</span><span class="done-c">Done {done_count}</span><span>Remaining {total - done_count}</span>
+  <div class="task-list-header">
+    <div class="stats">
+      <span>Total {total}</span><span class="done-c">Done {done_count}</span><span>Remaining {total - done_count}</span>
+    </div>
+    {"" if readonly else '<button type="button" onclick="toggleAddTask()" class="btn-add-new">＋ New Task</button>'}
   </div>
   {todo_sections}
   {habit_section}
