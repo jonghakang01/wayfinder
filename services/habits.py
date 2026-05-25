@@ -282,7 +282,7 @@ nav a:hover{color:white}
 .nav-user a{color:#94a3b8;padding:5px 11px;border-radius:8px;background:rgba(255,255,255,0.05);transition:0.2s}
 .nav-user a:hover{color:white;background:rgba(255,255,255,0.1)}
 h2{font-size:18px;font-weight:700;margin-bottom:16px;color:var(--text)}
-.add-form{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
+.add-form{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-start}
 .add-form label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--text-muted);font-weight:600}
 .add-form input[type=text],.add-form input[type=number]{padding:9px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:14px;transition:border-color 0.2s}
 .add-form input[type=text]{flex:1;min-width:140px}
