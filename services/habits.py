@@ -656,15 +656,17 @@ def render_list(habits, user, readonly=False):
             f'<button class="btn-sm btn-del-sm" type="submit">Delete</button></form>'
         )
 
+        hid = h["id"]
         inline_log_html = ""
         if readonly:
             checkin_btn = f'<span class="btn-sm btn-checkin-sm {"checked" if checked else ""}">{"✓ Done" if checked else "Not done"}</span>'
         elif h.get("track") == "detail":
             count_label = f'<span class="today-count {"done" if checked else ""}">{today_count}/{target}{unit}</span>'
+            log_label = "✓ Logged" if checked else "+ Log"
             checkin_btn = (
                 f'{count_label}'
-                f'<button type="button" class="btn-sm btn-checkin-sm" onclick="toggleLog({h[\'id\']})">'
-                f'{"✓ Logged" if checked else "+ Log"}'
+                f'<button type="button" class="btn-sm btn-checkin-sm" onclick="toggleLog({hid})">'
+                f'{log_label}'
                 f'</button>'
             )
             cats = h.get("categories", [])
@@ -677,22 +679,23 @@ def render_list(habits, user, readonly=False):
             else:
                 label_inp = f'<input type="text" name="label[]" placeholder="Activity" class="log-label-inp">'
             clear_btn = (
-                f'<form method="POST" action="/habit/{h["id"]}/checkin" class="log-clear-form">'
+                f'<form method="POST" action="/habit/{hid}/checkin" class="log-clear-form">'
                 f'<input type="hidden" name="clear" value="1">'
                 f'<input type="hidden" name="next" value="/habit">'
                 f'<button type="submit" class="btn-sm btn-log-clear">Clear today</button></form>'
             ) if today_count > 0 else ""
-            inline_log_html = f'''<div class="inline-log-panel" id="log-{h["id"]}" style="display:none">
-          <form method="POST" action="/habit/{h["id"]}/checkin" class="inline-log-form">
-            <input type="hidden" name="next" value="/habit">
-            <div class="inline-log-row">
-              {label_inp}
-              <input type="number" name="value[]" placeholder="{unit}" class="log-val-inp" min="0" step="0.1" required>
-              <button type="submit" class="btn-sm btn-log-ok">+ Add</button>
-            </div>
-          </form>
-          {clear_btn}
-        </div>'''
+            inline_log_html = (
+                f'<div class="inline-log-panel" id="log-{hid}" style="display:none">'
+                f'<form method="POST" action="/habit/{hid}/checkin" class="inline-log-form">'
+                f'<input type="hidden" name="next" value="/habit">'
+                f'<div class="inline-log-row">'
+                f'{label_inp}'
+                f'<input type="number" name="value[]" placeholder="{unit}" class="log-val-inp" min="0" step="0.1" required>'
+                f'<button type="submit" class="btn-sm btn-log-ok">+ Add</button>'
+                f'</div></form>'
+                f'{clear_btn}'
+                f'</div>'
+            )
         elif target > 1:
             count_label = f'<span class="today-count {"done" if checked else ""}">{today_count}/{target}{unit}</span>'
             checkin_btn = (
