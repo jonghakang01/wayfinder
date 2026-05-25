@@ -328,6 +328,24 @@ def render(todos, habits, user, readonly=False):
 .hb-detail:hover {{ border-color: var(--blue-500); color: var(--blue-500); }}
 .habits-link {{ display: inline-block; margin-top: 12px; font-size: 0.82rem; color: var(--blue-500); text-decoration: none; font-weight: 500; }}
 .habits-link:hover {{ text-decoration: underline; }}
+
+@media (max-width: 600px) {{
+  .todo-item {{ flex-wrap: wrap; padding: 10px 12px; gap: 10px; }}
+  .actions {{ width: 100%; justify-content: flex-end; margin-top: 6px; flex-wrap: wrap; gap: 6px; }}
+  .title {{ font-size: 0.9rem; }}
+  .date, .due-date {{ font-size: 0.72rem; }}
+  .tid {{ display: none; }}
+  .btn {{ min-height: 44px; padding: 8px 12px; display: inline-flex; align-items: center; justify-content: center; }}
+  .habit-item {{ flex-wrap: wrap; gap: 8px; padding: 10px 12px; }}
+  .h-actions {{ width: 100%; justify-content: flex-end; margin-top: 4px; flex-wrap: wrap; gap: 6px; }}
+  .hb-check, .hb-detail {{ min-height: 40px; padding: 8px 12px; font-size: 0.8rem; }}
+  .habits-section {{ padding: 14px 16px; }}
+  .habits-title {{ font-size: 1rem; }}
+  .h-name {{ font-size: 0.85rem; }}
+  .h-streak {{ font-size: 0.78rem; }}
+  .add-form {{ flex-direction: column; gap: 8px; }}
+  .add-form input, .add-form button {{ width: 100%; min-height: 44px; font-size: 1rem; }}
+}}
 </style>
 </head><body>
 <nav>

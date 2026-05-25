@@ -306,6 +306,39 @@ h1{font-size:20px;font-weight:700;color:var(--text)}
 .tab-row{display:flex;gap:4px;margin-bottom:20px}
 .tab-btn{padding:6px 14px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text-muted);font-size:13px;font-weight:600;cursor:pointer;transition:0.15s}
 .tab-btn.active{background:var(--text);color:white;border-color:var(--text)}
+.btn-cal-nav{background:none;border:1px solid var(--border);border-radius:8px;cursor:pointer;font-size:18px;color:var(--text-muted);width:44px;height:44px;display:inline-flex;align-items:center;justify-content:center;transition:0.15s}
+.btn-cal-nav:hover{border-color:var(--accent);color:var(--accent)}
+@media (max-width:600px){
+  body{padding:64px 12px calc(32px + env(safe-area-inset-bottom,0px))}
+  nav{padding:8px 14px}
+  .nav-user{font-size:11px}
+  .nav-user a{min-height:44px;display:inline-flex;align-items:center;padding:8px 10px}
+  .card{padding:16px}
+  .header{flex-direction:column;align-items:flex-start;gap:12px}
+  h1{font-size:17px}
+  h2{font-size:16px}
+  .habit-row{flex-wrap:wrap;gap:8px;padding:12px 0}
+  .habit-actions{width:100%;justify-content:flex-end;margin-top:4px}
+  .btn-sm,.btn-checkin-sm,.btn-del-sm{min-height:40px;padding:8px 14px;font-size:13px}
+  .btn-detail{min-height:40px;padding:8px 14px;font-size:13px}
+  .add-form{flex-direction:column}
+  .add-form label{width:100%}
+  .add-form input[type=text]{width:100%;min-height:44px}
+  .add-form input[type=number]{width:80px;min-height:44px}
+  .add-form select{min-height:44px}
+  .add-form button{min-height:44px;font-size:15px}
+  .counter-num{font-size:2.2rem}
+  .counter-progress{width:100%}
+  .counter-wrap{gap:14px}
+  .stats{gap:8px;flex-wrap:wrap}
+  .stat-divider{display:none}
+  .stat-value{font-size:22px}
+  .tab-row{gap:6px}
+  .tab-btn{flex:1;text-align:center;padding:10px 4px;min-height:44px;font-size:13px}
+  .heatmap-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .streak-badge{font-size:12px;padding:5px 10px}
+  #editToggle{min-height:40px;padding:8px 12px}
+}
 """
 
 _HEATMAP_JS = """
@@ -680,7 +713,7 @@ def render_detail(habit, user):
       </div>
       <div style="display:flex;gap:8px;align-items:center">
         <div class="streak-badge">🔥 {streak}일 연속</div>
-        <button id="editToggle" onclick="var f=document.getElementById('editForm');f.style.display=f.style.display==='none'?'block':'none';this.textContent=f.style.display==='none'?'편집':'취소'" style="background:none;border:1px solid var(--border);border-radius:8px;padding:6px 12px;font-size:13px;color:var(--text-muted);cursor:pointer">편집</button>
+        <button id="editToggle" onclick="var f=document.getElementById('editForm');f.style.display=f.style.display==='none'?'block':'none';this.textContent=f.style.display==='none'?'편집':'취소'" class="btn-cal-nav" style="font-size:13px;width:auto;padding:0 14px">편집</button>
       </div>
     </div>
     <form id="editForm" method="POST" action="/habit/{hid}/edit" style="display:none;margin-top:20px;padding-top:20px;border-top:1px solid var(--border)">
@@ -756,9 +789,9 @@ def render_detail(habit, user):
 
     <div id="tabCalendar" class="tab-panel">
       <div class="cal-header">
-        <button id="calPrev" style="background:none;border:none;cursor:pointer;font-size:16px;color:var(--text-muted)">‹</button>
+        <button id="calPrev" class="btn-cal-nav">‹</button>
         <span class="cal-title" id="calTitle"></span>
-        <button id="calNext" style="background:none;border:none;cursor:pointer;font-size:16px;color:var(--text-muted)">›</button>
+        <button id="calNext" class="btn-cal-nav">›</button>
       </div>
       <div id="monthCalendar"></div>
     </div>

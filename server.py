@@ -105,8 +105,10 @@ h1 { font-size: 1.75rem; color: var(--slate-900); margin-bottom: 6px; font-weigh
 
 /* Mobile responsive */
 @media (max-width: 600px) {
-  .container { padding: 24px 16px 60px; }
+  .container { padding: 24px 16px calc(60px + env(safe-area-inset-bottom, 0px)); }
   nav { padding: 10px 16px; }
+  .nav-user { gap: 6px; }
+  .nav-user a { padding: 8px 12px; min-height: 44px; display: inline-flex; align-items: center; }
   .dashboard { padding: 24px 20px; flex-direction: column; gap: 16px; }
   .dashboard-greeting h2 { font-size: 1.25rem; }
   .service-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
@@ -116,11 +118,14 @@ h1 { font-size: 1.75rem; color: var(--slate-900); margin-bottom: 6px; font-weigh
   .service-desc { display: none; }
   .add-form { flex-direction: column; }
   .add-form input, .add-form button { width: 100%; }
+  .add-form input { font-size: 1rem; min-height: 44px; }
+  .add-form button { min-height: 44px; font-size: 1rem; }
   .todo-item { flex-wrap: wrap; padding: 12px 14px; }
-  .actions { width: 100%; justify-content: flex-end; margin-top: 4px; }
-  .btn { padding: 8px 12px; font-size: 0.85rem; min-height: 36px; }
+  .actions { width: 100%; justify-content: flex-end; margin-top: 8px; flex-wrap: wrap; gap: 6px; }
+  .btn { padding: 10px 14px; font-size: 0.85rem; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
   .stat-card { padding: 12px 16px; min-width: 80px; }
   .stat-card .stat-num { font-size: 1.6rem; }
+  h1 { font-size: 1.4rem; }
 }
 @media (max-width: 400px) {
   .service-grid { grid-template-columns: 1fr 1fr; }
