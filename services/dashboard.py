@@ -45,11 +45,18 @@ def _load_habits(user):
         return []
 
 
+def _day_total(checkins, ds):
+    v = checkins.get(ds, 0)
+    if isinstance(v, dict):
+        return v.get("total", 0)
+    return v if isinstance(v, (int, float)) else 0
+
+
 def _streak(checkins, target=1):
     today = date.today()
     streak, d = 0, today
     t = max(1, target)
-    while checkins.get(d.isoformat(), 0) >= t:
+    while _day_total(checkins, d.isoformat()) >= t:
         streak += 1
         d -= timedelta(days=1)
     return streak
@@ -88,7 +95,7 @@ def render(user):
     total_habits = len(habits)
     done_habits_today = sum(
         1 for h in habits
-        if h.get("checkins", {}).get(today_str, 0) >= max(1, h.get("target", 1))
+        if _day_total(h.get("checkins", {}), today_str) >= max(1, h.get("target", 1))
     )
 
     # Habit weekly grid
@@ -100,7 +107,7 @@ def render(user):
         week_status = []
         for d in week_dates:
             ds = d.isoformat()
-            val = checkins.get(ds, 0)
+            val = _day_total(checkins, ds)
             if val >= target:
                 week_status.append("done")
             elif val > 0:
