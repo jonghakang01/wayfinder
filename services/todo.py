@@ -70,7 +70,7 @@ def due_badge(due_date_str, done):
         return ""
     n = days_left(due_date_str)
     if n < 0:
-        return f'<span class="badge overdue">D+{abs(n)}일 초과</span>'
+        return f'<span class="badge overdue">D+{abs(n)} overdue</span>'
     if n == 0:
         return '<span class="badge dday">D-Day</span>'
     return f'<span class="badge due">D-{n}</span>'
@@ -81,7 +81,7 @@ def early_badge(due_date_str, done_at_str):
         return ""
     days_early = (date.fromisoformat(due_date_str) - date.fromisoformat(done_at_str[:10])).days
     if days_early > 0:
-        return f'<span class="badge early">🎉 {days_early}일 앞당김!</span>'
+        return f'<span class="badge early">🎉 {days_early}d ahead!</span>'
     return ""
 
 
@@ -123,19 +123,21 @@ def handle(method, path, body, ctx=None):
         elif path == "/todo/to_habit":
             tid = int(body.get("id", [0])[0])
             for t in todos:
-                if t["id"] == tid and not t.get("habit_id"):
+                if t["id"] == tid:
                     habits = load_habits(user)
-                    hid = next_id(habits)
-                    habits.append({
-                        "id": hid,
-                        "name": t["title"],
-                        "icon": "✅",
-                        "freq": "daily",
-                        "started": date.today().isoformat(),
-                        "checkins": [],
-                    })
-                    save_habits(habits, user)
-                    t["habit_id"] = hid
+                    existing_hid = t.get("habit_id")
+                    if not existing_hid or not any(h["id"] == existing_hid for h in habits):
+                        hid = next_id(habits)
+                        habits.append({
+                            "id": hid,
+                            "name": t["title"],
+                            "icon": "✅",
+                            "freq": "daily",
+                            "started": date.today().isoformat(),
+                            "checkins": [],
+                        })
+                        save_habits(habits, user)
+                        t["habit_id"] = hid
             save(todos, user)
         return ("redirect", "/todo")
 
@@ -147,7 +149,8 @@ def render(todos, habits, user, readonly=False):
     total = len(todos)
     done_count = sum(1 for t in todos if t["done"])
 
-    # ── 습관 섹션 ────────────────────────────────────────────
+    # ── Habit section ────────────────────────────────────────
+    habit_index = {h["id"]: h for h in habits}
     if habits:
         habit_rows = ""
         checked_count = sum(1 for h in habits if today_str in h.get("checkins", []))
@@ -161,44 +164,44 @@ def render(todos, habits, user, readonly=False):
                 d -= timedelta(days=1)
 
             if checked:
-                checkin_html = '<span class="hb-done">✓ 완료</span>'
+                checkin_html = '<span class="hb-done">✓ Done</span>'
             elif readonly:
-                checkin_html = '<span class="hb-done" style="color:#94a3b8">미완료</span>'
+                checkin_html = '<span class="hb-done" style="color:#94a3b8">Not done</span>'
             else:
                 checkin_html = (
                     f'<form method="POST" action="/habit/{h["id"]}/checkin" style="display:inline">'
                     f'<input type="hidden" name="next" value="/todo">'
-                    f'<button class="btn hb-check">체크인</button></form>'
+                    f'<button class="btn hb-check">Check in</button></form>'
                 )
 
             habit_rows += f'''
             <div class="habit-item {"habit-checked" if checked else ""}">
               <span class="h-icon">{h.get("icon","✅")}</span>
               <span class="h-name">{h["name"]}</span>
-              <span class="h-streak">🔥 {streak}일</span>
+              <span class="h-streak">🔥 {streak}d</span>
               <div class="h-actions">
                 {checkin_html}
-                <a href="/habit/{h["id"]}" class="btn hb-detail">상세</a>
+                <a href="/habit/{h["id"]}" class="btn hb-detail">Detail</a>
               </div>
             </div>'''
 
         habit_section = f'''
         <div class="habits-section">
           <div class="habits-header">
-            <span class="habits-title">🔄 오늘의 습관</span>
-            <span class="habits-meta">{today_str} &nbsp; {checked_count}/{len(habits)} 완료</span>
+            <span class="habits-title">🔄 Today's Habits</span>
+            <span class="habits-meta">{today_str} &nbsp; {checked_count}/{len(habits)} done</span>
           </div>
           <div class="habit-items">{habit_rows}</div>
-          <a href="/habit" class="habits-link">+ 습관 관리 →</a>
+          <a href="/habit" class="habits-link">+ Manage Habits →</a>
         </div>'''
     else:
         habit_section = f'''
         <div class="habits-section habits-empty">
-          <span>🔄 오늘의 습관</span>
-          <a href="/habit" class="habits-link">습관 추가하기 →</a>
+          <span>🔄 Today's Habits</span>
+          <a href="/habit" class="habits-link">Add Habit →</a>
         </div>'''
 
-    # ── Todo 아이템 ──────────────────────────────────────────
+    # ── Todo items ───────────────────────────────────────────
     items = ""
     for t in todos:
         created = t.get("created_at", "")[:10]
@@ -212,26 +215,27 @@ def render(todos, habits, user, readonly=False):
             actions_html = ""
         elif t["done"]:
             badge = early_badge(due_date, done_at)
-            action_btn = f'<form method="POST" action="/todo/undone" style="display:inline"><input type="hidden" name="id" value="{t["id"]}"><button class="btn btn-undo">되살리기</button></form>'
+            action_btn = f'<form method="POST" action="/todo/undone" style="display:inline"><input type="hidden" name="id" value="{t["id"]}"><button class="btn btn-undo">Restore</button></form>'
             actions_html = f'''
               {action_btn}
               <form method="POST" action="/todo/delete" style="display:inline">
                 <input type="hidden" name="id" value="{t["id"]}">
-                <button class="btn btn-del">삭제</button>
+                <button class="btn btn-del">Delete</button>
               </form>'''
         else:
             badge = due_badge(due_date, t["done"])
-            done_btn = f'<form method="POST" action="/todo/done" style="display:inline"><input type="hidden" name="id" value="{t["id"]}"><button class="btn btn-done">완료</button></form>'
-            if habit_id:
-                habit_btn = f'<a href="/habit/{habit_id}" class="btn btn-habit linked">🏃 습관 보기</a>'
+            done_btn = f'<form method="POST" action="/todo/done" style="display:inline"><input type="hidden" name="id" value="{t["id"]}"><button class="btn btn-done">Done</button></form>'
+            habit_exists = habit_id and habit_id in habit_index
+            if habit_exists:
+                habit_btn = f'<a href="/habit/{habit_id}" class="btn btn-habit linked">🏃 View Habit</a>'
             else:
-                habit_btn = f'<form method="POST" action="/todo/to_habit" style="display:inline"><input type="hidden" name="id" value="{t["id"]}"><button class="btn btn-habit">🏃 습관화</button></form>'
+                habit_btn = f'<form method="POST" action="/todo/to_habit" style="display:inline"><input type="hidden" name="id" value="{t["id"]}"><button class="btn btn-habit">🏃 Make Habit</button></form>'
             actions_html = f'''
               {done_btn}
               {habit_btn}
               <form method="POST" action="/todo/delete" style="display:inline">
                 <input type="hidden" name="id" value="{t["id"]}">
-                <button class="btn btn-del">삭제</button>
+                <button class="btn btn-del">Delete</button>
               </form>'''
 
         items += f'''
@@ -245,13 +249,13 @@ def render(todos, habits, user, readonly=False):
         </div>'''
 
     if not todos:
-        items = '<div class="empty">할 일이 없습니다 🎉</div>'
+        items = '<div class="empty">No tasks yet 🎉</div>'
 
     add_form = "" if readonly else (
         '<form class="add-form" method="POST" action="/todo/add">'
-        '<input type="text" name="title" placeholder="새 할 일..." autofocus required>'
+        '<input type="text" name="title" placeholder="New task..." autofocus required>'
         '<input type="date" name="due_date">'
-        '<button type="submit">추가</button>'
+        '<button type="submit">Add</button>'
         '</form>'
     )
 
@@ -363,4 +367,17 @@ def render(todos, habits, user, readonly=False):
   <div class="todo-list">{items}</div>
 </div>
 {tabs_html}
+<script>
+document.addEventListener('keydown', function(e) {{
+  if (e.key !== 'Enter' || e.target.tagName !== 'INPUT') return;
+  var t = e.target.type;
+  if (t === 'submit' || t === 'button' || t === 'checkbox' || t === 'radio') return;
+  e.preventDefault();
+  var form = e.target.closest('form');
+  if (!form) return;
+  var inputs = Array.from(form.querySelectorAll('input:not([type=hidden]):not([type=submit]):not([type=button]), select, textarea'));
+  var idx = inputs.indexOf(e.target);
+  if (idx < inputs.length - 1) inputs[idx + 1].focus();
+}});
+</script>
 </body></html>'''

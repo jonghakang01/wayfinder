@@ -10,7 +10,7 @@ META = {
     "description": "Build lasting habits",
 }
 
-FREQ_LABEL = {"daily": "매일", "weekly": "주간"}
+FREQ_LABEL = {"daily": "Daily", "weekly": "Weekly"}
 
 
 def _habits_file(user):
@@ -38,7 +38,7 @@ def load(user):
                 elif not isinstance(h.get("checkins"), dict):
                     h["checkins"] = {}
                 h.setdefault("target", 1)
-                h.setdefault("unit", "회")
+                h.setdefault("unit", "times")
             return data
     except Exception:
         return []
@@ -102,7 +102,7 @@ def handle(method, path, body, ctx=None):
                 target = max(1, int(body.get("target", ["1"])[0]))
             except ValueError:
                 target = 1
-            unit = body.get("unit", ["회"])[0].strip() or "회"
+            unit = body.get("unit", ["times"])[0].strip() or "times"
             if name:
                 habits.append({
                     "id": next_id(habits),
@@ -157,7 +157,7 @@ def handle(method, path, body, ctx=None):
                         target = max(1, int(body.get("target", ["1"])[0]))
                     except ValueError:
                         target = habit.get("target", 1)
-                    unit = body.get("unit", ["회"])[0].strip() or "회"
+                    unit = body.get("unit", ["times"])[0].strip() or "times"
                     if name:
                         habit["name"] = name
                         habit["freq"] = freq
@@ -185,13 +185,16 @@ _CSS = """
   --radius:16px; --gap:4px; --cell:16px;
 }
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-body{background:var(--bg);color:var(--text);font-family:'Pretendard Variable',Pretendard,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;display:flex;justify-content:center;padding:80px 24px 60px;min-height:100vh}
+body{background:var(--bg);color:var(--text);font-family:'Pretendard Variable',Pretendard,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;display:flex;justify-content:center;padding:44px 24px 80px;min-height:100vh}
 .container{width:100%;max-width:720px;display:flex;flex-direction:column;gap:24px}
 .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:24px;box-shadow:0 4px 20px rgba(0,0,0,0.03)}
-nav{position:fixed;top:0;left:0;right:0;padding:10px 20px;font-size:13px;background:rgba(255,255,255,0.85);backdrop-filter:blur(12px);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;z-index:10}
-nav a{color:var(--text-muted);text-decoration:none;font-weight:500}
-nav a:hover{color:var(--accent)}
-.nav-user{color:var(--text-muted);font-size:12px}
+nav{position:sticky;top:0;left:0;right:0;padding:13px 32px;background:rgba(15,23,42,0.92);backdrop-filter:blur(12px);border-bottom:1px solid rgba(255,255,255,0.07);display:flex;align-items:center;justify-content:space-between;z-index:100}
+nav a{color:#94a3b8;text-decoration:none;font-weight:500;font-size:0.875rem;transition:color 0.15s}
+nav a:hover{color:white}
+.nav-brand{color:white;font-weight:800;font-size:1.05rem;letter-spacing:-0.02em}
+.nav-user{color:#64748b;font-size:0.82rem;display:flex;align-items:center;gap:10px}
+.nav-user a{color:#94a3b8;padding:5px 11px;border-radius:8px;background:rgba(255,255,255,0.05);transition:0.2s}
+.nav-user a:hover{color:white;background:rgba(255,255,255,0.1)}
 h2{font-size:18px;font-weight:700;margin-bottom:16px;color:var(--text)}
 .add-form{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
 .add-form label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--text-muted);font-weight:600}
@@ -309,7 +312,7 @@ h1{font-size:20px;font-weight:700;color:var(--text)}
 .btn-cal-nav{background:none;border:1px solid var(--border);border-radius:8px;cursor:pointer;font-size:18px;color:var(--text-muted);width:44px;height:44px;display:inline-flex;align-items:center;justify-content:center;transition:0.15s}
 .btn-cal-nav:hover{border-color:var(--accent);color:var(--accent)}
 @media (max-width:600px){
-  body{padding:64px 12px calc(32px + env(safe-area-inset-bottom,0px))}
+  body{padding:12px 12px calc(80px + env(safe-area-inset-bottom,0px))}
   nav{padding:8px 14px}
   .nav-user{font-size:11px}
   .nav-user a{min-height:44px;display:inline-flex;align-items:center;padding:8px 10px}
@@ -342,8 +345,8 @@ h1{font-size:20px;font-weight:700;color:var(--text)}
 """
 
 _HEATMAP_JS = """
-const MONTH_KO=['1월','2월','3월','4월','5월','6월','7월','8월','9월','10월','11월','12월'];
-const DAY_KO=['일','월','화','수','목','금','토'];
+const MONTH_EN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const DAY_EN=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 const DAY_SHORT=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 const WEEKS=12;
 const today=new Date();today.setHours(0,0,0,0);
@@ -367,7 +370,7 @@ for(let w=0;w<WEEKS;w++){
   const col=document.createElement('div');col.className='week-col';
   const ws=addDays(startSunday,w*7);const m=ws.getMonth();
   const ml=document.createElement('div');ml.className='month-label';
-  ml.textContent=m!==lastMonth?MONTH_KO[m]:'';monthLabels.appendChild(ml);lastMonth=m;
+  ml.textContent=m!==lastMonth?MONTH_EN[m]:'';monthLabels.appendChild(ml);lastMonth=m;
   for(let d=0;d<7;d++){
     const dt=addDays(startSunday,w*7+d);const key=dt.toISOString().slice(0,10);
     const cell=document.createElement('div');cell.className='day-cell';
@@ -378,10 +381,10 @@ for(let w=0;w<WEEKS;w++){
     cell.dataset.date=key;
     const isDone=count>=TARGET;
     const countLabel=TARGET>1?` (${count}/${TARGET})`:'';
-    cell.dataset.done=isDone?`✓ 완료${countLabel}`:(dt>today?'—':`미완료${countLabel} · 클릭하여 토글`);
+    cell.dataset.done=isDone?`✓ Done${countLabel}`:(dt>today?'—':`Not done${countLabel} · click to toggle`);
     cell.addEventListener('mouseenter',e=>{
       const d2=new Date(key+'T00:00:00');
-      tooltip.textContent=`${d2.getMonth()+1}월 ${d2.getDate()}일 (${DAY_KO[d2.getDay()]}) · ${cell.dataset.done}`;
+      tooltip.textContent=`${MONTH_EN[d2.getMonth()]} ${d2.getDate()} (${DAY_EN[d2.getDay()]}) · ${cell.dataset.done}`;
       tooltip.classList.add('show');
       tooltip.style.left=(e.clientX+14)+'px';tooltip.style.top=(e.clientY-28)+'px';
     });
@@ -413,9 +416,9 @@ function renderCalendar(monthOffset){
   const firstDow=new Date(year,month,1).getDay();
   const daysInMonth=new Date(year,month+1,0).getDate();
   const titleEl=document.getElementById('calTitle');
-  if(titleEl)titleEl.textContent=`${year}년 ${month+1}월`;
+  if(titleEl)titleEl.textContent=`${MONTH_EN[month]} ${year}`;
   const header=document.createElement('div');header.className='cal-grid';
-  ['일','월','화','수','목','금','토'].forEach(d=>{
+  ['Su','Mo','Tu','We','Th','Fr','Sa'].forEach(d=>{
     const el=document.createElement('div');el.className='cal-dow';el.textContent=d;header.appendChild(el);
   });
   calEl.appendChild(header);
@@ -436,7 +439,7 @@ function renderCalendar(monthOffset){
     if(TARGET>1&&count>0){
       const cEl=document.createElement('span');cEl.className='cal-count';cEl.textContent=`${count}/${TARGET}`;el.appendChild(cEl);
     }
-    el.title=`${month+1}/${d} · ${isDone?`완료 (${count})`:isFuture?'—':`미완료 (${count}/${TARGET})`}`;
+    el.title=`${month+1}/${d} · ${isDone?`Done (${count})`:isFuture?'—':`Not done (${count}/${TARGET})`}`;
     if(!isFuture){
       el.addEventListener('click',()=>{
         const form=document.createElement('form');
@@ -470,7 +473,7 @@ if(trendEl){
     const wrap=document.createElement('div');wrap.className='trend-bar-wrap';
     const bar=document.createElement('div');bar.className='trend-bar'+(done===0?' empty':'');
     bar.style.height=`${Math.max(2,Math.round(rate*64))}px`;
-    bar.title=`${ws.getMonth()+1}/${ws.getDate()} 주 · ${done}일 달성`;
+    bar.title=`Week of ${ws.getMonth()+1}/${ws.getDate()} · ${done} days done`;
     const lbl=document.createElement('div');lbl.className='trend-label';
     lbl.textContent=`${ws.getMonth()+1}/${ws.getDate()}`;
     wrap.appendChild(bar);wrap.appendChild(lbl);
@@ -497,16 +500,16 @@ def render_list(habits, user, readonly=False):
     rows = ""
     for h in habits:
         target = h.get("target", 1)
-        unit = h.get("unit", "회")
+        unit = h.get("unit", "times")
         streak, *_ = compute_stats(h.get("checkins", {}), target)
         today_count = h.get("checkins", {}).get(today_str, 0)
         checked = today_count >= target
-        freq_lbl = FREQ_LABEL.get(h.get("freq", "daily"), "매일")
+        freq_lbl = FREQ_LABEL.get(h.get("freq", "daily"), "Daily")
         started = h.get("started", "")[:7]
-        target_tag = f'<span class="tag-target">목표 {target}{unit}</span>' if target > 1 else ""
+        target_tag = f'<span class="tag-target">Goal: {target} {unit}</span>' if target > 1 else ""
 
         if readonly:
-            checkin_btn = f'<span class="btn-sm btn-checkin-sm {"checked" if checked else ""}">{"✓ 완료" if checked else "미완료"}</span>'
+            checkin_btn = f'<span class="btn-sm btn-checkin-sm {"checked" if checked else ""}">{"✓ Done" if checked else "Not done"}</span>'
             del_btn = ""
         elif target > 1:
             count_label = f'<span class="today-count {"done" if checked else ""}">{today_count}/{target}{unit}</span>'
@@ -519,8 +522,8 @@ def render_list(habits, user, readonly=False):
             )
             del_btn = (
                 f'<form method="POST" action="/habit/{h["id"]}/delete" style="display:inline"'
-                f' onsubmit="return confirm(\'{h["name"]} 습관을 삭제할까요?\')">'
-                f'<button class="btn-sm btn-del-sm" type="submit">삭제</button></form>'
+                f' onsubmit="return confirm(\'Delete habit: {h["name"]}?\')">'
+                f'<button class="btn-sm btn-del-sm" type="submit">Delete</button></form>'
             )
         else:
             checkin_btn = (
@@ -528,43 +531,43 @@ def render_list(habits, user, readonly=False):
                 f'<input type="hidden" name="toggle" value="1">'
                 f'<input type="hidden" name="next" value="/habit">'
                 f'<button class="btn-sm btn-checkin-sm{"  checked" if checked else ""}" '
-                f'{"type=button" if checked else "type=submit"}>{"✓ 완료" if checked else "체크인"}</button></form>'
+                f'{"type=button" if checked else "type=submit"}>{"✓ Done" if checked else "Check in"}</button></form>'
             )
             del_btn = (
                 f'<form method="POST" action="/habit/{h["id"]}/delete" style="display:inline"'
-                f' onsubmit="return confirm(\'{h["name"]} 습관을 삭제할까요?\')">'
-                f'<button class="btn-sm btn-del-sm" type="submit">삭제</button></form>'
+                f' onsubmit="return confirm(\'Delete habit: {h["name"]}?\')">'
+                f'<button class="btn-sm btn-del-sm" type="submit">Delete</button></form>'
             )
         rows += f'''
         <div class="habit-row">
           <div class="habit-icon-sm">{h.get("icon", "✅")}</div>
           <div class="habit-info">
             <div class="habit-name">{h["name"]}</div>
-            <div class="habit-meta"><span class="tag-freq">{freq_lbl}</span>{target_tag}  {started} 시작</div>
+            <div class="habit-meta"><span class="tag-freq">{freq_lbl}</span>{target_tag}  {started}</div>
           </div>
           <div class="habit-actions">
-            <span class="streak-sm">🔥 {streak}일</span>
+            <span class="streak-sm">🔥 {streak}d</span>
             {checkin_btn}
-            <a class="btn-detail" href="/habit/{h["id"]}">상세</a>
+            <a class="btn-detail" href="/habit/{h["id"]}">Detail</a>
             {del_btn}
           </div>
         </div>'''
 
     if not habits:
-        rows = '<div class="empty">등록된 습관이 없습니다. 첫 습관을 추가해보세요!</div>'
+        rows = '<div class="empty">No habits yet. Add your first habit!</div>'
 
     add_card = "" if readonly else (
-        '<div class="card"><h2>새 습관 추가</h2>'
+        '<div class="card"><h2>Add New Habit</h2>'
         '<form class="add-form" method="POST" action="/habit/add">'
-        '<label>습관 이름<input type="text" name="name" placeholder="예: 물 마시기, 운동, 독서" required autofocus></label>'
-        '<label>빈도<select name="freq"><option value="daily">매일</option><option value="weekly">주간</option></select></label>'
-        '<label>목표 횟수<input type="number" name="target" value="1" min="1" max="999"></label>'
-        '<label>단위<input type="text" name="unit" value="회" placeholder="회" list="unit-examples" style="width:72px"></label>'
+        '<label>Habit name<input type="text" name="name" placeholder="e.g. Exercise, Read, Drink water" required autofocus></label>'
+        '<label>Frequency<select name="freq"><option value="daily">Daily</option><option value="weekly">Weekly</option></select></label>'
+        '<label>Goal<input type="number" name="target" value="1" min="1" max="999"></label>'
+        '<label>Unit<input type="text" name="unit" value="times" placeholder="times" list="unit-examples" style="width:72px"></label>'
         '<datalist id="unit-examples">'
-        '<option value="회"><option value="잔"><option value="분"><option value="km">'
-        '<option value="페이지"><option value="세트"><option value="개"><option value="시간">'
+        '<option value="times"><option value="cups"><option value="min"><option value="km">'
+        '<option value="pages"><option value="sets"><option value="hrs">'
         '</datalist>'
-        '<button type="submit">추가</button>'
+        '<button type="submit">Add</button>'
         '</form></div>'
     )
 
@@ -595,6 +598,19 @@ def render_list(habits, user, readonly=False):
 
 </div>
 {tabs_html}
+<script>
+document.addEventListener('keydown', function(e) {{
+  if (e.key !== 'Enter' || e.target.tagName !== 'INPUT') return;
+  var t = e.target.type;
+  if (t === 'submit' || t === 'button' || t === 'checkbox' || t === 'radio') return;
+  e.preventDefault();
+  var form = e.target.closest('form');
+  if (!form) return;
+  var inputs = Array.from(form.querySelectorAll('input:not([type=hidden]):not([type=submit]):not([type=button]), select, textarea'));
+  var idx = inputs.indexOf(e.target);
+  if (idx < inputs.length - 1) inputs[idx + 1].focus();
+}});
+</script>
 </body>
 </html>'''
 
@@ -603,7 +619,7 @@ def render_detail(habit, user):
     today = date.today()
     cs = habit.get("checkins", {})
     target = habit.get("target", 1)
-    unit = habit.get("unit", "회")
+    unit = habit.get("unit", "times")
     today_str = today.isoformat()
     today_count = cs.get(today_str, 0)
     today_done = today_count >= target
@@ -631,12 +647,12 @@ def render_detail(habit, user):
 
     started = habit.get("started", "")
     started_display = (
-        f"{date.fromisoformat(started).year}년 {date.fromisoformat(started).month}월부터"
-        if started else "시작일 미설정"
+        f"Since {date.fromisoformat(started).strftime('%b %Y')}"
+        if started else "No start date"
     )
     habit_name = habit.get("name", "")
     habit_icon = habit.get("icon", "✅")
-    freq_lbl = FREQ_LABEL.get(habit.get("freq", "daily"), "매일")
+    freq_lbl = FREQ_LABEL.get(habit.get("freq", "daily"), "Daily")
 
     # checkin block
     if target == 1:
@@ -644,14 +660,14 @@ def render_detail(habit, user):
             checkin_block = (
                 f'<form method="POST" action="/habit/{hid}/checkin" style="display:inline">'
                 f'<input type="hidden" name="toggle" value="1">'
-                f'<button class="btn-checkin" type="submit">✓ 오늘 {habit_name} 완료!</button></form>'
+                f'<button class="btn-checkin" type="submit">✓ Complete {habit_name} today!</button></form>'
             )
         else:
-            checkin_block = '<button class="btn-checkin checked" type="button">✓ 오늘 완료!</button>'
+            checkin_block = '<button class="btn-checkin checked" type="button">✓ Done today!</button>'
         checkin_note = (
-            f"오늘 {habit_name}을 완료했어요. 내일도 화이팅! {habit_icon}"
+            f"Great job completing {habit_name} today! {habit_icon}"
             if today_done else
-            f"오늘 아직 체크인하지 않았어요. {habit_name}을 마쳤다면 버튼을 누르세요."
+            f"Not checked in yet today. Press the button when you finish {habit_name}."
         )
         checkin_section = f'''
         <div class="checkin-wrap">
@@ -672,7 +688,7 @@ def render_detail(habit, user):
             f'<input type="hidden" name="next" value="/habit/{hid}">'
             f'<button class="btn-counter" type="submit">＋</button></form>'
         )
-        note = f"목표 {target}{unit} 달성! 잘 하셨어요 {habit_icon}" if today_done else f"오늘 {today_count}/{target}{unit} 완료. {target - today_count}{unit} 남았어요."
+        note = f"Goal reached: {target} {unit}! Well done {habit_icon}" if today_done else f"Today: {today_count}/{target} {unit}. {target - today_count} {unit} to go."
         checkin_section = f'''
         <div class="counter-wrap">
           <div>
@@ -700,8 +716,8 @@ def render_detail(habit, user):
 </head>
 <body>
 <nav>
-  <a href="/habit">← 목록</a>
-  <span class="nav-user">👤 {user} &nbsp;·&nbsp; <a href="/logout">로그아웃</a></span>
+  <a href="/habit">← Habits</a>
+  <span class="nav-user">👤 {user} &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
 </nav>
 <div class="container">
 
@@ -711,65 +727,65 @@ def render_detail(habit, user):
         <div class="habit-icon-lg">{habit_icon}</div>
         <div>
           <h1>{habit_name}</h1>
-          <div class="habit-sub">{started_display} · {freq_lbl} · 목표 {target}{unit}</div>
+          <div class="habit-sub">{started_display} · {freq_lbl} · Goal: {target} {unit}</div>
         </div>
       </div>
       <div style="display:flex;gap:8px;align-items:center">
-        <div class="streak-badge">🔥 {streak}일 연속</div>
-        <button id="editToggle" onclick="var f=document.getElementById('editForm');f.style.display=f.style.display==='none'?'block':'none';this.textContent=f.style.display==='none'?'편집':'취소'" class="btn-cal-nav" style="font-size:13px;width:auto;padding:0 14px">편집</button>
+        <div class="streak-badge">🔥 {streak} streak</div>
+        <button id="editToggle" onclick="var f=document.getElementById('editForm');f.style.display=f.style.display==='none'?'block':'none';this.textContent=f.style.display==='none'?'Edit':'Cancel'" class="btn-cal-nav" style="font-size:13px;width:auto;padding:0 14px">Edit</button>
       </div>
     </div>
     <form id="editForm" method="POST" action="/habit/{hid}/edit" style="display:none;margin-top:20px;padding-top:20px;border-top:1px solid var(--border)">
       <div class="add-form">
-        <label>이름<input type="text" name="name" value="{habit_name}" required></label>
-        <label>빈도<select name="freq">
-          <option value="daily" {"selected" if habit.get("freq","daily")=="daily" else ""}>매일</option>
-          <option value="weekly" {"selected" if habit.get("freq","daily")=="weekly" else ""}>주간</option>
+        <label>Name<input type="text" name="name" value="{habit_name}" required></label>
+        <label>Frequency<select name="freq">
+          <option value="daily" {"selected" if habit.get("freq","daily")=="daily" else ""}>Daily</option>
+          <option value="weekly" {"selected" if habit.get("freq","daily")=="weekly" else ""}>Weekly</option>
         </select></label>
-        <label>목표<input type="number" name="target" value="{target}" min="1" max="999"></label>
-        <label>단위<input type="text" name="unit" value="{unit}" list="unit-edit" style="width:72px"></label>
+        <label>Goal<input type="number" name="target" value="{target}" min="1" max="999"></label>
+        <label>Unit<input type="text" name="unit" value="{unit}" list="unit-edit" style="width:72px"></label>
         <datalist id="unit-edit">
-          <option value="회"><option value="잔"><option value="분"><option value="km">
-          <option value="페이지"><option value="세트"><option value="개"><option value="시간">
+          <option value="times"><option value="cups"><option value="min"><option value="km">
+          <option value="pages"><option value="sets"><option value="hrs">
         </datalist>
-        <button type="submit">저장</button>
+        <button type="submit">Save</button>
       </div>
     </form>
     <div style="height:20px"></div>
     <div class="stats">
-      <div class="stat"><span class="stat-value streak-c">{streak}</span><span class="stat-label">현재 스트릭</span></div>
+      <div class="stat"><span class="stat-value streak-c">{streak}</span><span class="stat-label">Current streak</span></div>
       <div class="stat-divider"></div>
-      <div class="stat"><span class="stat-value accent">{longest}</span><span class="stat-label">최장 스트릭</span></div>
+      <div class="stat"><span class="stat-value accent">{longest}</span><span class="stat-label">Longest streak</span></div>
       <div class="stat-divider"></div>
-      <div class="stat"><span class="stat-value">{total}</span><span class="stat-label">총 달성일</span></div>
+      <div class="stat"><span class="stat-value">{total}</span><span class="stat-label">Total days</span></div>
       <div class="stat-divider"></div>
-      <div class="stat"><span class="stat-value">{rate_12w}%</span><span class="stat-label">달성률 (12주)</span></div>
+      <div class="stat"><span class="stat-value">{rate_12w}%</span><span class="stat-label">Rate (12w)</span></div>
     </div>
     <div class="progress-wrap">
-      <div class="progress-label"><span>12주 달성률</span><span>{done_12w} / {days_12w}일</span></div>
+      <div class="progress-label"><span>12-week rate</span><span>{done_12w} / {days_12w} days</span></div>
       <div class="progress-bar"><div class="progress-fill" style="width:{rate_12w}%"></div></div>
     </div>
   </div>
 
   <div class="card">
     <div class="heatmap-header">
-      <span class="heatmap-title">Activity — 최근 12주</span>
+      <span class="heatmap-title">Activity — Last 12 weeks</span>
       <div class="legend">
         <span>0</span>
         <div class="legend-cell" style="background:var(--cell-0);border:1px solid var(--border)"></div>
         <div class="legend-cell" style="background:#e0f2fe"></div>
         <div class="legend-cell" style="background:#bae6fd"></div>
         <div class="legend-cell" style="background:var(--cell-4)"></div>
-        <span>목표</span>
+        <span>Goal</span>
       </div>
     </div>
     <div class="heatmap-wrap">
       <div class="heatmap-grid-wrap">
         <div class="dow-labels">
-          <div class="dow-label">일</div><div class="dow-label">월</div>
-          <div class="dow-label">화</div><div class="dow-label">수</div>
-          <div class="dow-label">목</div><div class="dow-label">금</div>
-          <div class="dow-label">토</div>
+          <div class="dow-label">Su</div><div class="dow-label">Mo</div>
+          <div class="dow-label">Tu</div><div class="dow-label">We</div>
+          <div class="dow-label">Th</div><div class="dow-label">Fr</div>
+          <div class="dow-label">Sa</div>
         </div>
         <div class="weeks-wrap">
           <div class="month-labels" id="monthLabels"></div>
@@ -780,14 +796,14 @@ def render_detail(habit, user):
   </div>
 
   <div class="card">
-    <div class="section-title">오늘 체크인</div>
+    <div class="section-title">Today's Check-in</div>
     {checkin_section}
   </div>
 
   <div class="card">
     <div class="tab-row">
-      <button class="tab-btn active" data-tab="tabCalendar">📅 달력</button>
-      <button class="tab-btn" data-tab="tabTrend">📈 트렌드</button>
+      <button class="tab-btn active" data-tab="tabCalendar">📅 Calendar</button>
+      <button class="tab-btn" data-tab="tabTrend">📈 Trend</button>
     </div>
 
     <div id="tabCalendar" class="tab-panel">
@@ -800,7 +816,7 @@ def render_detail(habit, user):
     </div>
 
     <div id="tabTrend" class="tab-panel" style="display:none">
-      <div class="section-title" style="margin-bottom:8px">주간 달성 트렌드 (12주)</div>
+      <div class="section-title" style="margin-bottom:8px">Weekly Trend (12 weeks)</div>
       <div style="position:relative">
         <div class="trend-zero"></div>
         <div class="trend-wrap" id="trendChart"></div>
