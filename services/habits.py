@@ -631,7 +631,7 @@ def render_list(habits, user, readonly=False):
         target = h.get("target", 1)
         unit = h.get("unit", "times")
         streak, *_ = compute_stats(h.get("checkins", {}), target)
-        today_count = h.get("checkins", {}).get(today_str, 0)
+        today_count = _day_total(h.get("checkins", {}), today_str)
         checked = today_count >= target
         freq_lbl = FREQ_LABEL.get(h.get("freq", "daily"), "Daily")
         started = h.get("started", "")[:7]
