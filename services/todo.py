@@ -139,6 +139,18 @@ def handle(method, path, body, ctx=None):
                         save_habits(habits, user)
                         t["habit_id"] = hid
             save(todos, user)
+        elif path == "/todo/reorder":
+            ids_str = body.get("ids", [""])[0]
+            if ids_str:
+                try:
+                    ordered_ids = [int(i) for i in ids_str.split(",") if i.strip()]
+                    id_map = {t["id"]: t for t in todos}
+                    reordered = [id_map[i] for i in ordered_ids if i in id_map]
+                    rest = [t for t in todos if t["id"] not in set(ordered_ids)]
+                    save(reordered + rest, user)
+                except (ValueError, KeyError):
+                    pass
+            return ("json", {"ok": True})
         return ("redirect", "/todo")
 
     return ("html", render(load(user), load_habits(user), user))
@@ -238,8 +250,11 @@ def render(todos, habits, user, readonly=False):
                 <button class="btn btn-del">Delete</button>
               </form>'''
 
+        drag_attr = 'draggable="true"' if not t["done"] else ""
+        drag_handle = '<span class="drag-handle" title="Drag to reorder">⠿</span>' if not t["done"] else ""
         items += f'''
-        <div class="todo-item {"done" if t["done"] else ""}">
+        <div class="todo-item {"done" if t["done"] else ""}" data-id="{t["id"]}" {drag_attr}>
+          {drag_handle}
           <span class="tid">#{t["id"]}</span>
           <span class="title">{t["title"]}</span>
           <span class="date">{created}</span>
@@ -294,6 +309,11 @@ def render(todos, habits, user, readonly=False):
 .todo-item.done::before {{ background: var(--slate-200); }}
 .todo-item.done {{ opacity: 0.6; background: var(--slate-50); box-shadow: none; transform: none; }}
 .todo-item.done .title {{ text-decoration: line-through; color: var(--slate-400); }}
+.todo-item.dragging {{ opacity: 0.4; box-shadow: 0 8px 24px rgba(0,0,0,0.15); transform: scale(1.02); border-color: var(--blue-500); }}
+.todo-item.drag-over {{ border-top: 2px solid var(--blue-500); }}
+.drag-handle {{ cursor: grab; color: var(--slate-300); font-size: 1rem; padding: 0 2px; flex-shrink: 0; user-select: none; touch-action: none; }}
+.drag-handle:hover {{ color: var(--slate-500); }}
+.drag-handle:active {{ cursor: grabbing; }}
 .tid {{ font-size: 0.75rem; color: var(--slate-300); min-width: 28px; }}
 .title {{ flex: 1; font-size: 0.95rem; }}
 .date {{ font-size: 0.75rem; color: var(--slate-300); }}
@@ -379,5 +399,47 @@ document.addEventListener('keydown', function(e) {{
   var idx = inputs.indexOf(e.target);
   if (idx < inputs.length - 1) inputs[idx + 1].focus();
 }});
+
+(function() {{
+  var list = document.querySelector('.todo-list');
+  if (!list) return;
+  var dragged = null;
+
+  list.addEventListener('dragstart', function(e) {{
+    dragged = e.target.closest('.todo-item[draggable]');
+    if (!dragged) return;
+    dragged.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+  }});
+
+  list.addEventListener('dragend', function() {{
+    if (!dragged) return;
+    dragged.classList.remove('dragging');
+    list.querySelectorAll('.drag-over').forEach(function(el) {{ el.classList.remove('drag-over'); }});
+    var ids = Array.from(list.querySelectorAll('.todo-item[draggable]')).map(function(el) {{ return el.dataset.id; }});
+    if (ids.length > 0) {{
+      fetch('/todo/reorder', {{
+        method: 'POST',
+        headers: {{'Content-Type': 'application/x-www-form-urlencoded'}},
+        body: 'ids=' + ids.join(',')
+      }});
+    }}
+    dragged = null;
+  }});
+
+  list.addEventListener('dragover', function(e) {{
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    var over = e.target.closest('.todo-item[draggable]');
+    if (!over || over === dragged) return;
+    list.querySelectorAll('.drag-over').forEach(function(el) {{ el.classList.remove('drag-over'); }});
+    var rect = over.getBoundingClientRect();
+    if (e.clientY < rect.top + rect.height / 2) {{
+      list.insertBefore(dragged, over);
+    }} else {{
+      list.insertBefore(dragged, over.nextSibling);
+    }}
+  }});
+}})();
 </script>
 </body></html>'''
