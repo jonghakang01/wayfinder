@@ -483,6 +483,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_text(SW_JS, "application/javascript")
         if path == "/icons/icon.svg":
             return self.send_text(ICON_SVG, "image/svg+xml")
+        if path == "/health":
+            return self.send_text('{"status":"ok"}', "application/json")
         if path in ("/login", "/logout"):
             return self.dispatch(auth.handle("GET", path, {}, ctx))
         if not ctx["user"]:
