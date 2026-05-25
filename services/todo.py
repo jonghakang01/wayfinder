@@ -403,19 +403,25 @@ def render(todos, habits, user, readonly=False):
             f'<option value="{g}">{g}</option>' for g in all_groups
         ) + '<option value="__new__">+ New group...</option>'
         add_form = f'''
-        <form class="add-form" method="POST" action="/todo/add" id="addTaskForm">
-          <input type="text" name="title" placeholder="New task..." autofocus required>
-          <input type="date" name="due_date">
-          <select name="group" id="groupSelect" onchange="toggleNewGroup(this)">
-            {group_options}
-          </select>
-          <input type="text" name="new_group" id="newGroupInput" placeholder="Group name" style="display:none;flex:0 0 120px">
-          <button type="submit">Add</button>
-        </form>
-        <form class="group-add-form" method="POST" action="/todo/group/add">
-          <input type="text" name="name" placeholder="New group name..." required>
-          <button type="submit" class="btn-add-group">+ Group</button>
-        </form>'''
+        <div class="add-task-bar">
+          <button type="button" class="btn-add-task" onclick="toggleAddTask()">＋ Task</button>
+          <form class="group-add-form" method="POST" action="/todo/group/add">
+            <input type="text" name="name" placeholder="New group..." required>
+            <button type="submit" class="btn-add-group">+ Group</button>
+          </form>
+        </div>
+        <div id="addTaskCard" style="display:none">
+          <form class="add-form" method="POST" action="/todo/add" id="addTaskForm">
+            <input type="text" name="title" placeholder="Task name..." id="taskTitleInput" required>
+            <input type="date" name="due_date">
+            <select name="group" id="groupSelect" onchange="toggleNewGroup(this)">
+              {group_options}
+            </select>
+            <input type="text" name="new_group" id="newGroupInput" placeholder="Group name" style="display:none;flex:0 0 120px">
+            <button type="submit">Add</button>
+            <button type="button" onclick="toggleAddTask()" class="btn-cancel-task">✕</button>
+          </form>
+        </div>'''
     else:
         add_form = ""
 
@@ -505,9 +511,31 @@ def render(todos, habits, user, readonly=False):
 .done-summary .group-name-lbl {{ color: var(--slate-500); }}
 .done-summary .group-count-badge {{ background: var(--slate-300); }}
 
+/* Add task bar */
+.add-task-bar {{
+  display: flex; gap: 10px; align-items: center; margin-bottom: 16px;
+}}
+.btn-add-task {{
+  padding: 10px 20px; background: var(--blue-500); color: white;
+  border: none; border-radius: var(--radius-md); font-size: 0.95rem;
+  font-weight: 700; cursor: pointer; transition: 0.2s; white-space: nowrap;
+  letter-spacing: -0.01em;
+}}
+.btn-add-task:hover {{ background: #2563eb; transform: translateY(-1px); }}
+.btn-cancel-task {{
+  padding: 6px 12px; background: transparent; color: var(--slate-400);
+  border: 1px solid var(--slate-200); border-radius: 8px; font-size: 0.85rem;
+  cursor: pointer; transition: 0.2s;
+}}
+.btn-cancel-task:hover {{ color: #ef4444; border-color: #ef4444; }}
+#addTaskCard {{
+  background: white; border: 1px solid var(--slate-200); border-radius: var(--radius-lg);
+  padding: 20px; margin-bottom: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+}}
+
 /* Group add form */
 .group-add-form {{
-  display: flex; gap: 8px; margin-bottom: 16px; align-items: center;
+  display: flex; gap: 8px; flex: 1; align-items: center;
 }}
 .group-add-form input {{
   flex: 1; padding: 8px 12px; border: 1px solid var(--slate-200);
@@ -576,8 +604,12 @@ def render(todos, habits, user, readonly=False):
   .h-actions {{ width: 100%; justify-content: flex-end; margin-top: 4px; flex-wrap: wrap; gap: 6px; }}
   .hb-check, .hb-detail {{ min-height: 40px; padding: 8px 12px; font-size: 0.8rem; }}
   .add-form {{ flex-direction: column; gap: 8px; }}
-  .add-form input, .add-form select, .add-form button {{ width: 100%; min-height: 44px; font-size: 1rem; }}
-  .group-add-form {{ flex-direction: column; }}
+  .add-form input, .add-form select {{ width: 100%; min-height: 44px; font-size: 1rem; }}
+  .add-form button {{ min-height: 44px; font-size: 1rem; }}
+  .btn-add-task {{ min-height: 48px; flex: 1; font-size: 1rem; }}
+  .group-add-form {{ flex: 1; }}
+  .group-add-form input {{ min-height: 44px; font-size: 1rem; }}
+  .btn-add-group {{ min-height: 44px; }}
   .group-summary {{ padding: 12px 14px; }}
   .group-body {{ padding: 8px 8px 4px; }}
 }}
@@ -597,6 +629,20 @@ def render(todos, habits, user, readonly=False):
 </div>
 {tabs_html}
 <script>
+function toggleAddTask() {{
+  var card = document.getElementById('addTaskCard');
+  if (!card) return;
+  var open = card.style.display !== 'none';
+  card.style.display = open ? 'none' : 'block';
+  if (!open) {{
+    card.scrollIntoView({{behavior:'smooth', block:'nearest'}});
+    setTimeout(function() {{
+      var inp = document.getElementById('taskTitleInput');
+      if (inp) inp.focus();
+    }}, 100);
+  }}
+}}
+
 function toggleNewGroup(sel) {{
   var inp = document.getElementById('newGroupInput');
   if (!inp) return;
