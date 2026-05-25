@@ -185,8 +185,8 @@ _CSS = """
   --radius:16px; --gap:4px; --cell:16px;
 }
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-body{background:var(--bg);color:var(--text);font-family:'Pretendard Variable',Pretendard,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;display:flex;justify-content:center;padding:44px 24px 80px;min-height:100vh}
-.container{width:100%;max-width:720px;display:flex;flex-direction:column;gap:24px}
+body{background:var(--bg);color:var(--text);font-family:'Pretendard Variable',Pretendard,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;min-height:100vh}
+.container{width:100%;max-width:720px;margin:0 auto;padding:32px 24px 80px;display:flex;flex-direction:column;gap:24px}
 .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:24px;box-shadow:0 4px 20px rgba(0,0,0,0.03)}
 nav{position:sticky;top:0;left:0;right:0;padding:13px 32px;background:rgba(15,23,42,0.92);backdrop-filter:blur(12px);border-bottom:1px solid rgba(255,255,255,0.07);display:flex;align-items:center;justify-content:space-between;z-index:100}
 nav a{color:#94a3b8;text-decoration:none;font-weight:500;font-size:0.875rem;transition:color 0.15s}
@@ -312,7 +312,7 @@ h1{font-size:20px;font-weight:700;color:var(--text)}
 .btn-cal-nav{background:none;border:1px solid var(--border);border-radius:8px;cursor:pointer;font-size:18px;color:var(--text-muted);width:44px;height:44px;display:inline-flex;align-items:center;justify-content:center;transition:0.15s}
 .btn-cal-nav:hover{border-color:var(--accent);color:var(--accent)}
 @media (max-width:600px){
-  body{padding:12px 12px calc(80px + env(safe-area-inset-bottom,0px))}
+  .container{padding:12px 12px calc(80px + env(safe-area-inset-bottom,0px))}
   nav{padding:8px 14px}
   .nav-user{font-size:11px}
   .nav-user a{min-height:44px;display:inline-flex;align-items:center;padding:8px 10px}
