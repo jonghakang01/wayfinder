@@ -68,6 +68,18 @@ h1 { font-size: 1.75rem; color: var(--slate-900); margin-bottom: 6px; font-weigh
 .stat-card .stat-label { font-size: 0.7rem; color: var(--slate-400); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
 .stat-card.highlight .stat-num { color: var(--sky-400); text-shadow: 0 0 20px rgba(56,189,248,0.3); }
 
+/* App entry card */
+.app-entry-card { display:flex; align-items:center; gap:20px; background:white; border:1px solid var(--slate-200); border-radius:var(--radius-xl); padding:24px 28px; text-decoration:none; color:inherit; transition:all .25s; margin-bottom:32px; position:relative; overflow:hidden; }
+.app-entry-card::before { content:""; position:absolute; top:0; left:0; right:0; height:4px; background:linear-gradient(90deg,#3b82f6,#38bdf8); }
+.app-entry-card:hover { box-shadow:var(--shadow-lg); transform:translateY(-3px); border-color:var(--blue-500); }
+.app-entry-icon { font-size:2.5rem; filter:drop-shadow(0 2px 6px rgba(0,0,0,0.1)); }
+.app-entry-text { flex:1; }
+.app-entry-name { font-size:1.1rem; font-weight:800; color:var(--slate-900); margin-bottom:4px; letter-spacing:-.02em; }
+.app-entry-tabs { font-size:0.8rem; color:var(--slate-400); font-weight:500; }
+.app-entry-arrow { font-size:1.4rem; color:var(--slate-300); transition:.2s; }
+.app-entry-card:hover .app-entry-arrow { color:var(--blue-500); transform:translateX(4px); }
+@media(max-width:600px) { .app-entry-card { padding:18px 20px; gap:14px; } .app-entry-icon { font-size:2rem; } }
+
 /* Category */
 .category-section { margin-bottom: 40px; }
 .category-title { font-size: 0.7rem; font-weight: 700; color: var(--slate-400); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 14px; padding-left: 2px; }
@@ -235,7 +247,7 @@ PWA_INJECT = (
 )
 
 CATEGORIES = {
-    "생산성": ["/dashboard", "/todo", "/habit"],
+    "생산성": [],
     "팀 도구": ["/terminals", "/workspace"],
     "분석": ["/aeo", "/llm-check"],
     "관리": ["/admin"],
@@ -337,6 +349,15 @@ def wayfinder(user):
     </div>
   </div>
   
+  <a href="/todo" class="app-entry-card">
+    <div class="app-entry-icon">🧭</div>
+    <div class="app-entry-text">
+      <div class="app-entry-name">My Productivity App</div>
+      <div class="app-entry-tabs">✅ Tasks &nbsp;·&nbsp; 🏃 Habits &nbsp;·&nbsp; 📊 Overview</div>
+    </div>
+    <div class="app-entry-arrow">→</div>
+  </a>
+
   <div id="pwa-banner" class="pwa-banner">
     <div class="pwa-icon">📱</div>
     <div class="pwa-text">
@@ -467,7 +488,7 @@ class Handler(BaseHTTPRequestHandler):
         if not ctx["user"]:
             return self.redirect("/login")
         if path == "/":
-            return self.redirect("/todo")
+            return self.send_html(wayfinder(ctx["user"]))
         for svc_path, svc in SERVICES.items():
             if path == svc_path or path.startswith(svc_path + "/"):
                 if not auth.has_service_access(ctx["user"], svc_path):
