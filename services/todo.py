@@ -158,6 +158,8 @@ def handle(method, path, body, ctx=None):
 
 def render(todos, habits, user, readonly=False):
     today_str = date.today().isoformat()
+    # Active items on top, done items at bottom
+    todos = [t for t in todos if not t.get("done")] + [t for t in todos if t.get("done")]
     total = len(todos)
     done_count = sum(1 for t in todos if t["done"])
 
