@@ -1,7 +1,7 @@
 #!/bin/bash
 # Pre-deploy smoke test — run by QA (태양) before git push
 # Usage: bash scripts/smoke-test.sh [base_url]
-BASE="${1:-http://localhost:8765}"
+BASE="${1:-http://localhost:8080}"
 PASS=0
 FAIL=0
 
