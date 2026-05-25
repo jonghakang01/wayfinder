@@ -404,18 +404,10 @@ document.addEventListener('keydown', function(e) {{
   var list = document.querySelector('.todo-list');
   if (!list) return;
   var dragged = null;
+  var clone = null;
+  var offsetY = 0;
 
-  list.addEventListener('dragstart', function(e) {{
-    dragged = e.target.closest('.todo-item[draggable]');
-    if (!dragged) return;
-    dragged.classList.add('dragging');
-    e.dataTransfer.effectAllowed = 'move';
-  }});
-
-  list.addEventListener('dragend', function() {{
-    if (!dragged) return;
-    dragged.classList.remove('dragging');
-    list.querySelectorAll('.drag-over').forEach(function(el) {{ el.classList.remove('drag-over'); }});
+  function saveOrder() {{
     var ids = Array.from(list.querySelectorAll('.todo-item[draggable]')).map(function(el) {{ return el.dataset.id; }});
     if (ids.length > 0) {{
       fetch('/todo/reorder', {{
@@ -424,21 +416,70 @@ document.addEventListener('keydown', function(e) {{
         body: 'ids=' + ids.join(',')
       }});
     }}
+  }}
+
+  function insertAt(clientY) {{
+    var items = Array.from(list.querySelectorAll('.todo-item[draggable]')).filter(function(el) {{ return el !== dragged; }});
+    var after = null;
+    for (var i = 0; i < items.length; i++) {{
+      var rect = items[i].getBoundingClientRect();
+      if (clientY < rect.top + rect.height / 2) {{ after = items[i]; break; }}
+    }}
+    list.insertBefore(dragged, after);
+  }}
+
+  // ── Desktop drag ──────────────────────────────────────────
+  list.addEventListener('dragstart', function(e) {{
+    dragged = e.target.closest('.todo-item[draggable]');
+    if (!dragged) return;
+    dragged.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+  }});
+  list.addEventListener('dragend', function() {{
+    if (!dragged) return;
+    dragged.classList.remove('dragging');
+    saveOrder();
     dragged = null;
   }});
-
   list.addEventListener('dragover', function(e) {{
     e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    var over = e.target.closest('.todo-item[draggable]');
-    if (!over || over === dragged) return;
-    list.querySelectorAll('.drag-over').forEach(function(el) {{ el.classList.remove('drag-over'); }});
-    var rect = over.getBoundingClientRect();
-    if (e.clientY < rect.top + rect.height / 2) {{
-      list.insertBefore(dragged, over);
-    }} else {{
-      list.insertBefore(dragged, over.nextSibling);
-    }}
+    if (!dragged) return;
+    insertAt(e.clientY);
+  }});
+
+  // ── Mobile touch ──────────────────────────────────────────
+  list.addEventListener('touchstart', function(e) {{
+    var handle = e.target.closest('.drag-handle');
+    if (!handle) return;
+    dragged = handle.closest('.todo-item[draggable]');
+    if (!dragged) return;
+    var touch = e.touches[0];
+    var rect = dragged.getBoundingClientRect();
+    offsetY = touch.clientY - rect.top;
+    clone = dragged.cloneNode(true);
+    clone.style.cssText = 'position:fixed;left:' + rect.left + 'px;width:' + rect.width + 'px;top:' + rect.top + 'px;z-index:9999;opacity:.85;pointer-events:none;box-shadow:0 8px 24px rgba(0,0,0,.18);border-radius:14px;background:white;';
+    document.body.appendChild(clone);
+    dragged.style.opacity = '.25';
+    e.preventDefault();
+  }}, {{passive: false}});
+
+  document.addEventListener('touchmove', function(e) {{
+    if (!dragged || !clone) return;
+    var touch = e.touches[0];
+    clone.style.top = (touch.clientY - offsetY) + 'px';
+    clone.style.display = 'none';
+    var under = document.elementFromPoint(touch.clientX, touch.clientY);
+    clone.style.display = '';
+    if (under) insertAt(touch.clientY);
+    e.preventDefault();
+  }}, {{passive: false}});
+
+  document.addEventListener('touchend', function() {{
+    if (!dragged) return;
+    dragged.style.opacity = '';
+    if (clone) {{ clone.remove(); clone = null; }}
+    saveOrder();
+    dragged = null;
   }});
 }})();
 </script>
