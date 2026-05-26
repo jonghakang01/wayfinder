@@ -41,6 +41,7 @@ def load(user):
                 h.setdefault("unit", "times")
                 h.setdefault("track", "count")
                 h.setdefault("categories", [])
+                h.setdefault("group", "")
             return data
     except Exception:
         return []
@@ -57,6 +58,28 @@ def next_id(habits):
 
 def find_habit(habits, hid):
     return next((h for h in habits if h["id"] == hid), None)
+
+
+def _habit_groups_file(user):
+    d = os.path.join(DATA_ROOT, user or "guest")
+    os.makedirs(d, exist_ok=True)
+    return os.path.join(d, "habit_groups.json")
+
+
+def load_habit_groups(user):
+    f = _habit_groups_file(user)
+    if not os.path.exists(f):
+        return []
+    try:
+        with open(f) as fp:
+            return json.load(fp)
+    except Exception:
+        return []
+
+
+def save_habit_groups(groups, user):
+    with open(_habit_groups_file(user), "w") as fp:
+        json.dump(groups, fp, ensure_ascii=False)
 
 
 def _day_total(checkins, ds):
@@ -153,6 +176,7 @@ def handle(method, path, body, ctx=None):
                 track = "count"
             cats_raw = body.get("categories", [""])[0].strip()
             categories = [c.strip() for c in cats_raw.split(",") if c.strip()]
+            group = body.get("group", [""])[0].strip()
             if name:
                 habits.append({
                     "id": next_id(habits),
@@ -163,10 +187,35 @@ def handle(method, path, body, ctx=None):
                     "unit": unit,
                     "track": track,
                     "categories": categories,
+                    "group": group,
                     "started": date.today().isoformat(),
                     "checkins": {},
                 })
                 save(habits, user)
+                if group:
+                    _gs = load_habit_groups(user)
+                    if group not in _gs:
+                        _gs.append(group)
+                        save_habit_groups(_gs, user)
+            return ("redirect", "/habit")
+
+        if path == "/habit/group/add":
+            name = body.get("name", [""])[0].strip()
+            if name:
+                groups = load_habit_groups(user)
+                if name not in groups:
+                    groups.append(name)
+                    save_habit_groups(groups, user)
+            return ("redirect", "/habit")
+
+        if path == "/habit/group/delete":
+            name = body.get("name", [""])[0].strip()
+            groups = load_habit_groups(user)
+            save_habit_groups([g for g in groups if g != name], user)
+            for h in habits:
+                if h.get("group") == name:
+                    h["group"] = ""
+            save(habits, user)
             return ("redirect", "/habit")
 
         if len(parts) >= 4:
@@ -242,6 +291,7 @@ def handle(method, path, body, ctx=None):
                         track = habit.get("track", "count")
                     cats_raw = body.get("categories", [""])[0].strip()
                     categories = [c.strip() for c in cats_raw.split(",") if c.strip()]
+                    group = body.get("group", [""])[0].strip()
                     if name:
                         habit["name"] = name
                         habit["freq"] = freq
@@ -249,7 +299,13 @@ def handle(method, path, body, ctx=None):
                         habit["unit"] = unit
                         habit["track"] = track
                         habit["categories"] = categories
+                        habit["group"] = group
                         save(habits, user)
+                        if group:
+                            _gs = load_habit_groups(user)
+                            if group not in _gs:
+                                _gs.append(group)
+                                save_habit_groups(_gs, user)
                     return ("redirect", f"/habit/{hid}")
                 elif action == "delete":
                     save([h for h in habits if h["id"] != hid], user)
@@ -264,11 +320,11 @@ def handle(method, path, body, ctx=None):
 
 _CSS = """
 :root {
-  --bg:#f8fafc; --surface:#ffffff; --border:#e2e8f0;
-  --text:#0f172a; --text-muted:#64748b;
-  --accent:#3b82f6; --streak:#f59e0b;
-  --cell-0:#f1f5f9; --cell-2:#bae6fd; --cell-4:#38bdf8;
-  --radius:16px; --gap:4px; --cell:16px;
+  --bg:var(--slate-50); --surface:#ffffff; --border:var(--slate-200);
+  --text:var(--slate-900); --text-muted:var(--slate-500);
+  --accent:var(--blue-500); --streak:#f59e0b;
+  --cell-0:var(--slate-100); --cell-2:#bae6fd; --cell-4:var(--sky-400);
+  --radius:var(--radius-lg); --gap:4px; --cell:16px;
 }
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg);color:var(--text);font-family:'Pretendard Variable',Pretendard,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;min-height:100vh}
@@ -291,9 +347,9 @@ h2{font-size:18px;font-weight:700;margin-bottom:16px;color:var(--text)}
 .add-form select{padding:9px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:14px}
 .add-form button{padding:9px 18px;background:var(--text);color:white;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;transition:opacity 0.2s;align-self:flex-end}
 .add-form button:hover{opacity:0.85}
-.habit-row{display:flex;align-items:center;gap:14px;padding:14px 0;border-bottom:1px solid var(--border);transition:transform 0.2s}
-.habit-row:last-child{border-bottom:none}
-.habit-row:hover{transform:translateX(4px)}
+.habit-row{display:flex;align-items:center;gap:14px;padding:14px 16px;border-radius:var(--radius-md);border:1px solid var(--border);background:white;margin-bottom:8px;transition:box-shadow 0.2s,transform 0.2s;position:relative;overflow:hidden}
+.habit-row::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--accent)}
+.habit-row:hover{box-shadow:0 4px 12px rgba(0,0,0,0.05);transform:translateY(-2px)}
 .habit-icon-sm{font-size:22px;width:36px;text-align:center;flex-shrink:0}
 .habit-info{flex:1}
 .habit-name{font-size:15px;font-weight:700;color:var(--text)}
@@ -453,6 +509,17 @@ h1{font-size:20px;font-weight:700;color:var(--text)}
 .field-hint{font-size:11px;color:var(--text-muted);margin-top:3px}
 .btn-add-new{padding:6px 16px;background:var(--text);color:white;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;transition:opacity .15s;white-space:nowrap}
 .btn-add-new:hover{opacity:.8}
+.btn-add-group{padding:6px 16px;background:var(--bg);color:var(--text-muted);border:1px solid var(--border);border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;transition:0.2s;white-space:nowrap}
+.btn-add-group:hover{border-color:var(--accent);color:var(--accent)}
+.habit-group-accordion{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:12px;overflow:hidden}
+.habit-group-accordion[open]>.habit-group-summary .habit-group-chevron{transform:rotate(90deg)}
+.habit-group-summary{display:flex;align-items:center;gap:10px;padding:12px 20px;cursor:pointer;list-style:none;user-select:none;background:var(--bg);border-bottom:1px solid transparent}
+.habit-group-accordion[open]>.habit-group-summary{border-bottom-color:var(--border)}
+.habit-group-summary::-webkit-details-marker{display:none}
+.habit-group-chevron{font-size:0.7rem;color:var(--text-muted);transition:transform 0.2s;display:inline-block}
+.habit-group-name{font-weight:700;font-size:0.9rem;color:var(--text);flex:1}
+.habit-group-count{font-size:0.72rem;font-weight:700;padding:2px 8px;background:var(--accent);color:white;border-radius:99px;min-width:20px;text-align:center}
+.habit-group-body{padding:8px 16px 4px}
 @media (max-width:600px){
   .container{padding:12px 12px calc(80px + env(safe-area-inset-bottom,0px))}
   nav{padding:8px 14px}
@@ -639,7 +706,13 @@ document.querySelectorAll('.tab-btn').forEach(btn=>{
 
 def render_list(habits, user, readonly=False):
     today_str = date.today().isoformat()
-    rows = ""
+    all_groups = load_habit_groups(user)
+    for h in habits:
+        g = h.get("group", "")
+        if g and g not in all_groups:
+            all_groups.append(g)
+
+    row_items = []
     for h in habits:
         target = h.get("target", 1)
         unit = h.get("unit", "times")
@@ -672,12 +745,12 @@ def render_list(habits, user, readonly=False):
             cats = h.get("categories", [])
             if cats:
                 label_inp = (
-                    '<select name="label[]" class="log-label-inp">'
+                    '<select name="label" class="log-label-inp">'
                     + "".join(f'<option value="{c}">{c}</option>' for c in cats)
                     + '</select>'
                 )
             else:
-                label_inp = f'<input type="text" name="label[]" placeholder="Activity" class="log-label-inp">'
+                label_inp = f'<input type="text" name="label" placeholder="Activity" class="log-label-inp">'
             clear_btn = (
                 f'<form method="POST" action="/habit/{hid}/checkin" class="log-clear-form">'
                 f'<input type="hidden" name="clear" value="1">'
@@ -690,7 +763,7 @@ def render_list(habits, user, readonly=False):
                 f'<input type="hidden" name="next" value="/habit">'
                 f'<div class="inline-log-row">'
                 f'{label_inp}'
-                f'<input type="number" name="value[]" placeholder="{unit}" class="log-val-inp" min="0" step="0.1" required>'
+                f'<input type="number" name="value" placeholder="{unit}" class="log-val-inp" min="0" step="0.1" required>'
                 f'<button type="submit" class="btn-sm btn-log-ok">+ Add</button>'
                 f'</div></form>'
                 f'{clear_btn}'
@@ -724,7 +797,7 @@ def render_list(habits, user, readonly=False):
             if pills:
                 entries_html = f'<div class="today-entries list-entries">{pills}</div>'
 
-        rows += f'''
+        row_items.append((h.get("group", "") or "", f'''
         <div class="habit-row">
           <div class="habit-icon-sm">{h.get("icon", "✅")}</div>
           <div class="habit-info">
@@ -739,10 +812,26 @@ def render_list(habits, user, readonly=False):
             {del_btn}
           </div>
         </div>
-        {inline_log_html}'''
+        {inline_log_html}'''))
 
     if not habits:
         rows = '<div class="empty">No habits yet. Add your first habit!</div>'
+    else:
+        _gmap = {}
+        _ungrouped = []
+        for _grp, _html in row_items:
+            if _grp:
+                _gmap.setdefault(_grp, []).append(_html)
+            else:
+                _ungrouped.append(_html)
+        rows = "".join(_ungrouped)
+        for _grp in sorted(_gmap.keys()):
+            _items = "".join(_gmap[_grp])
+            _cnt = len(_gmap[_grp])
+            rows += f'''<details open class="habit-group-accordion">
+  <summary class="habit-group-summary"><span class="habit-group-chevron">▶</span><span class="habit-group-name">{_grp}</span><span class="habit-group-count">{_cnt}</span></summary>
+  <div class="habit-group-body">{_items}</div>
+</details>'''
 
     _add_display = 'block' if not habits else 'none'
     add_card = "" if readonly else (
@@ -776,12 +865,32 @@ def render_list(habits, user, readonly=False):
         '<input type="hidden" name="categories" id="catsHiddenAdd" value="">'
         '<div class="tag-pill-wrap" id="catPillsAdd"><input type="text" id="catInpAdd" class="tag-pill-inp" placeholder="e.g. Running, Walking..."></div>'
         '</label>'
+        '<label style="width:100%">Group'
+        + f'<select name="group" style="width:100%"><option value="">No group</option>'
+        + "".join(f'<option value="{g}">{g}</option>' for g in all_groups)
+        + '</select></label>'
         '<button type="submit">Add</button>'
         '</form></div>'
     )
 
     from server import app_tabs
     tabs_html = app_tabs("/habit")
+
+    add_group_card = "" if readonly else (
+        '<div id="addGroupCard" style="display:none;background:white;border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:12px">'
+        '<form method="POST" action="/habit/group/add" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
+        '<input type="text" name="name" id="newHabitGroupInput" placeholder="Group name..." style="flex:1;min-width:160px;padding:9px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px">'
+        '<button type="submit" class="btn-add-new" style="padding:9px 18px">Add</button>'
+        '<button type="button" onclick="toggleAddGroupForm()" style="padding:9px 12px;background:transparent;border:1px solid var(--border);border-radius:8px;cursor:pointer;color:var(--text-muted);font-size:14px">✕</button>'
+        '</form></div>'
+    )
+    group_btn_html = "" if readonly else (
+        '<div style="display:flex;gap:8px">'
+        '<button type="button" onclick="toggleAddGroupForm()" class="btn-add-group">＋ Group</button>'
+        '<button type="button" onclick="toggleAddForm()" class="btn-add-new">＋ New Habit</button>'
+        '</div>'
+    )
+
     return f'''<!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -799,11 +908,12 @@ def render_list(habits, user, readonly=False):
 <div class="container">
 
   {add_card}
+  {add_group_card}
 
   <div class="card">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-      <h2 style="margin:0">{"🏃 " + user + "'s " if readonly else ""}Habits</h2>
-      {"" if readonly else '<button type="button" onclick="toggleAddForm()" class="btn-add-new">＋ New Habit</button>'}
+      <h2 style="margin:0">{("🏃 " + user + "'s ") if readonly else ""}Habits</h2>
+      {group_btn_html}
     </div>
     {rows}
   </div>
@@ -900,6 +1010,16 @@ function initUnitSel(selId, hiddenId, customId) {{
 }}
 initTagPills('catPillsAdd', 'catInpAdd', 'catsHiddenAdd');
 initUnitSel('unitSelAdd', 'unitHiddenAdd', 'unitCustomAdd');
+function toggleAddGroupForm() {{
+  var card = document.getElementById('addGroupCard');
+  if (!card) return;
+  var open = card.style.display !== 'none';
+  card.style.display = open ? 'none' : 'block';
+  if (!open) {{
+    var inp = card.querySelector('input[name=name]');
+    if (inp) setTimeout(function() {{ inp.focus(); }}, 50);
+  }}
+}}
 function toggleAddForm() {{
   var card = document.getElementById('addHabitCard');
   if (!card) return;
@@ -1184,6 +1304,10 @@ def render_detail(habit, user):
         <span style="font-size:11px;color:var(--text-muted);margin-left:6px">(press Enter or , to add)</span>
         <input type="hidden" name="categories" id="catsHiddenEdit" value="{", ".join(categories)}">
         <div class="tag-pill-wrap" id="catPillsEdit"><input type="text" id="catInpEdit" class="tag-pill-inp" placeholder="e.g. Running, Walking..."></div>
+        </label>
+        <label style="width:100%">Group
+        <input type="text" name="group" value="{habit.get('group','')}" list="detail-groups" placeholder="e.g. Morning, Health..." style="width:100%">
+        <datalist id="detail-groups">{"".join(f'<option value="{g}">' for g in load_habit_groups(user))}</datalist>
         </label>
         <button type="submit">Save</button>
       </div>

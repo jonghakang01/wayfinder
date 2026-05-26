@@ -240,6 +240,16 @@ def render(todos, habits, user, readonly=False):
 
     all_groups = groups + [g for g in seen_groups if g not in groups]
 
+    # Separate done tasks: group-members go inside their group, rest go to global done
+    done_by_group = {}
+    ungrouped_done = []
+    for t in done_list:
+        g = t.get("group") or ""
+        if g and g in all_groups:
+            done_by_group.setdefault(g, []).append(t)
+        else:
+            ungrouped_done.append(t)
+
     # ── Habit section (at BOTTOM of page) ─────────────────────
     habit_index = {h["id"]: h for h in habits}
     if habits:
@@ -364,9 +374,22 @@ def render(todos, habits, user, readonly=False):
     # Named groups
     for g in all_groups:
         tasks = task_by_group.get(g, [])
+        done_tasks = done_by_group.get(g, [])
         count = len(tasks)
         count_badge = f'<span class="group-count-badge">{count}</span>' if count else '<span class="group-count-badge empty">0</span>'
-        items_html = "".join(item_html(t) for t in tasks) if tasks else '<div class="group-empty">No tasks in this group</div>'
+        active_html = "".join(item_html(t) for t in tasks)
+        if not active_html and not done_tasks:
+            active_html = '<div class="group-empty">No tasks in this group</div>'
+        done_in_group_html = ""
+        if done_tasks:
+            done_items_g = "".join(item_html(t) for t in done_tasks)
+            done_in_group_html = (
+                f'<details class="sub-done-accordion">'
+                f'<summary class="sub-done-summary"><span class="sub-done-chevron">▶</span> ✓ Completed ({len(done_tasks)})</summary>'
+                f'<div class="sub-done-body">{done_items_g}</div>'
+                f'</details>'
+            )
+        items_html = active_html + done_in_group_html
         del_form = "" if readonly else (
             f'<form method="POST" action="/todo/group/delete" style="display:inline;margin-left:auto" '
             f'onsubmit="return confirm(\'Delete group &quot;{g}&quot;?\')">'
@@ -384,15 +407,15 @@ def render(todos, habits, user, readonly=False):
           <div class="todo-list group-body" data-group="{g}">{items_html}</div>
         </details>'''
 
-    # Done section (collapsed by default)
-    if done_list:
-        done_items = "".join(item_html(t) for t in done_list)
+    # Done section (collapsed) — only ungrouped done tasks
+    if ungrouped_done:
+        done_items = "".join(item_html(t) for t in ungrouped_done)
         todo_sections += f'''
         <details class="group-accordion done-accordion">
           <summary class="group-summary done-summary">
             <span class="group-chevron">▶</span>
             <span class="group-name-lbl">✓ Completed</span>
-            <span class="group-count-badge">{done_count}</span>
+            <span class="group-count-badge">{len(ungrouped_done)}</span>
           </summary>
           <div class="todo-list group-body">{done_items}</div>
         </details>'''
@@ -420,6 +443,25 @@ def render(todos, habits, user, readonly=False):
 
     from server import app_tabs
     tabs_html = app_tabs("/todo")
+
+    todo_add_group_card = "" if readonly else (
+        '<div id="addGroupCard" style="display:none;background:white;border:1px solid var(--slate-200);'
+        'border-radius:var(--radius-lg);padding:16px;margin-bottom:12px;box-shadow:0 4px 12px rgba(0,0,0,0.06)">'
+        '<form method="POST" action="/todo/group/add" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
+        '<input type="text" name="name" id="newGroupNameInput" placeholder="Group name..." '
+        'style="flex:1;min-width:160px;padding:9px 12px;border:1px solid var(--slate-200);border-radius:8px;font-size:14px">'
+        '<button type="submit" class="btn-add-new" style="padding:9px 18px">Add</button>'
+        '<button type="button" onclick="toggleAddGroupCard()" '
+        'style="padding:9px 12px;background:transparent;border:1px solid var(--slate-200);border-radius:8px;cursor:pointer;color:var(--slate-400);font-size:14px">✕</button>'
+        '</form></div>'
+    )
+    todo_header_btns = "" if readonly else (
+        '<div style="display:flex;gap:8px">'
+        '<button type="button" onclick="toggleAddGroupCard()" class="btn-add-group-task">＋ Group</button>'
+        '<button type="button" onclick="toggleAddTask()" class="btn-add-new">＋ New Task</button>'
+        '</div>'
+    )
+
     return f'''<!DOCTYPE html>
 <html lang="ko"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -458,7 +500,7 @@ def render(todos, habits, user, readonly=False):
 .drag-handle:hover {{ color: var(--slate-500); }}
 .drag-handle:active {{ cursor: grabbing; }}
 .tid {{ font-size: 0.75rem; color: var(--slate-300); min-width: 28px; }}
-.title {{ flex: 1; font-size: 0.95rem; }}
+.title {{ flex: 1; font-size: 1rem; font-weight: 600; }}
 .date {{ font-size: 0.75rem; color: var(--slate-300); }}
 .due-date {{ font-size: 0.75rem; color: var(--slate-400); }}
 .actions {{ display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }}
@@ -503,6 +545,12 @@ def render(todos, habits, user, readonly=False):
 .done-summary {{ background: var(--slate-50); }}
 .done-summary .group-name-lbl {{ color: var(--slate-500); }}
 .done-summary .group-count-badge {{ background: var(--slate-300); }}
+.sub-done-accordion {{ margin-top: 8px; border-radius: 8px; border: 1px solid var(--slate-100); overflow: hidden; }}
+.sub-done-accordion[open] > .sub-done-summary .sub-done-chevron {{ transform: rotate(90deg); }}
+.sub-done-summary {{ display: flex; align-items: center; gap: 8px; padding: 8px 12px; cursor: pointer; list-style: none; background: var(--slate-50); font-size: 0.82rem; font-weight: 600; color: var(--slate-500); user-select: none; }}
+.sub-done-summary::-webkit-details-marker {{ display: none; }}
+.sub-done-chevron {{ font-size: 0.65rem; color: var(--slate-400); transition: transform 0.2s; display: inline-block; }}
+.sub-done-body {{ padding: 8px 8px 4px; }}
 
 .btn-add-new {{
   padding: 6px 16px; background: var(--slate-900); color: white;
@@ -510,6 +558,12 @@ def render(todos, habits, user, readonly=False):
   cursor: pointer; transition: opacity .15s; white-space: nowrap;
 }}
 .btn-add-new:hover {{ opacity: .8; }}
+.btn-add-group-task {{
+  padding: 6px 16px; background: var(--slate-50); color: var(--slate-500);
+  border: 1px solid var(--slate-200); border-radius: 8px; font-size: 13px; font-weight: 700;
+  cursor: pointer; transition: 0.2s; white-space: nowrap;
+}}
+.btn-add-group-task:hover {{ border-color: var(--blue-500); color: var(--blue-500); }}
 .btn-cancel-task {{
   padding: 6px 12px; background: transparent; color: var(--slate-400);
   border: 1px solid var(--slate-200); border-radius: 8px; font-size: 0.85rem;
@@ -567,7 +621,7 @@ def render(todos, habits, user, readonly=False):
 @media (max-width: 600px) {{
   .todo-item {{ flex-wrap: wrap; padding: 10px 12px; gap: 8px; }}
   .actions {{ width: 100%; justify-content: flex-start; margin-top: 4px; flex-wrap: wrap; gap: 6px; }}
-  .title {{ font-size: 0.9rem; min-width: 0; word-break: break-word; }}
+  .title {{ font-size: 0.95rem; font-weight: 600; min-width: 0; word-break: break-word; }}
   .date {{ display: none; }}
   .due-date {{ font-size: 0.72rem; }}
   .tid {{ display: none; }}
@@ -594,17 +648,31 @@ def render(todos, habits, user, readonly=False):
 </nav>
 <div class="container">
   {add_form}
+  {todo_add_group_card}
   <div class="task-list-header">
     <div class="stats">
       <span>Total {total}</span><span class="done-c">Done {done_count}</span><span>Remaining {total - done_count}</span>
     </div>
-    {"" if readonly else '<button type="button" onclick="toggleAddTask()" class="btn-add-new">＋ New Task</button>'}
+    {todo_header_btns}
   </div>
   {todo_sections}
   {habit_section}
 </div>
 {tabs_html}
 <script>
+function toggleAddGroupCard() {{
+  var card = document.getElementById('addGroupCard');
+  if (!card) return;
+  var open = card.style.display !== 'none';
+  card.style.display = open ? 'none' : 'block';
+  if (!open) {{
+    card.scrollIntoView({{behavior:'smooth', block:'nearest'}});
+    setTimeout(function() {{
+      var inp = document.getElementById('newGroupNameInput');
+      if (inp) inp.focus();
+    }}, 100);
+  }}
+}}
 function toggleAddTask() {{
   var card = document.getElementById('addTaskCard');
   if (!card) return;
