@@ -564,6 +564,26 @@ class Handler(BaseHTTPRequestHandler):
                     self.wfile.flush()
             except (BrokenPipeError, ConnectionResetError):
                 pass
+        elif t == "file":
+            # Serve a file from disk for download
+            import os as _os
+            fpath, mime, fname = result[1], result[2], result[3]
+            data = open(fpath, "rb").read()
+            self.send_response(200)
+            self.send_header("Content-Type", mime)
+            self.send_header("Content-Disposition", f'attachment; filename="{fname}"')
+            self.send_header("Content-Length", len(data))
+            self.end_headers()
+            self.wfile.write(data)
+        elif t == "file_inline":
+            # Serve in-memory bytes for download
+            data, mime, fname = result[1], result[2], result[3]
+            self.send_response(200)
+            self.send_header("Content-Type", mime)
+            self.send_header("Content-Disposition", f'attachment; filename="{fname}"')
+            self.send_header("Content-Length", len(data))
+            self.end_headers()
+            self.wfile.write(data)
 
     def get_ctx(self):
         cookie = self.headers.get("Cookie", "")
@@ -605,7 +625,7 @@ class Handler(BaseHTTPRequestHandler):
         content_type = self.headers.get("Content-Type", "")
 
         if "multipart/form-data" in content_type:
-            body = {"__raw__": self}
+            body = {"__raw__": self, "__raw_handler__": self}
         elif "application/json" in content_type:
             try:
                 body = json.loads(self.rfile.read(length).decode())
