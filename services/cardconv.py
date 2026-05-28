@@ -563,8 +563,18 @@ def _handle_drive_auth(username: str, body):
         token_json = _json.loads(resp.read())
         if "error" in token_json:
             raise Exception(f"{token_json['error']}: {token_json.get('error_description','')}")
+        # Save in google.oauth2.credentials.Credentials format
+        c = _get_client_info()
+        save_data = {
+            "token":         token_json.get("access_token"),
+            "refresh_token": token_json.get("refresh_token"),
+            "token_uri":     "https://oauth2.googleapis.com/token",
+            "client_id":     c["client_id"],
+            "client_secret": c["client_secret"],
+            "scopes":        SCOPES,
+        }
         _ensure_dirs()
-        (TOKENS_DIR / f"{username}.json").write_text(_json.dumps(token_json))
+        (TOKENS_DIR / f"{username}.json").write_text(_json.dumps(save_data))
     except Exception as e:
         return ("html", f"<p style='padding:20px;color:var(--danger)'>Auth error: {e} "
                         f"<a href='/cardconv' style='color:var(--accent)'>Back</a></p>")
