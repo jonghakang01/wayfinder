@@ -375,6 +375,51 @@ def wayfinder(user):
       <div class="service-grid">{extra}</div>
     </div>'''
 
+    # Projects section (admin only)
+    projects_html = ""
+    if user_is_admin:
+        try:
+            from services.dashboard import _load_projects, STATUS_META
+            projects = _load_projects()
+            proj_cards = ""
+            for p in projects:
+                sm = STATUS_META.get(p.get("status", "planning"), STATUS_META["planning"])
+                link = p.get("url", "")
+                link_btn = f'<a href="{link}" style="font-size:.72rem;color:var(--accent);text-decoration:none;font-weight:600">Open →</a>' if link else ""
+                status_opts = "".join(
+                    f'<option value="{s}" {"selected" if s == p.get("status") else ""}>{STATUS_META[s]["label"]}</option>'
+                    for s in STATUS_META
+                )
+                proj_cards += f'''<div style="background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md);padding:14px 16px;display:flex;align-items:center;gap:12px">
+  <span style="font-size:1.4rem">{p.get("emoji","📌")}</span>
+  <div style="flex:1;min-width:0">
+    <div style="font-size:.9rem;font-weight:700;color:var(--text)">{p["name"]}</div>
+    <div style="font-size:.75rem;color:var(--text-muted);margin-top:2px">{p.get("desc","")}</div>
+  </div>
+  <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+    <span style="font-size:.7rem;font-weight:700;padding:3px 10px;border-radius:99px;color:{sm["color"]};background:{sm["bg"]};border:1px solid {sm["border"]}">{sm["label"]}</span>
+    <form method="POST" action="/dashboard/project/status" style="display:inline"><input type="hidden" name="id" value="{p["id"]}"><select name="status" onchange="this.form.submit()" style="font-size:.7rem;padding:2px 4px;border-radius:4px;border:1px solid var(--border);background:var(--surface);color:var(--text-muted)">{status_opts}</select></form>
+    {link_btn}
+  </div>
+</div>'''
+            add_form = '''<form method="POST" action="/dashboard/project/add" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:4px">
+  <input type="text" name="emoji" placeholder="📌" style="width:44px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);color:var(--text);font-size:.8rem">
+  <input type="text" name="name" placeholder="Project name" required style="flex:1;min-width:140px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);color:var(--text);font-size:.8rem">
+  <select name="status" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);color:var(--text);font-size:.8rem"><option value="planning">Planning</option><option value="active">Active</option><option value="paused">Paused</option><option value="done">Done</option></select>
+  <input type="text" name="url" placeholder="URL" style="width:100px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);color:var(--text);font-size:.8rem">
+  <input type="text" name="desc" placeholder="Description" style="flex:2;min-width:180px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);color:var(--text);font-size:.8rem">
+  <button type="submit" class="btn btn-primary btn-sm">Add</button>
+</form>'''
+            projects_html = f'''<div class="category-section">
+  <div class="category-title" style="color:var(--accent)">🗂 Projects</div>
+  <div style="display:flex;flex-direction:column;gap:8px">
+    {proj_cards}
+    {add_form}
+  </div>
+</div>'''
+        except Exception:
+            pass
+
     return f'''<!DOCTYPE html>
 <html lang="ko"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -422,6 +467,7 @@ def wayfinder(user):
   </div>
   
   {sections_html}
+  {projects_html}
 </div>
 <script>
   function closePwaBanner() {{
