@@ -515,28 +515,29 @@ def handle(method, path, body, ctx=None):
     return ("html", _render(user))
 
 
+def _get_client_info():
+    import json as _json
+    data = _json.loads(CREDS_FILE.read_text())
+    return data.get("installed", data.get("web", {}))
+
+
 def _handle_drive_connect(username: str):
     if not CREDS_FILE.exists():
         return ("html", f"<p style='padding:20px;color:var(--danger)'>Credentials file not found: {CREDS_FILE}</p>")
     try:
-        import json as _json
-        from google_auth_oauthlib.flow import InstalledAppFlow
-        flow = InstalledAppFlow.from_client_secrets_file(str(CREDS_FILE), SCOPES)
-        flow.redirect_uri = 'urn:ietf:wg:oauth:2.0:oob'
-        # Disable PKCE so no code_verifier is needed
-        auth_url, state = flow.authorization_url(
-            access_type='offline',
-            prompt='consent',
-            include_granted_scopes='true',
-        )
-        # Remove code_challenge from URL to avoid PKCE requirement
         import urllib.parse as _up
-        parts = _up.urlparse(auth_url)
-        params = dict(_up.parse_qsl(parts.query))
-        params.pop('code_challenge', None)
-        params.pop('code_challenge_method', None)
-        clean_url = parts._replace(query=_up.urlencode(params)).geturl()
-        return ("html", _render_drive_connect(username, clean_url))
+        c = _get_client_info()
+        # Build auth URL manually — no PKCE, no library
+        params = {
+            "client_id":     c["client_id"],
+            "redirect_uri":  "urn:ietf:wg:oauth:2.0:oob",
+            "response_type": "code",
+            "scope":         " ".join(SCOPES),
+            "access_type":   "offline",
+            "prompt":        "consent",
+        }
+        auth_url = "https://accounts.google.com/o/oauth2/v2/auth?" + _up.urlencode(params)
+        return ("html", _render_drive_connect(username, auth_url))
     except Exception as e:
         return ("html", f"<p style='padding:20px;color:var(--danger)'>Drive connect error: {e}</p>")
 
@@ -547,19 +548,18 @@ def _handle_drive_auth(username: str, body):
     if not code:
         return ("redirect", "/cardconv")
     try:
-        import json as _json
-        # Exchange code for token using requests directly (no PKCE)
-        creds_data = _json.loads(CREDS_FILE.read_text())
-        installed = creds_data.get("installed", creds_data.get("web", {}))
-        import urllib.request as _req, urllib.parse as _up
+        import json as _json, urllib.request as _req, urllib.parse as _up
+        c = _get_client_info()
         token_data = _up.urlencode({
-            "code": code,
-            "client_id": installed["client_id"],
-            "client_secret": installed["client_secret"],
-            "redirect_uri": "urn:ietf:wg:oauth:2.0:oob",
-            "grant_type": "authorization_code",
+            "code":          code,
+            "client_id":     c["client_id"],
+            "client_secret": c["client_secret"],
+            "redirect_uri":  "urn:ietf:wg:oauth:2.0:oob",
+            "grant_type":    "authorization_code",
         }).encode()
-        resp = _req.urlopen("https://oauth2.googleapis.com/token", data=token_data)
+        req = _req.Request("https://oauth2.googleapis.com/token", data=token_data,
+                           headers={"Content-Type": "application/x-www-form-urlencoded"})
+        resp = _req.urlopen(req)
         token_json = _json.loads(resp.read())
         if "error" in token_json:
             raise Exception(f"{token_json['error']}: {token_json.get('error_description','')}")
