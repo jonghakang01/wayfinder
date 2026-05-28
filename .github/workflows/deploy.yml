@@ -16,5 +16,7 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             cd ~/webapp && git pull origin main
+            pip3 install openpyxl --break-system-packages -q 2>/dev/null || pip3 install openpyxl -q
             systemctl restart wayfinder
+            sleep 2 && curl -sf http://localhost:8080/health && echo "Health OK"
             echo "Deployed at $(date)"
