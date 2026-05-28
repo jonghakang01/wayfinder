@@ -1,6 +1,39 @@
 import json, os
 from datetime import date, timedelta, datetime
 
+ADMIN_USER = "jongha.kang"
+PROJECTS_FILE = os.path.join(os.path.expanduser("~/.appdata"), "projects.json")
+
+STATUS_META = {
+    "active":   {"label": "Active",    "color": "#34d399", "bg": "rgba(52,211,153,0.12)",  "border": "rgba(52,211,153,0.3)"},
+    "planning": {"label": "Planning",  "color": "#fbbf24", "bg": "rgba(251,191,36,0.12)",  "border": "rgba(251,191,36,0.3)"},
+    "paused":   {"label": "Paused",    "color": "#94a3b8", "bg": "rgba(148,163,184,0.12)", "border": "rgba(148,163,184,0.3)"},
+    "done":     {"label": "Done",      "color": "#818cf8", "bg": "rgba(129,140,248,0.12)", "border": "rgba(129,140,248,0.3)"},
+}
+
+DEFAULT_PROJECTS = [
+    {"id": 1, "emoji": "🧭", "name": "Wayfinder · Task/Habit", "desc": "Personal productivity hub — Task & Habit tracker, ongoing improvement", "status": "active",   "started": "2026-05-01", "url": "/todo"},
+    {"id": 2, "emoji": "💳", "name": "Corporate Card Automation", "desc": "Auto-process corporate card receipts and generate expense reports", "status": "planning", "started": "2026-05-28", "url": ""},
+]
+
+def _load_projects():
+    if not os.path.exists(PROJECTS_FILE):
+        _save_projects(DEFAULT_PROJECTS)
+        return DEFAULT_PROJECTS
+    try:
+        with open(PROJECTS_FILE) as f:
+            return json.load(f)
+    except Exception:
+        return DEFAULT_PROJECTS
+
+def _save_projects(projects):
+    os.makedirs(os.path.dirname(PROJECTS_FILE), exist_ok=True)
+    with open(PROJECTS_FILE, "w") as f:
+        json.dump(projects, f, ensure_ascii=False, indent=2)
+
+def _next_proj_id(projects):
+    return max((p["id"] for p in projects), default=0) + 1
+
 DATA_ROOT = os.path.expanduser("~/.appdata")
 
 META = {
@@ -66,6 +99,30 @@ def handle(method, path, body, ctx=None):
     user = (ctx or {}).get("user")
     if not user:
         return ("redirect", "/login")
+
+    if method == "POST" and user == ADMIN_USER:
+        projects = _load_projects()
+        if path == "/dashboard/project/add":
+            name  = (body.get("name",  [""])[0]).strip()
+            desc  = (body.get("desc",  [""])[0]).strip()
+            emoji = (body.get("emoji", ["📌"])[0]).strip() or "📌"
+            url   = (body.get("url",   [""])[0]).strip()
+            status = body.get("status", ["planning"])[0]
+            if name:
+                projects.append({"id": _next_proj_id(projects), "emoji": emoji, "name": name, "desc": desc, "status": status, "started": date.today().isoformat(), "url": url})
+                _save_projects(projects)
+        elif path == "/dashboard/project/delete":
+            pid = int(body.get("id", [0])[0])
+            _save_projects([p for p in projects if p["id"] != pid])
+        elif path == "/dashboard/project/status":
+            pid    = int(body.get("id", [0])[0])
+            status = body.get("status", ["active"])[0]
+            for p in projects:
+                if p["id"] == pid:
+                    p["status"] = status
+            _save_projects(projects)
+        return ("redirect", "/dashboard")
+
     return ("html", render(user))
 
 
@@ -162,6 +219,94 @@ def render(user):
 
     from server import app_tabs
     tabs_html = app_tabs("/dashboard")
+
+    # Projects section (admin only)
+    projects_html = ""
+    if user == ADMIN_USER:
+        projects = _load_projects()
+        proj_cards = ""
+        for p in projects:
+            sm = STATUS_META.get(p.get("status", "planning"), STATUS_META["planning"])
+            link_btn = f'<a href="{p["url"]}" class="btn btn-ghost btn-sm" style="font-size:0.72rem">Open →</a>' if p.get("url") else ""
+            status_opts = "".join(
+                f'<option value="{s}" {"selected" if s == p.get("status") else ""}>{STATUS_META[s]["label"]}</option>'
+                for s in STATUS_META
+            )
+            proj_cards += f'''
+<div class="proj-card">
+  <div class="proj-top">
+    <span class="proj-emoji">{p.get("emoji","📌")}</span>
+    <div class="proj-info">
+      <div class="proj-name">{p["name"]}</div>
+      <div class="proj-desc">{p.get("desc","")}</div>
+    </div>
+    <div class="proj-actions">
+      <span class="proj-badge" style="color:{sm["color"]};background:{sm["bg"]};border:1px solid {sm["border"]}">{sm["label"]}</span>
+      {link_btn}
+    </div>
+  </div>
+  <div class="proj-footer">
+    <span class="proj-date">Started {p.get("started","")}</span>
+    <form method="POST" action="/dashboard/project/status" style="display:inline-flex;align-items:center;gap:6px">
+      <input type="hidden" name="id" value="{p["id"]}">
+      <select name="status" onchange="this.form.submit()" class="proj-status-sel">{status_opts}</select>
+    </form>
+    <form method="POST" action="/dashboard/project/delete" style="display:inline" onsubmit="return confirm('Delete project?')">
+      <input type="hidden" name="id" value="{p["id"]}">
+      <button class="btn btn-danger btn-sm" style="font-size:0.72rem">✕</button>
+    </form>
+  </div>
+</div>'''
+
+        add_form = '''
+<details class="proj-add-details">
+  <summary class="btn btn-ghost btn-sm" style="list-style:none;cursor:pointer;display:inline-flex;align-items:center;gap:4px">＋ Add Project</summary>
+  <form method="POST" action="/dashboard/project/add" class="proj-add-form">
+    <input type="text" name="emoji" placeholder="Emoji" style="width:60px">
+    <input type="text" name="name" placeholder="Project name" required style="flex:1;min-width:160px">
+    <select name="status">
+      <option value="planning">Planning</option>
+      <option value="active">Active</option>
+      <option value="paused">Paused</option>
+      <option value="done">Done</option>
+    </select>
+    <input type="text" name="url" placeholder="URL (optional)" style="width:140px">
+    <input type="text" name="desc" placeholder="Description" style="flex:2;min-width:200px">
+    <button type="submit" class="btn btn-primary btn-sm">Add</button>
+  </form>
+</details>'''
+
+        projects_html = f'''
+<div class="notepad-card" style="margin-bottom:28px">
+  <div class="notepad-header">
+    <div class="notepad-title-row">
+      <span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--accent)">🗂 Projects</span>
+      <span style="font-size:var(--text-xs);color:var(--text-muted);margin-left:auto">{len(projects)} projects</span>
+    </div>
+  </div>
+  <div class="notepad-body" style="padding:12px 16px;display:flex;flex-direction:column;gap:10px">
+    {proj_cards}
+    <div style="margin-top:4px">{add_form}</div>
+  </div>
+</div>
+<style>
+.proj-card{{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md);padding:14px 16px;display:flex;flex-direction:column;gap:10px}}
+.proj-top{{display:flex;align-items:flex-start;gap:12px}}
+.proj-emoji{{font-size:1.5rem;flex-shrink:0;width:36px;text-align:center;margin-top:2px}}
+.proj-info{{flex:1;min-width:0}}
+.proj-name{{font-size:.95rem;font-weight:700;color:var(--text);margin-bottom:3px}}
+.proj-desc{{font-size:.78rem;color:var(--text-muted);line-height:1.4}}
+.proj-actions{{display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0}}
+.proj-badge{{font-size:.7rem;font-weight:700;padding:3px 10px;border-radius:var(--radius-full);white-space:nowrap}}
+.proj-footer{{display:flex;align-items:center;gap:8px;flex-wrap:wrap;border-top:1px solid var(--border);padding-top:8px}}
+.proj-date{{font-size:.72rem;color:var(--text-muted);flex:1}}
+.proj-status-sel{{font-size:.72rem;padding:3px 6px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text-muted);cursor:pointer}}
+.proj-add-details summary::marker,.proj-add-details summary::-webkit-details-marker{{display:none}}
+.proj-add-form{{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px;padding:12px;background:var(--surface-3);border-radius:var(--radius-md)}}
+.proj-add-form input,.proj-add-form select{{padding:7px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface-2);color:var(--text);font-size:.82rem}}
+.proj-add-form input:focus{{outline:none;border-color:var(--accent)}}
+@media(max-width:600px){{.proj-top{{flex-wrap:wrap}}.proj-actions{{flex-direction:row;flex-wrap:wrap}}.proj-add-form{{flex-direction:column}}.proj-add-form input,.proj-add-form select{{width:100%}}}}
+</style>'''
 
     now_hour = datetime.now().hour
     if now_hour < 6:
@@ -264,6 +409,8 @@ def render(user):
       {habit_grid_html}
     </div>
   </div>
+
+  {projects_html}
 
 </div>
 {tabs_html}
