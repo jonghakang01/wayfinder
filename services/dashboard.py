@@ -141,14 +141,14 @@ def render(user):
         cells = ""
         for status in row["week"]:
             cells += f'<div class="hcell {status}"></div>'
-        streak_html = f'<span class="streak">🔥 {row["streak"]}일</span>' if row["streak"] >= 2 else ""
+        streak_html = f'<span class="streak">🔥 {row["streak"]}d</span>' if row["streak"] >= 2 else ""
         habit_grid_html += f'''<div class="habit-row-d">
           <div class="habit-name-d">{row["icon"]} {row["name"]} {streak_html}</div>
           <div class="hcells">{cells}</div>
         </div>'''
 
     if not habit_grid_html:
-        habit_grid_html = '<div class="empty-hint">등록된 습관이 없습니다</div>'
+        habit_grid_html = '<div class="empty-hint">No habits yet</div>'
 
     todo_rate = int(done_today / (done_today + total_active) * 100) if (done_today + total_active) > 0 else 0
     habit_rate = int(done_habits_today / total_habits * 100) if total_habits > 0 else 0

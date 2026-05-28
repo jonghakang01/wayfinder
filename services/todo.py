@@ -337,7 +337,7 @@ def render(todos, habits, user, readonly=False):
             else:
                 actions_html = (
                     f'<button class="btn btn-ghost btn-sm" '
-                    f'onclick="openMemoEdit({item_id},this)" type="button">수정</button>'
+                    f'onclick="openMemoEdit({item_id},this)" type="button">Edit</button>'
                     f'<form method="POST" action="/todo/delete" style="display:inline">'
                     f'<input type="hidden" name="id" value="{item_id}">'
                     f'<button class="btn btn-danger btn-sm">x</button></form>'
@@ -351,8 +351,8 @@ def render(todos, habits, user, readonly=False):
               <input type="hidden" name="id" value="{t["id"]}">
               <textarea name="body" class="memo-textarea" rows="2">{body_text}</textarea>
               <div style="display:flex;gap:4px;margin-top:4px">
-                <button type="submit" class="btn btn-primary btn-sm">저장</button>
-                <button type="button" class="btn btn-ghost btn-sm" onclick="closeMemoEdit({t["id"]})">취소</button>
+                <button type="submit" class="btn btn-primary btn-sm">Save</button>
+                <button type="button" class="btn btn-ghost btn-sm" onclick="closeMemoEdit({t["id"]})">Cancel</button>
               </div>
             </form>
           </div>
@@ -394,7 +394,7 @@ def render(todos, habits, user, readonly=False):
                 habit_btn = (
                     f'<form method="POST" action="/todo/to_habit" style="display:inline">'
                     f'<input type="hidden" name="id" value="{t["id"]}">'
-                    f'<button class="btn btn-ghost">습관</button></form>'
+                    f'<button class="btn btn-ghost">Habit</button></form>'
                 )
             group_opts = '<option value="">No group</option>' + "".join(
                 f'<option value="{g}" {"selected" if g == t_group else ""}>{g}</option>'
@@ -444,19 +444,19 @@ def render(todos, habits, user, readonly=False):
             f'<form method="POST" action="/todo/add">'
             f'<input type="hidden" name="group" value="{g}">'
             f'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
-            f'<input type="text" name="title" placeholder="Task 이름..." required style="flex:1;min-width:150px;padding:7px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:var(--text-sm);background:var(--surface);color:var(--text)">'
+            f'<input type="text" name="title" placeholder="Task name..." required style="flex:1;min-width:150px;padding:7px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:var(--text-sm);background:var(--surface);color:var(--text)">'
             f'<input type="date" name="due_date" style="padding:7px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:var(--text-sm);background:var(--surface);color:var(--text)">'
-            f'<button type="submit" class="btn btn-primary btn-sm">추가</button>'
-            f'<button type="button" class="btn btn-ghost btn-sm" onclick="closeInlineForm(this)">취소</button>'
+            f'<button type="submit" class="btn btn-primary btn-sm">Add</button>'
+            f'<button type="button" class="btn btn-ghost btn-sm" onclick="closeInlineForm(this)">Cancel</button>'
             f'</div></form></div>'
             f'<div class="inline-memo-form inline-add-form" style="display:none;padding:10px 12px;background:var(--surface-2);border-top:1px solid var(--notepad-line)">'
             f'<form method="POST" action="/todo/memo/add">'
             f'<input type="hidden" name="group" value="{g}">'
             f'<div style="display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap">'
-            f'<textarea name="body" placeholder="메모 내용..." rows="2" required style="flex:1;min-width:150px;padding:7px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:var(--text-sm);resize:vertical;background:var(--surface);color:var(--text)"></textarea>'
+            f'<textarea name="body" placeholder="Memo..." rows="2" required style="flex:1;min-width:150px;padding:7px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:var(--text-sm);resize:vertical;background:var(--surface);color:var(--text)"></textarea>'
             f'<div style="display:flex;gap:4px">'
-            f'<button type="submit" class="btn btn-primary btn-sm">추가</button>'
-            f'<button type="button" class="btn btn-ghost btn-sm" onclick="closeInlineForm(this)">취소</button>'
+            f'<button type="submit" class="btn btn-primary btn-sm">Add</button>'
+            f'<button type="button" class="btn btn-ghost btn-sm" onclick="closeInlineForm(this)">Cancel</button>'
             f'</div></div></form></div>'
         )
         del_btn = "" if readonly else (
@@ -544,8 +544,7 @@ def render(todos, habits, user, readonly=False):
 .badge-early   {{ background:rgba(52,211,153,0.1);   color:var(--success); }}
 
 /* Notepad card */
-.notepad-card {{ background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-lg); margin-bottom:16px; box-shadow:var(--shadow-sm); overflow:hidden; position:relative; }}
-.notepad-card::before {{ content:""; position:absolute; top:0; left:0; bottom:0; width:4px; background:var(--group-color,var(--accent)); border-radius:var(--radius-lg) 0 0 var(--radius-lg); }}
+.notepad-card {{ background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-lg); margin-bottom:16px; box-shadow:var(--shadow-sm); overflow:hidden; }}
 .notepad-tab {{ background:var(--notepad-header); border-bottom:1px solid var(--border); display:flex; align-items:center; padding:5px 20px; gap:8px; }}
 .notepad-tab-dot {{ width:10px; height:10px; border-radius:50%; border:2px solid var(--accent); background:transparent; }}
 .notepad-header {{ background:var(--notepad-header); padding:10px 16px 12px; }}

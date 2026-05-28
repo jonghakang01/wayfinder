@@ -329,8 +329,7 @@ _CSS = """
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg-deep);color:var(--text);font-family:'Pretendard Variable',Pretendard,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;min-height:100vh}
 .container{width:100%;max-width:720px;margin:0 auto;padding:32px 24px 80px;display:flex;flex-direction:column;gap:24px}
-.notepad-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow-md);position:relative}
-.notepad-card::before{content:"";position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,var(--accent),var(--info))}
+.notepad-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow-md)}
 .notepad-header{background:var(--surface-2);padding:12px 16px 14px;border-bottom:1px solid var(--border)}
 .notepad-title-row{display:flex;align-items:center;gap:10px}
 .notepad-chevron{font-size:0.7rem;color:var(--text-muted);cursor:pointer;transition:transform 0.2s;user-select:none}
@@ -354,8 +353,7 @@ h2{font-size:18px;font-weight:700;margin-bottom:16px;color:var(--text)}
 .add-form input[type=number]{width:72px}
 .add-form input:focus{border-color:var(--accent);outline:none;box-shadow:0 0 0 3px var(--accent-glow)}
 .add-form select{padding:9px 12px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:14px}
-.habit-row{display:flex;align-items:center;gap:14px;padding:14px 16px;border-radius:var(--radius-md);border:1px solid var(--border);background:var(--surface);margin-bottom:8px;transition:box-shadow 0.2s,transform 0.2s,border-color 0.2s;position:relative;overflow:hidden}
-.habit-row::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--accent)}
+.habit-row{display:flex;align-items:center;gap:14px;padding:14px 16px;border-radius:var(--radius-md);border:1px solid var(--border);background:var(--surface);margin-bottom:8px;transition:box-shadow 0.2s,transform 0.2s,border-color 0.2s}
 .habit-row:hover{box-shadow:var(--shadow-md);transform:translateY(-2px);border-color:var(--accent)}
 .habit-icon-sm{font-size:18px;width:40px;height:40px;display:flex;align-items:center;justify-content:center;flex-shrink:0;background:var(--surface-2);border-radius:10px}
 .habit-info{flex:1}

@@ -215,7 +215,7 @@ ICON_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192">
 MANIFEST = json.dumps({
     "name": "Wayfinder",
     "short_name": "Wayfinder",
-    "description": "개인 생산성 허브",
+    "description": "Personal productivity hub",
     "start_url": "/",
     "display": "standalone",
     "background_color": "#f8fafc",
@@ -225,8 +225,8 @@ MANIFEST = json.dumps({
         {"src": "/icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"}
     ],
     "shortcuts": [
-        {"name": "Todo List", "url": "/todo", "description": "할 일 관리"},
-        {"name": "Habit Tracker", "url": "/habit", "description": "습관 추적"}
+        {"name": "Todo List", "url": "/todo", "description": "Task management"},
+        {"name": "Habit Tracker", "url": "/habit", "description": "Habit tracking"}
     ]
 }, ensure_ascii=False, indent=2)
 
@@ -257,7 +257,7 @@ self.addEventListener('fetch', e => {{
   }}
   e.respondWith(
     fetch(e.request).catch(() =>
-      new Response('<h2 style="font-family:sans-serif;padding:40px">오프라인 상태입니다. 인터넷 연결을 확인해주세요.</h2>',
+      new Response('<h2 style="font-family:sans-serif;padding:40px">You are offline. Please check your internet connection.</h2>',
         {{headers: {{'Content-Type': 'text/html; charset=utf-8'}}}})
     )
   );
@@ -301,10 +301,10 @@ PWA_INJECT = (
 )
 
 CATEGORIES = {
-    "생산성": [],
-    "팀 도구": ["/terminals", "/workspace"],
-    "분석": ["/aeo", "/llm-check"],
-    "관리": ["/admin"],
+    "Productivity": [],
+    "Team Tools": ["/terminals", "/workspace"],
+    "Analytics": ["/aeo", "/llm-check"],
+    "Admin": ["/admin"],
 }
 
 def wayfinder(user):
@@ -320,15 +320,15 @@ def wayfinder(user):
 
     hour = datetime.now().hour
     if hour < 6:
-        greeting, greeting_icon = "늦은 밤이에요", "🌙"
+        greeting, greeting_icon = "Good night", "🌙"
     elif hour < 12:
-        greeting, greeting_icon = "좋은 아침이에요", "☀️"
+        greeting, greeting_icon = "Good morning", "☀️"
     elif hour < 18:
-        greeting, greeting_icon = "안녕하세요", "🌤️"
+        greeting, greeting_icon = "Hello", "🌤️"
     else:
-        greeting, greeting_icon = "좋은 저녁이에요", "🌙"
+        greeting, greeting_icon = "Good evening", "🌙"
 
-    today_str = datetime.now().strftime("%Y년 %m월 %d일")
+    today_str = datetime.now().strftime("%B %d, %Y")
 
     # 서비스 path → META 매핑
     svc_map = {}
@@ -371,7 +371,7 @@ def wayfinder(user):
         </a>'''
     if extra:
         sections_html += f'''<div class="category-section">
-      <div class="category-title">기타</div>
+      <div class="category-title">Other</div>
       <div class="service-grid">{extra}</div>
     </div>'''
 
@@ -383,22 +383,22 @@ def wayfinder(user):
 </head><body>
 <nav>
   <span class="nav-brand">🧭 Wayfinder</span>
-  <span class="nav-user">👤 {user} &nbsp;·&nbsp; <a href="/logout">로그아웃</a></span>
+  <span class="nav-user">👤 {user} &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
 </nav>
 <div class="container">
   <div class="dashboard">
     <div class="dashboard-greeting">
-      <h2>{greeting_icon} {greeting}, {user}님</h2>
+      <h2>{greeting_icon} {greeting}, {user}</h2>
       <p>{today_str}</p>
     </div>
     <div class="dashboard-stats">
       <div class="stat-card highlight">
         <div class="stat-num">{todo_total}</div>
-        <div class="stat-label">남은 할 일</div>
+        <div class="stat-label">Tasks Left</div>
       </div>
       <div class="stat-card">
         <div class="stat-num">{todo_done_today}</div>
-        <div class="stat-label">오늘 완료</div>
+        <div class="stat-label">Done Today</div>
       </div>
     </div>
   </div>
@@ -415,8 +415,8 @@ def wayfinder(user):
   <div id="pwa-banner" class="pwa-banner">
     <div class="pwa-icon">📱</div>
     <div class="pwa-text">
-      <div class="pwa-title">앱으로 설치하기</div>
-      <div id="pwa-desc" class="pwa-desc">바탕화면에 추가하여 빠르게 접속하세요.</div>
+      <div class="pwa-title">Install App</div>
+      <div id="pwa-desc" class="pwa-desc">Add to your home screen for quick access.</div>
     </div>
     <button class="pwa-close" onclick="closePwaBanner()">×</button>
   </div>
@@ -440,9 +440,9 @@ def wayfinder(user):
       const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
       
       if (isIOS) {{
-        desc.innerHTML = 'Safari 하단의 <b>공유</b> 버튼을 누르고<br><b>홈 화면에 추가</b>를 선택하세요.';
+        desc.innerHTML = 'Tap the <b>Share</b> button in Safari,<br>then select <b>Add to Home Screen</b>.';
       }} else {{
-        desc.innerHTML = 'Chrome 메뉴(⋮)를 누르고<br><b>홈 화면에 추가</b>를 선택하세요.';
+        desc.innerHTML = 'Tap the Chrome menu (⋮)<br>and select <b>Add to Home Screen</b>.';
       }}
       banner.classList.add('show');
     }}
