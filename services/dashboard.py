@@ -180,36 +180,36 @@ def render(user):
 <title>📊 Overview · Wayfinder</title>
 <link rel="stylesheet" href="/static/style.css">
 <style>
-.db-hero{{background:var(--slate-900);background-image:radial-gradient(at 0% 0%,rgba(56,189,248,.18) 0,transparent 55%),radial-gradient(at 100% 100%,rgba(59,130,246,.18) 0,transparent 55%);border-radius:var(--radius-xl);padding:32px 36px;color:white;margin-bottom:28px;border:1px solid rgba(255,255,255,.05)}}
+.db-hero{{background:var(--surface);background-image:radial-gradient(at 0% 0%,rgba(56,189,248,.18) 0,transparent 55%),radial-gradient(at 100% 100%,rgba(129,140,248,.18) 0,transparent 55%);border-radius:var(--radius-xl);padding:32px 36px;color:var(--text);margin-bottom:28px;border:1px solid var(--border)}}
 .db-hero h2{{font-size:1.5rem;font-weight:800;letter-spacing:-.03em;margin-bottom:4px}}
-.db-hero p{{color:var(--slate-400);font-size:.9rem}}
+.db-hero p{{color:var(--text-muted);font-size:.9rem}}
 .db-grid{{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:28px}}
-.big-num{{font-size:3rem;font-weight:800;letter-spacing:-.04em;line-height:1;color:var(--slate-900)}}
-.big-num span{{font-size:1rem;font-weight:500;color:var(--slate-400);margin-left:4px}}
-.rate-bar{{background:var(--slate-100);border-radius:99px;height:8px;margin-top:12px;overflow:hidden}}
-.rate-fill{{height:100%;border-radius:99px;background:linear-gradient(90deg,#3b82f6,#38bdf8);transition:width .6s ease}}
-.rate-label{{font-size:.78rem;color:var(--slate-500);margin-top:6px}}
+.big-num{{font-size:3rem;font-weight:800;letter-spacing:-.04em;line-height:1;color:var(--text)}}
+.big-num span{{font-size:1rem;font-weight:500;color:var(--text-muted);margin-left:4px}}
+.rate-bar{{background:var(--surface-2);border-radius:99px;height:8px;margin-top:12px;overflow:hidden}}
+.rate-fill{{height:100%;border-radius:99px;background:linear-gradient(90deg,var(--accent),var(--info));transition:width .6s ease}}
+.rate-label{{font-size:.78rem;color:var(--text-muted);margin-top:6px}}
 .bar-chart{{display:flex;align-items:flex-end;gap:8px;height:80px;padding-bottom:0}}
 .bar-col{{display:flex;flex-direction:column;align-items:center;gap:4px;flex:1}}
-.bar-val{{font-size:.7rem;color:var(--slate-400);height:16px;display:flex;align-items:center}}
-.bar{{width:100%;background:var(--slate-200);border-radius:4px 4px 0 0;transition:.3s}}
-.bar.today{{background:linear-gradient(180deg,#38bdf8,#3b82f6)}}
-.bar-label{{font-size:.68rem;color:var(--slate-400);font-weight:600}}
-.bar-label.today{{color:#3b82f6}}
+.bar-val{{font-size:.7rem;color:var(--text-muted);height:16px;display:flex;align-items:center}}
+.bar{{width:100%;background:var(--surface-2);border-radius:4px 4px 0 0;transition:.3s}}
+.bar.today{{background:linear-gradient(180deg,var(--accent),var(--info))}}
+.bar-label{{font-size:.68rem;color:var(--text-muted);font-weight:600}}
+.bar-label.today{{color:var(--accent)}}
 .week-labels{{display:flex;justify-content:flex-end;gap:4px;margin-bottom:8px}}
-.wlabel{{width:28px;text-align:center;font-size:.65rem;color:var(--slate-400);font-weight:600}}
-.wlabel.today-lbl{{color:#3b82f6}}
-.habit-row-d{{display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--slate-100)}}
+.wlabel{{width:28px;text-align:center;font-size:.65rem;color:var(--text-muted);font-weight:600}}
+.wlabel.today-lbl{{color:var(--accent)}}
+.habit-row-d{{display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border)}}
 .habit-row-d:last-child{{border-bottom:none}}
-.habit-name-d{{flex:1;font-size:.85rem;font-weight:600;color:var(--slate-900);display:flex;align-items:center;gap:6px;min-width:0}}
-.streak{{font-size:.72rem;color:#f97316;font-weight:700;white-space:nowrap}}
+.habit-name-d{{flex:1;font-size:.85rem;font-weight:600;color:var(--text);display:flex;align-items:center;gap:6px;min-width:0}}
+.streak{{font-size:.72rem;color:var(--warn);font-weight:700;white-space:nowrap}}
 .hcells{{display:flex;gap:4px}}
-.hcell{{width:28px;height:28px;border-radius:6px;background:var(--slate-100)}}
-.hcell.done{{background:linear-gradient(135deg,#3b82f6,#38bdf8)}}
-.hcell.partial{{background:#bfdbfe}}
-.empty-hint{{color:var(--slate-400);font-size:.85rem;padding:16px 0;text-align:center}}
-.notepad-card{{background:white;border:1px solid var(--slate-200);border-radius:var(--radius-lg);overflow:hidden;box-shadow:var(--shadow-sm)}}
-.notepad-header{{background:var(--notepad-header);padding:10px 16px 12px}}
+.hcell{{width:28px;height:28px;border-radius:6px;background:var(--surface-2)}}
+.hcell.done{{background:linear-gradient(135deg,var(--accent),var(--info))}}
+.hcell.partial{{background:rgba(56,189,248,0.25)}}
+.empty-hint{{color:var(--text-muted);font-size:.85rem;padding:16px 0;text-align:center}}
+.notepad-card{{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;box-shadow:var(--shadow-sm)}}
+.notepad-header{{background:var(--surface-2);padding:10px 16px 12px;border-bottom:1px solid var(--border)}}
 .notepad-title-row{{display:flex;align-items:center;gap:10px}}
 .notepad-body{{padding:16px}}
 @media(max-width:600px){{

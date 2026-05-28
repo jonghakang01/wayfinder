@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import importlib, os, sys, json
+import importlib, os, sys, json, hashlib
 from http.server import HTTPServer, BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
@@ -33,6 +33,14 @@ SERVICES = load_services()
 STYLE = """
 @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css');
 :root {
+  /* Dark foundation */
+  --bg-deep:#080d14; --surface:#111827; --surface-2:#1a2537; --surface-3:#243044;
+  --border:#1e293b; --border-bright:#334155;
+  --text:#f1f5f9; --text-muted:#64748b; --text-dim:#334155;
+  /* Semantic */
+  --accent:#38bdf8; --accent-glow:rgba(56,189,248,0.12);
+  --success:#34d399; --warn:#fbbf24; --danger:#f87171; --info:#818cf8;
+  /* Legacy aliases (기존 코드 호환) */
   --slate-50:#f8fafc; --slate-100:#f1f5f9; --slate-200:#e2e8f0;
   --slate-300:#cbd5e1; --slate-400:#94a3b8; --slate-500:#64748b;
   --slate-700:#334155; --slate-900:#0f172a;
@@ -40,19 +48,22 @@ STYLE = """
   --green-50:#f0fdf4; --green-500:#22c55e; --green-600:#16a34a;
   --amber-50:#fffbeb; --amber-400:#fbbf24; --amber-500:#f59e0b;
   --red-50:#fef2f2; --red-500:#ef4444;
+  /* Group accent colors */
+  --group-1:#38bdf8; --group-2:#818cf8; --group-3:#34d399; --group-4:#fb923c; --group-5:#f472b6;
+  /* Typography */
   --text-xs:0.72rem; --text-sm:0.82rem; --text-base:0.9rem; --text-md:1rem;
   --fw-medium:500; --fw-semibold:600; --fw-bold:700; --fw-extrabold:800;
   --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:20px; --sp-6:24px;
   --radius-sm:6px; --radius-md:10px; --radius-lg:14px; --radius-xl:18px; --radius-full:9999px;
-  --shadow-sm:0 1px 3px rgba(0,0,0,0.06);
-  --shadow-md:0 4px 12px rgba(0,0,0,0.06);
-  --shadow-lg:0 10px 15px -3px rgba(0,0,0,0.1),0 4px 6px -4px rgba(0,0,0,0.1);
+  --shadow-sm:0 1px 4px rgba(0,0,0,0.4);
+  --shadow-md:0 4px 16px rgba(0,0,0,0.5);
+  --shadow-lg:0 8px 32px rgba(0,0,0,0.6);
   --btn-h-sm:28px; --btn-h-base:32px; --btn-h-lg:40px;
-  --notepad-header:#fefce8; --notepad-line:#f1f5f9;
+  --notepad-header:var(--surface-2); --notepad-line:var(--border);
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 input, textarea, select, button { font-family: inherit; font-size: inherit; }
-body { font-family: 'Pretendard Variable', Pretendard, -apple-system, system-ui, sans-serif; background: var(--slate-50); color: var(--slate-900); line-height: 1.5; -webkit-font-smoothing: antialiased; min-height: 100vh; }
+body { font-family: 'Pretendard Variable', Pretendard, -apple-system, system-ui, sans-serif; background: var(--bg-deep); color: var(--text); line-height: 1.5; -webkit-font-smoothing: antialiased; min-height: 100vh; }
 
 /* Nav */
 nav { background: rgba(15,23,42,0.92); backdrop-filter: blur(12px); padding: 13px 32px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; border-bottom: 1px solid rgba(255,255,255,0.07); }
@@ -67,7 +78,7 @@ nav a:hover { color: white; }
 
 /* Layout */
 .container { max-width: 880px; margin: 0 auto; padding: 44px 24px 80px; }
-h1 { font-size: 1.75rem; color: var(--slate-900); margin-bottom: 6px; font-weight: 800; letter-spacing: -0.03em; }
+h1 { font-size: 1.75rem; color: var(--text); margin-bottom: 6px; font-weight: 800; letter-spacing: -0.03em; }
 
 /* Dashboard widget */
 .dashboard { background: var(--slate-900); background-image: radial-gradient(at 0% 0%, rgba(56,189,248,0.15) 0, transparent 50%), radial-gradient(at 100% 100%, rgba(59,130,246,0.15) 0, transparent 50%); border-radius: var(--radius-xl); padding: 36px 40px; margin-bottom: 48px; color: white; display: flex; justify-content: space-between; align-items: center; gap: 24px; flex-wrap: wrap; box-shadow: var(--shadow-lg); border: 1px solid rgba(255,255,255,0.05); }
@@ -81,9 +92,9 @@ h1 { font-size: 1.75rem; color: var(--slate-900); margin-bottom: 6px; font-weigh
 .stat-card.highlight .stat-num { color: var(--sky-400); text-shadow: 0 0 20px rgba(56,189,248,0.3); }
 
 /* App entry card */
-.app-entry-card { display:flex; align-items:center; gap:20px; background:white; border:1px solid var(--slate-200); border-radius:var(--radius-xl); padding:24px 28px; text-decoration:none; color:inherit; transition:all .25s; margin-bottom:32px; position:relative; overflow:hidden; }
-.app-entry-card::before { content:""; position:absolute; top:0; left:0; right:0; height:4px; background:linear-gradient(90deg,#3b82f6,#38bdf8); }
-.app-entry-card:hover { box-shadow:var(--shadow-lg); transform:translateY(-3px); border-color:var(--blue-500); }
+.app-entry-card { display:flex; align-items:center; gap:20px; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-xl); padding:24px 28px; text-decoration:none; color:var(--text); transition:all .25s; margin-bottom:32px; position:relative; overflow:hidden; }
+.app-entry-card::before { content:""; position:absolute; top:0; left:0; right:0; height:3px; background:linear-gradient(90deg,var(--accent),var(--info)); }
+.app-entry-card:hover { box-shadow:var(--shadow-lg); transform:translateY(-3px); border-color:var(--accent); }
 .app-entry-icon { font-size:2.5rem; filter:drop-shadow(0 2px 6px rgba(0,0,0,0.1)); }
 .app-entry-text { flex:1; }
 .app-entry-name { font-size:1.1rem; font-weight:800; color:var(--slate-900); margin-bottom:4px; letter-spacing:-.02em; }
@@ -98,13 +109,13 @@ h1 { font-size: 1.75rem; color: var(--slate-900); margin-bottom: 6px; font-weigh
 
 /* Wayfinder cards */
 .service-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(185px, 1fr)); gap: 14px; }
-.service-card { background: white; border-radius: var(--radius-lg); padding: 24px; border: 1px solid var(--slate-200); text-decoration: none; color: inherit; transition: all 0.25s cubic-bezier(0.4,0,0.2,1); display: flex; flex-direction: column; position: relative; overflow: hidden; }
-.service-card::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--blue-500); opacity: 0; transition: 0.2s; }
-.service-card:hover { box-shadow: var(--shadow-lg); transform: translateY(-4px); border-color: var(--blue-500); }
+.service-card { background: var(--surface); border-radius: var(--radius-lg); padding: 24px; border: 1px solid var(--border); text-decoration: none; color: var(--text); transition: all 0.25s cubic-bezier(0.4,0,0.2,1); display: flex; flex-direction: column; position: relative; overflow: hidden; }
+.service-card::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--accent); opacity: 0; transition: 0.2s; }
+.service-card:hover { box-shadow: var(--shadow-lg); transform: translateY(-4px); border-color: var(--accent); }
 .service-card:hover::before { opacity: 1; }
-.service-icon { font-size: 2rem; margin-bottom: 14px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.08)); }
-.service-name { font-weight: 700; font-size: 0.95rem; color: var(--slate-900); margin-bottom: 5px; }
-.service-desc { font-size: 0.78rem; color: var(--slate-400); line-height: 1.5; }
+.service-icon { font-size: 2rem; margin-bottom: 14px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3)); }
+.service-name { font-weight: 700; font-size: 0.95rem; color: var(--text); margin-bottom: 5px; }
+.service-desc { font-size: 0.78rem; color: var(--text-muted); line-height: 1.5; }
 
 /* Todo */
 .add-form { display: flex; gap: 8px; margin-bottom: 20px; }
@@ -132,19 +143,19 @@ h1 { font-size: 1.75rem; color: var(--slate-900); margin-bottom: 6px; font-weigh
 }
 .btn-sm { height:var(--btn-h-sm); padding:0 8px; font-size:var(--text-xs); }
 .btn-lg { height:var(--btn-h-lg); padding:0 20px; font-size:var(--text-base); font-weight:var(--fw-bold); }
-.btn-primary   { background:var(--slate-900); color:white; }
-.btn-secondary { background:var(--slate-100); color:var(--slate-700); border:1px solid var(--slate-200); }
-.btn-ghost     { background:transparent; color:var(--slate-500); border:1px solid var(--slate-200); }
-.btn-success   { background:var(--green-50); color:var(--green-600); border:1px solid #bbf7d0; }
-.btn-danger    { background:transparent; color:var(--slate-400); }
-.btn-accent    { background:var(--blue-500); color:white; }
-.btn-warn      { background:var(--amber-50); color:#92400e; border:1px solid #fde68a; }
-.btn-primary:hover   { opacity:0.85; transform:translateY(-1px); }
-.btn-secondary:hover { border-color:var(--blue-500); color:var(--blue-500); background:var(--blue-50); }
-.btn-ghost:hover     { border-color:var(--blue-500); color:var(--blue-500); background:var(--blue-50); }
-.btn-success:hover   { background:var(--green-500); color:white; border-color:transparent; }
-.btn-danger:hover    { color:var(--red-500); background:var(--red-50); }
-.btn-accent:hover    { opacity:0.88; transform:translateY(-1px); }
+.btn-primary   { background:var(--accent); color:#080d14; font-weight:700; }
+.btn-secondary { background:var(--surface-2); color:var(--text); border:1px solid var(--border); }
+.btn-ghost     { background:transparent; color:var(--text-muted); border:1px solid var(--border); }
+.btn-success   { background:rgba(52,211,153,0.12); color:var(--success); border:1px solid rgba(52,211,153,0.3); }
+.btn-danger    { background:transparent; color:var(--text-muted); }
+.btn-accent    { background:var(--accent); color:#080d14; font-weight:700; }
+.btn-warn      { background:rgba(251,191,36,0.12); color:var(--warn); border:1px solid rgba(251,191,36,0.3); }
+.btn-primary:hover   { opacity:0.88; transform:translateY(-1px); box-shadow:0 4px 12px rgba(56,189,248,0.3); }
+.btn-secondary:hover { border-color:var(--accent); color:var(--accent); }
+.btn-ghost:hover     { border-color:var(--accent); color:var(--accent); background:var(--accent-glow); }
+.btn-success:hover   { background:var(--success); color:#080d14; border-color:transparent; }
+.btn-danger:hover    { color:var(--danger); background:rgba(248,113,113,0.12); }
+.btn-accent:hover    { opacity:0.88; transform:translateY(-1px); box-shadow:0 4px 12px rgba(56,189,248,0.3); }
 @media (max-width:600px) {
   .btn { height:40px; padding:0 14px; }
   .btn-sm { height:36px; padding:0 10px; }
@@ -191,6 +202,8 @@ h1 { font-size: 1.75rem; color: var(--slate-900); margin-bottom: 6px; font-weigh
 }
 """
 
+CSS_VER = hashlib.md5(STYLE.encode()).hexdigest()[:8]
+
 ICON_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192">
   <rect width="192" height="192" rx="40" fill="#0f172a"/>
   <circle cx="96" cy="96" r="56" fill="none" stroke="#38bdf8" stroke-width="4"/>
@@ -217,45 +230,49 @@ MANIFEST = json.dumps({
     ]
 }, ensure_ascii=False, indent=2)
 
-SW_JS = """
-const CACHE = 'wayfinder-v3';
-const STATIC = ['/static/style.css', '/manifest.json', '/icons/icon.svg'];
+SW_JS = f"""
+const CACHE = 'wayfinder-{CSS_VER}';
+const STATIC = ['/static/style.css?v={CSS_VER}', '/manifest.json', '/icons/icon.svg'];
 
-self.addEventListener('install', e => {
+self.addEventListener('install', e => {{
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(STATIC)));
   self.skipWaiting();
-});
-self.addEventListener('activate', e => {
+}});
+self.addEventListener('activate', e => {{
   e.waitUntil(caches.keys().then(keys =>
     Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))
   ));
   self.clients.claim();
-});
-self.addEventListener('fetch', e => {
+}});
+self.addEventListener('fetch', e => {{
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.origin !== location.origin) return;
-  if (STATIC.includes(url.pathname)) {
+  if (url.pathname === '/static/style.css') {{
+    e.respondWith(caches.match('/static/style.css?v={CSS_VER}').then(c => c || fetch(e.request)));
+    return;
+  }}
+  if (STATIC.includes(url.pathname + url.search) || STATIC.includes(url.pathname)) {{
     e.respondWith(caches.match(e.request).then(c => c || fetch(e.request)));
     return;
-  }
+  }}
   e.respondWith(
     fetch(e.request).catch(() =>
       new Response('<h2 style="font-family:sans-serif;padding:40px">오프라인 상태입니다. 인터넷 연결을 확인해주세요.</h2>',
-        {headers: {'Content-Type': 'text/html; charset=utf-8'}})
+        {{headers: {{'Content-Type': 'text/html; charset=utf-8'}}}})
     )
   );
-});
+}});
 """
 
 APP_TAB_CSS = """
 <style>
-.app-tabs{position:fixed!important;top:auto!important;bottom:0!important;left:0;right:0;height:auto;background:rgba(15,23,42,0.96);backdrop-filter:blur(16px);border-top:1px solid rgba(255,255,255,0.08);border-bottom:none;display:flex!important;justify-content:stretch;z-index:200;padding:0 0 env(safe-area-inset-bottom,0)}
-.app-tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:10px 4px 8px;color:rgba(148,163,184,0.7);text-decoration:none;font-size:0.65rem;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;transition:.15s}
-.app-tab:hover{color:rgba(255,255,255,0.8)}
-.app-tab.active{color:#38bdf8}
-.app-tab-icon{font-size:1.3rem;line-height:1}
-.app-tab.active .app-tab-icon{filter:drop-shadow(0 0 6px rgba(56,189,248,0.6))}
-body{padding-bottom:calc(64px + env(safe-area-inset-bottom,0px))!important}
+.app-tabs{position:fixed!important;top:auto!important;bottom:0!important;left:0;right:0;height:auto;background:rgba(8,13,20,0.97);backdrop-filter:blur(20px);border-top:1px solid rgba(255,255,255,0.06);border-bottom:none;display:flex!important;justify-content:stretch;z-index:200;padding:8px 8px calc(8px + env(safe-area-inset-bottom,0));gap:4px}
+.app-tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:8px 4px;color:rgba(100,116,139,0.8);text-decoration:none;font-size:0.6rem;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;border-radius:12px;transition:all 0.2s}
+.app-tab:hover{color:rgba(255,255,255,0.7);background:rgba(255,255,255,0.04)}
+.app-tab.active{color:#38bdf8;background:rgba(56,189,248,0.12)}
+.app-tab-icon{font-size:1.3rem;line-height:1;transition:transform 0.2s}
+.app-tab.active .app-tab-icon{filter:drop-shadow(0 0 8px rgba(56,189,248,0.7));transform:translateY(-2px)}
+body{padding-bottom:calc(72px + env(safe-area-inset-bottom,0px))!important}
 </style>
 """
 
@@ -362,7 +379,7 @@ def wayfinder(user):
 <html lang="ko"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>🧭 Wayfinder</title>
-<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/style.css?v={CSS_VER}">
 </head><body>
 <nav>
   <span class="nav-brand">🧭 Wayfinder</span>

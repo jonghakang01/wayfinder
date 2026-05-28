@@ -433,27 +433,27 @@ def render(todos, habits, user, readonly=False):
     # ── Build task sections ────────────────────────────────────
     todo_sections = ""
 
-    def _notepad_card(g, tasks, done_tasks, group_id=""):
+    def _notepad_card(g, tasks, done_tasks, group_id="", group_idx=-1):
         count = len(tasks)
         add_btns = "" if readonly else (
             f'<div class="notepad-footer">'
             f'<button type="button" class="btn btn-ghost btn-sm" onclick="openAddTask(this)">+ Task</button>'
             f'<button type="button" class="btn btn-ghost btn-sm" onclick="openAddMemo(this)">+ Memo</button>'
             f'</div>'
-            f'<div class="inline-task-form inline-add-form" style="display:none;padding:10px 12px;background:var(--slate-50);border-top:1px solid var(--notepad-line)">'
+            f'<div class="inline-task-form inline-add-form" style="display:none;padding:10px 12px;background:var(--surface-2);border-top:1px solid var(--notepad-line)">'
             f'<form method="POST" action="/todo/add">'
             f'<input type="hidden" name="group" value="{g}">'
             f'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
-            f'<input type="text" name="title" placeholder="Task 이름..." required style="flex:1;min-width:150px;padding:7px 10px;border:1px solid var(--slate-200);border-radius:var(--radius-sm);font-size:var(--text-sm)">'
-            f'<input type="date" name="due_date" style="padding:7px 8px;border:1px solid var(--slate-200);border-radius:var(--radius-sm);font-size:var(--text-sm)">'
+            f'<input type="text" name="title" placeholder="Task 이름..." required style="flex:1;min-width:150px;padding:7px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:var(--text-sm);background:var(--surface);color:var(--text)">'
+            f'<input type="date" name="due_date" style="padding:7px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:var(--text-sm);background:var(--surface);color:var(--text)">'
             f'<button type="submit" class="btn btn-primary btn-sm">추가</button>'
             f'<button type="button" class="btn btn-ghost btn-sm" onclick="closeInlineForm(this)">취소</button>'
             f'</div></form></div>'
-            f'<div class="inline-memo-form inline-add-form" style="display:none;padding:10px 12px;background:var(--slate-50);border-top:1px solid var(--notepad-line)">'
+            f'<div class="inline-memo-form inline-add-form" style="display:none;padding:10px 12px;background:var(--surface-2);border-top:1px solid var(--notepad-line)">'
             f'<form method="POST" action="/todo/memo/add">'
             f'<input type="hidden" name="group" value="{g}">'
             f'<div style="display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap">'
-            f'<textarea name="body" placeholder="메모 내용..." rows="2" required style="flex:1;min-width:150px;padding:7px 10px;border:1px solid var(--slate-200);border-radius:var(--radius-sm);font-size:var(--text-sm);resize:vertical"></textarea>'
+            f'<textarea name="body" placeholder="메모 내용..." rows="2" required style="flex:1;min-width:150px;padding:7px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:var(--text-sm);resize:vertical;background:var(--surface);color:var(--text)"></textarea>'
             f'<div style="display:flex;gap:4px">'
             f'<button type="submit" class="btn btn-primary btn-sm">추가</button>'
             f'<button type="button" class="btn btn-ghost btn-sm" onclick="closeInlineForm(this)">취소</button>'
@@ -480,8 +480,9 @@ def render(todos, habits, user, readonly=False):
         if not body_content:
             body_content = '<div class="group-empty">No items in this group</div>'
         data_attr = f'data-group="{g}"'
+        group_color = f"var(--group-{(group_idx % 5) + 1})" if group_idx >= 0 else "var(--text-muted)"
         return f'''
-        <div class="notepad-card">
+        <div class="notepad-card" style="--group-color:{group_color}">
           <div class="notepad-header">
             <div class="notepad-title-row">
               <span class="notepad-chevron" onclick="toggleNotepad(this)">▼</span>
@@ -502,10 +503,10 @@ def render(todos, habits, user, readonly=False):
             todo_sections += _notepad_card("", ungrouped, ungrouped_done)
 
     # Named groups
-    for g in all_groups:
+    for idx, g in enumerate(all_groups):
         tasks = task_by_group.get(g, [])
         done_tasks = done_by_group.get(g, [])
-        todo_sections += _notepad_card(g, tasks, done_tasks)
+        todo_sections += _notepad_card(g, tasks, done_tasks, group_idx=idx)
 
     # ── Add form ───────────────────────────────────────────────
     add_form = ""
@@ -514,11 +515,11 @@ def render(todos, habits, user, readonly=False):
     tabs_html = app_tabs("/todo")
 
     todo_add_group_card = "" if readonly else (
-        '<div id="addGroupCard" style="display:none;background:white;border:1px solid var(--slate-200);'
+        '<div id="addGroupCard" style="display:none;background:var(--surface);border:1px solid var(--border);'
         'border-radius:var(--radius-lg);padding:16px;margin-bottom:12px;box-shadow:var(--shadow-md)">'
         '<form method="POST" action="/todo/group/add" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
         '<input type="text" name="name" id="newGroupNameInput" placeholder="Group name..." '
-        'style="flex:1;min-width:160px;padding:9px 12px;border:1px solid var(--slate-200);border-radius:var(--radius-sm);font-size:14px">'
+        'style="flex:1;min-width:160px;padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:14px;background:var(--surface-2);color:var(--text)">'
         '<button type="submit" class="btn btn-primary">Add</button>'
         '<button type="button" onclick="toggleAddGroupCard()" class="btn btn-ghost">✕</button>'
         '</form></div>'
@@ -537,42 +538,43 @@ def render(todos, habits, user, readonly=False):
 <style>
 /* Badge */
 .badge {{ display:inline-flex; align-items:center; height:20px; padding:0 8px; border-radius:var(--radius-full); font-size:var(--text-xs); font-weight:var(--fw-bold); }}
-.badge-due     {{ background:var(--blue-50);   color:var(--blue-500); }}
-.badge-overdue {{ background:var(--red-50);    color:var(--red-500); border:1px solid #fecaca; }}
-.badge-dday    {{ background:var(--amber-50);  color:var(--amber-500); border:1px solid #fde68a; }}
-.badge-early   {{ background:var(--green-50);  color:var(--green-600); }}
+.badge-due     {{ background:rgba(56,189,248,0.1);   color:var(--accent); }}
+.badge-overdue {{ background:rgba(248,113,113,0.12); color:var(--danger); border:1px solid rgba(248,113,113,0.3); }}
+.badge-dday    {{ background:rgba(251,191,36,0.1);   color:var(--warn); border:1px solid rgba(251,191,36,0.3); }}
+.badge-early   {{ background:rgba(52,211,153,0.1);   color:var(--success); }}
 
 /* Notepad card */
-.notepad-card {{ background:white; border:1px solid var(--slate-200); border-radius:var(--radius-lg); margin-bottom:16px; box-shadow:var(--shadow-sm); overflow:hidden; }}
-.notepad-tab {{ background:var(--notepad-header); border-bottom:2px solid #fde68a; display:flex; align-items:center; padding:5px 20px; gap:8px; }}
-.notepad-tab-dot {{ width:10px; height:10px; border-radius:50%; border:2px solid #fde68a; background:white; }}
+.notepad-card {{ background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-lg); margin-bottom:16px; box-shadow:var(--shadow-sm); overflow:hidden; position:relative; }}
+.notepad-card::before {{ content:""; position:absolute; top:0; left:0; bottom:0; width:4px; background:var(--group-color,var(--accent)); border-radius:var(--radius-lg) 0 0 var(--radius-lg); }}
+.notepad-tab {{ background:var(--notepad-header); border-bottom:1px solid var(--border); display:flex; align-items:center; padding:5px 20px; gap:8px; }}
+.notepad-tab-dot {{ width:10px; height:10px; border-radius:50%; border:2px solid var(--accent); background:transparent; }}
 .notepad-header {{ background:var(--notepad-header); padding:10px 16px 12px; }}
 .notepad-title-row {{ display:flex; align-items:center; gap:10px; }}
-.notepad-chevron {{ font-size:0.7rem; color:var(--slate-400); cursor:pointer; transition:transform 0.2s; user-select:none; }}
+.notepad-chevron {{ font-size:0.7rem; color:var(--text-muted); cursor:pointer; transition:transform 0.2s; user-select:none; }}
 .notepad-card.collapsed .notepad-chevron {{ transform:rotate(-90deg); }}
-.notepad-name {{ font-weight:var(--fw-bold); font-size:var(--text-base); color:var(--slate-900); flex:1; }}
-.notepad-count {{ font-size:var(--text-xs); font-weight:var(--fw-bold); padding:2px 8px; background:white; color:var(--slate-500); border:1px solid var(--slate-200); border-radius:var(--radius-full); }}
-.notepad-del-btn {{ background:transparent; border:none; color:var(--slate-300); font-size:1.1rem; cursor:pointer; padding:0 4px; transition:color 0.15s; }}
-.notepad-del-btn:hover {{ color:var(--red-500); }}
+.notepad-name {{ font-weight:var(--fw-bold); font-size:var(--text-md); color:var(--text); flex:1; }}
+.notepad-count {{ font-size:var(--text-xs); font-weight:var(--fw-bold); padding:2px 9px; background:var(--accent); color:#080d14; border-radius:var(--radius-full); min-width:22px; text-align:center; }}
+.notepad-del-btn {{ background:transparent; border:none; color:var(--text-dim); font-size:1.1rem; cursor:pointer; padding:0 4px; transition:color 0.15s; }}
+.notepad-del-btn:hover {{ color:var(--danger); }}
 .notepad-body {{ padding:8px 12px 4px; }}
 .notepad-card.collapsed .notepad-body, .notepad-card.collapsed .notepad-footer {{ display:none; }}
 .notepad-item {{ display:flex; align-items:flex-start; gap:10px; padding:10px 8px; border-bottom:1px solid var(--notepad-line); border-radius:var(--radius-md); transition:background 0.15s; }}
 .notepad-item:last-child {{ border-bottom:none; }}
-.notepad-item:hover {{ background:var(--slate-50); }}
+.notepad-item:hover {{ background:var(--surface-3); }}
 .item-left {{ display:flex; align-items:center; gap:6px; padding-top:4px; flex-shrink:0; }}
 .item-type-dot {{ width:8px; height:8px; border-radius:50%; flex-shrink:0; }}
-.task-dot {{ background:var(--blue-500); }}
-.memo-dot {{ background:var(--amber-400); }}
+.task-dot {{ background:var(--accent); }}
+.memo-dot {{ background:var(--warn); }}
 .item-content {{ flex:1; min-width:0; }}
-.item-title {{ font-size:var(--text-md); font-weight:var(--fw-semibold); color:var(--slate-900); line-height:1.4; }}
+.item-title {{ font-size:var(--text-md); font-weight:var(--fw-semibold); color:var(--text); line-height:1.4; }}
 .item-meta {{ display:flex; align-items:center; gap:6px; margin-top:3px; }}
-.item-date {{ font-size:var(--text-xs); color:var(--slate-400); }}
+.item-date {{ font-size:var(--text-xs); color:var(--text-muted); }}
 .item-actions {{ display:flex; align-items:center; gap:4px; flex-shrink:0; }}
-.notepad-task.done .item-title {{ text-decoration:line-through; color:var(--slate-400); }}
-.notepad-task.done {{ opacity:0.6; }}
-.memo-text {{ font-size:var(--text-base); color:var(--slate-600); font-style:italic; line-height:1.5; }}
-.memo-textarea {{ width:100%; padding:8px 12px; border:1px solid var(--slate-200); border-radius:var(--radius-sm); font-size:var(--text-base); resize:vertical; }}
-.notepad-footer {{ display:flex; gap:8px; padding:8px 12px 10px; background:var(--slate-50); border-top:1px solid var(--notepad-line); }}
+.notepad-task.done .item-title {{ text-decoration:line-through; color:var(--text-muted); }}
+.notepad-task.done {{ opacity:0.5; }}
+.memo-text {{ font-size:var(--text-base); color:var(--text-muted); font-style:italic; line-height:1.5; }}
+.memo-textarea {{ width:100%; padding:8px 12px; border:1px solid var(--border); border-radius:var(--radius-sm); font-size:var(--text-base); resize:vertical; background:var(--surface-2); color:var(--text); }}
+.notepad-footer {{ display:flex; gap:8px; padding:8px 12px 10px; background:var(--surface-2); border-top:1px solid var(--notepad-line); }}
 
 /* drag */
 .drag-handle {{ cursor:grab; color:var(--slate-300); font-size:1rem; padding:0 2px; flex-shrink:0; user-select:none; touch-action:none; }}
@@ -582,45 +584,49 @@ def render(todos, habits, user, readonly=False):
 
 /* group select inline */
 .group-sel-form {{ display:inline-flex; align-items:center; }}
-.group-select-inline {{ font-size:0.75rem; padding:3px 6px; border-radius:6px; border:1px solid var(--slate-200); background:var(--slate-50); color:var(--slate-500); cursor:pointer; }}
+.group-select-inline {{ font-size:0.75rem; padding:3px 6px; border-radius:6px; border:1px solid var(--border); background:var(--surface-2); color:var(--text-muted); cursor:pointer; }}
 
 /* sub-done */
-.sub-done-accordion {{ margin-top:8px; border-radius:8px; border:1px solid var(--slate-100); overflow:hidden; }}
+.sub-done-accordion {{ margin-top:8px; border-radius:8px; border:1px solid var(--border); overflow:hidden; }}
 .sub-done-accordion[open] > .sub-done-summary .sub-done-chevron {{ transform:rotate(90deg); }}
-.sub-done-summary {{ display:flex; align-items:center; gap:8px; padding:8px 12px; cursor:pointer; list-style:none; background:var(--slate-50); font-size:0.82rem; font-weight:600; color:var(--slate-500); user-select:none; }}
+.sub-done-summary {{ display:flex; align-items:center; gap:8px; padding:8px 12px; cursor:pointer; list-style:none; background:var(--surface-2); font-size:0.82rem; font-weight:600; color:var(--text-muted); user-select:none; }}
 .sub-done-summary::-webkit-details-marker {{ display:none; }}
-.sub-done-chevron {{ font-size:0.65rem; color:var(--slate-400); transition:transform 0.2s; display:inline-block; }}
+.sub-done-chevron {{ font-size:0.65rem; color:var(--text-muted); transition:transform 0.2s; display:inline-block; }}
 .sub-done-body {{ padding:8px 8px 4px; }}
-.group-empty {{ color:var(--slate-400); font-size:0.85rem; padding:12px 8px; text-align:center; }}
+.group-empty {{ color:var(--text-muted); font-size:0.85rem; padding:12px 8px; text-align:center; }}
 
 /* header & stats */
 .task-list-header {{ display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }}
+.stats {{ display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap; }}
+.stats span {{ background:var(--surface-2); padding:5px 14px; border-radius:var(--radius-full); border:1px solid var(--border); font-size:0.82rem; color:var(--text-muted); font-weight:600; }}
+.stats .done-c {{ color:var(--success); background:rgba(52,211,153,0.1); border-color:rgba(52,211,153,0.3); }}
 .add-form {{ display:flex; gap:8px; flex-wrap:wrap; align-items:flex-start; }}
-.add-form input, .add-form select {{ padding:9px 12px; border:1px solid var(--slate-200); border-radius:var(--radius-sm); font-size:var(--text-base); }}
+.add-form input, .add-form select {{ padding:9px 12px; border:1px solid var(--border); border-radius:var(--radius-sm); font-size:var(--text-base); background:var(--surface-2); color:var(--text); }}
 .add-form input[type=text], .add-form input[type=date] {{ flex:1; min-width:140px; }}
+.add-form input:focus, .add-form select:focus {{ outline:none; border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-glow); }}
 
 /* Habits section */
-.habits-accordion {{ background:white; border:1px solid var(--slate-200); border-radius:var(--radius-lg); margin-top:24px; overflow:hidden; }}
-.habits-accordion > .habits-header {{ display:flex; align-items:center; justify-content:space-between; padding:14px 20px; cursor:pointer; list-style:none; background:var(--slate-50); user-select:none; }}
+.habits-accordion {{ background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-lg); margin-top:24px; overflow:hidden; box-shadow:var(--shadow-sm); }}
+.habits-accordion > .habits-header {{ display:flex; align-items:center; justify-content:space-between; padding:14px 20px; cursor:pointer; list-style:none; background:var(--surface-2); user-select:none; }}
 .habits-accordion > .habits-header::-webkit-details-marker {{ display:none; }}
-.habits-accordion[open] > .habits-header {{ border-bottom:1px solid var(--slate-100); }}
+.habits-accordion[open] > .habits-header {{ border-bottom:1px solid var(--border); }}
 .habits-accordion .habit-items {{ display:flex; flex-direction:column; gap:8px; padding:12px 20px; }}
-.habits-section.habits-empty {{ display:flex; align-items:center; justify-content:space-between; padding:14px 20px; background:white; border:1px solid var(--slate-200); border-radius:var(--radius-lg); margin-top:24px; }}
-.habits-title {{ font-weight:800; font-size:1rem; color:var(--slate-900); }}
-.habits-meta {{ font-size:0.85rem; color:var(--slate-500); }}
-.habit-item {{ display:flex; align-items:center; gap:12px; background:var(--slate-50); padding:12px 16px; border-radius:12px; border:1px solid transparent; transition:0.2s; }}
-.habit-item:hover {{ border-color:var(--slate-200); background:white; }}
-.habit-item.habit-checked {{ opacity:0.6; }}
-.h-icon {{ font-size:1.1rem; flex-shrink:0; }}
-.h-name {{ flex:1; font-size:0.9rem; font-weight:500; color:var(--slate-900); }}
-.h-streak {{ font-size:0.8rem; color:var(--amber-500); font-weight:700; white-space:nowrap; }}
+.habits-section.habits-empty {{ display:flex; align-items:center; justify-content:space-between; padding:14px 20px; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-lg); margin-top:24px; }}
+.habits-title {{ font-weight:800; font-size:1rem; color:var(--text); }}
+.habits-meta {{ font-size:0.85rem; color:var(--text-muted); }}
+.habit-item {{ display:flex; align-items:center; gap:12px; background:var(--surface-2); padding:12px 16px; border-radius:12px; border:1px solid var(--border); transition:0.2s; }}
+.habit-item:hover {{ border-color:var(--accent); background:var(--surface-3); transform:translateY(-1px); }}
+.habit-item.habit-checked {{ opacity:0.5; }}
+.h-icon {{ font-size:1.1rem; flex-shrink:0; width:32px; height:32px; background:var(--surface-3); border-radius:8px; display:flex; align-items:center; justify-content:center; }}
+.h-name {{ flex:1; font-size:0.9rem; font-weight:600; color:var(--text); }}
+.h-streak {{ font-size:0.75rem; color:var(--warn); font-weight:700; white-space:nowrap; background:rgba(251,191,36,0.1); padding:2px 8px; border-radius:var(--radius-full); border:1px solid rgba(251,191,36,0.3); }}
 .h-actions {{ display:flex; gap:6px; align-items:center; flex-shrink:0; }}
-.hb-check {{ background:var(--slate-900); color:white; font-size:0.78rem; padding:4px 10px; border-radius:6px; border:none; cursor:pointer; font-weight:600; transition:0.2s; }}
-.hb-check:hover {{ opacity:0.85; }}
-.hb-done {{ font-size:0.78rem; color:var(--green-600); font-weight:600; padding:4px 6px; }}
-.hb-detail {{ background:var(--slate-50); color:var(--slate-600); font-size:0.78rem; text-decoration:none; padding:4px 10px; border-radius:6px; border:1px solid var(--slate-200); transition:0.2s; }}
-.hb-detail:hover {{ border-color:var(--blue-500); color:var(--blue-500); }}
-.habits-link {{ display:inline-block; margin:8px 20px 16px; font-size:0.82rem; color:var(--blue-500); text-decoration:none; font-weight:500; }}
+.hb-check {{ background:var(--accent); color:#080d14; font-size:0.78rem; padding:4px 12px; border-radius:6px; border:none; cursor:pointer; font-weight:700; transition:0.2s; }}
+.hb-check:hover {{ opacity:0.88; transform:translateY(-1px); box-shadow:0 4px 10px rgba(56,189,248,0.3); }}
+.hb-done {{ font-size:0.78rem; color:var(--success); font-weight:700; padding:4px 8px; background:rgba(52,211,153,0.1); border-radius:6px; border:1px solid rgba(52,211,153,0.3); }}
+.hb-detail {{ background:var(--surface-2); color:var(--text-muted); font-size:0.78rem; text-decoration:none; padding:4px 10px; border-radius:6px; border:1px solid var(--border); transition:0.2s; }}
+.hb-detail:hover {{ border-color:var(--accent); color:var(--accent); }}
+.habits-link {{ display:inline-block; margin:8px 20px 16px; font-size:0.82rem; color:var(--accent); text-decoration:none; font-weight:600; }}
 .habits-link:hover {{ text-decoration:underline; }}
 
 @media (max-width:600px) {{
