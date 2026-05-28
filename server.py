@@ -33,13 +33,25 @@ SERVICES = load_services()
 STYLE = """
 @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css');
 :root {
-  --slate-50: #f8fafc; --slate-100: #f1f5f9; --slate-200: #e2e8f0;
-  --slate-400: #94a3b8; --slate-500: #64748b; --slate-900: #0f172a;
-  --blue-500: #3b82f6; --sky-400: #38bdf8;
-  --radius-xl: 20px; --radius-lg: 16px; --radius-md: 12px;
-  --shadow-lg: 0 10px 15px -3px rgb(0 0 0/0.1), 0 4px 6px -4px rgb(0 0 0/0.1);
+  --slate-50:#f8fafc; --slate-100:#f1f5f9; --slate-200:#e2e8f0;
+  --slate-300:#cbd5e1; --slate-400:#94a3b8; --slate-500:#64748b;
+  --slate-700:#334155; --slate-900:#0f172a;
+  --blue-50:#eff6ff; --blue-500:#3b82f6; --sky-400:#38bdf8;
+  --green-50:#f0fdf4; --green-500:#22c55e; --green-600:#16a34a;
+  --amber-50:#fffbeb; --amber-400:#fbbf24; --amber-500:#f59e0b;
+  --red-50:#fef2f2; --red-500:#ef4444;
+  --text-xs:0.72rem; --text-sm:0.82rem; --text-base:0.9rem; --text-md:1rem;
+  --fw-medium:500; --fw-semibold:600; --fw-bold:700; --fw-extrabold:800;
+  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:20px; --sp-6:24px;
+  --radius-sm:6px; --radius-md:10px; --radius-lg:14px; --radius-xl:18px; --radius-full:9999px;
+  --shadow-sm:0 1px 3px rgba(0,0,0,0.06);
+  --shadow-md:0 4px 12px rgba(0,0,0,0.06);
+  --shadow-lg:0 10px 15px -3px rgba(0,0,0,0.1),0 4px 6px -4px rgba(0,0,0,0.1);
+  --btn-h-sm:28px; --btn-h-base:32px; --btn-h-lg:40px;
+  --notepad-header:#fefce8; --notepad-line:#f1f5f9;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
+input, textarea, select, button { font-family: inherit; font-size: inherit; }
 body { font-family: 'Pretendard Variable', Pretendard, -apple-system, system-ui, sans-serif; background: var(--slate-50); color: var(--slate-900); line-height: 1.5; -webkit-font-smoothing: antialiased; min-height: 100vh; }
 
 /* Nav */
@@ -110,9 +122,34 @@ h1 { font-size: 1.75rem; color: var(--slate-900); margin-bottom: 6px; font-weigh
 .title { flex: 1; font-size: 0.95rem; }
 .date { font-size: 0.75rem; color: #cbd5e1; }
 .actions { display: flex; gap: 6px; }
-.btn { padding: 4px 10px; border: none; border-radius: 6px; font-size: 0.8rem; cursor: pointer; }
-.btn-done { background: #dcfce7; color: #16a34a; }
-.btn-del { background: #fee2e2; color: #dc2626; }
+.btn {
+  display:inline-flex; align-items:center; justify-content:center;
+  height:var(--btn-h-base); padding:0 12px; border:none;
+  border-radius:var(--radius-sm); font-size:var(--text-sm);
+  font-weight:var(--fw-semibold); cursor:pointer;
+  transition:background 0.15s,opacity 0.15s,transform 0.1s,color 0.15s,border-color 0.15s;
+  white-space:nowrap; text-decoration:none; flex-shrink:0;
+}
+.btn-sm { height:var(--btn-h-sm); padding:0 8px; font-size:var(--text-xs); }
+.btn-lg { height:var(--btn-h-lg); padding:0 20px; font-size:var(--text-base); font-weight:var(--fw-bold); }
+.btn-primary   { background:var(--slate-900); color:white; }
+.btn-secondary { background:var(--slate-100); color:var(--slate-700); border:1px solid var(--slate-200); }
+.btn-ghost     { background:transparent; color:var(--slate-500); border:1px solid var(--slate-200); }
+.btn-success   { background:var(--green-50); color:var(--green-600); border:1px solid #bbf7d0; }
+.btn-danger    { background:transparent; color:var(--slate-400); }
+.btn-accent    { background:var(--blue-500); color:white; }
+.btn-warn      { background:var(--amber-50); color:#92400e; border:1px solid #fde68a; }
+.btn-primary:hover   { opacity:0.85; transform:translateY(-1px); }
+.btn-secondary:hover { border-color:var(--blue-500); color:var(--blue-500); background:var(--blue-50); }
+.btn-ghost:hover     { border-color:var(--blue-500); color:var(--blue-500); background:var(--blue-50); }
+.btn-success:hover   { background:var(--green-500); color:white; border-color:transparent; }
+.btn-danger:hover    { color:var(--red-500); background:var(--red-50); }
+.btn-accent:hover    { opacity:0.88; transform:translateY(-1px); }
+@media (max-width:600px) {
+  .btn { height:40px; padding:0 14px; }
+  .btn-sm { height:36px; padding:0 10px; }
+  .btn-lg { height:48px; }
+}
 .empty { text-align: center; color: #94a3b8; padding: 48px 0; }
 
 /* Mobile responsive */
@@ -181,7 +218,7 @@ MANIFEST = json.dumps({
 }, ensure_ascii=False, indent=2)
 
 SW_JS = """
-const CACHE = 'wayfinder-v1';
+const CACHE = 'wayfinder-v3';
 const STATIC = ['/static/style.css', '/manifest.json', '/icons/icon.svg'];
 
 self.addEventListener('install', e => {
@@ -430,7 +467,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", mime)
         self.send_header("Content-Length", len(b))
-        self.send_header("Cache-Control", "public, max-age=86400")
+        self.send_header("Cache-Control", "no-cache, must-revalidate")
         self.end_headers()
         self.wfile.write(b)
 

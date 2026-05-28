@@ -184,8 +184,6 @@ def render(user):
 .db-hero h2{{font-size:1.5rem;font-weight:800;letter-spacing:-.03em;margin-bottom:4px}}
 .db-hero p{{color:var(--slate-400);font-size:.9rem}}
 .db-grid{{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:28px}}
-.db-card{{background:white;border:1px solid var(--slate-200);border-radius:var(--radius-lg);padding:24px}}
-.db-card h3{{font-size:.7rem;font-weight:700;color:var(--slate-400);text-transform:uppercase;letter-spacing:.08em;margin-bottom:16px}}
 .big-num{{font-size:3rem;font-weight:800;letter-spacing:-.04em;line-height:1;color:var(--slate-900)}}
 .big-num span{{font-size:1rem;font-weight:500;color:var(--slate-400);margin-left:4px}}
 .rate-bar{{background:var(--slate-100);border-radius:99px;height:8px;margin-top:12px;overflow:hidden}}
@@ -198,8 +196,6 @@ def render(user):
 .bar.today{{background:linear-gradient(180deg,#38bdf8,#3b82f6)}}
 .bar-label{{font-size:.68rem;color:var(--slate-400);font-weight:600}}
 .bar-label.today{{color:#3b82f6}}
-.habit-grid-card{{background:white;border:1px solid var(--slate-200);border-radius:var(--radius-lg);padding:24px;margin-bottom:28px}}
-.habit-grid-card h3{{font-size:.7rem;font-weight:700;color:var(--slate-400);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px}}
 .week-labels{{display:flex;justify-content:flex-end;gap:4px;margin-bottom:8px}}
 .wlabel{{width:28px;text-align:center;font-size:.65rem;color:var(--slate-400);font-weight:600}}
 .wlabel.today-lbl{{color:#3b82f6}}
@@ -212,12 +208,12 @@ def render(user):
 .hcell.done{{background:linear-gradient(135deg,#3b82f6,#38bdf8)}}
 .hcell.partial{{background:#bfdbfe}}
 .empty-hint{{color:var(--slate-400);font-size:.85rem;padding:16px 0;text-align:center}}
-.quick-links{{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:28px}}
-.quick-btn{{display:inline-flex;align-items:center;gap:8px;padding:10px 20px;background:white;border:1px solid var(--slate-200);border-radius:var(--radius-md);font-size:.875rem;font-weight:600;color:var(--slate-900);text-decoration:none;transition:.2s}}
-.quick-btn:hover{{border-color:#3b82f6;color:#3b82f6;transform:translateY(-2px)}}
+.notepad-card{{background:white;border:1px solid var(--slate-200);border-radius:var(--radius-lg);overflow:hidden;box-shadow:var(--shadow-sm)}}
+.notepad-header{{background:var(--notepad-header);padding:10px 16px 12px}}
+.notepad-title-row{{display:flex;align-items:center;gap:10px}}
+.notepad-body{{padding:16px}}
 @media(max-width:600px){{
   .db-grid{{grid-template-columns:1fr;gap:12px}}
-  .db-card{{padding:16px}}
   .db-hero{{padding:20px}}
   .big-num{{font-size:2.2rem}}
   .hcell{{width:24px;height:24px}}
@@ -236,31 +232,37 @@ def render(user):
   </div>
 
   <div class="db-grid">
-    <div class="db-card">
-      <h3>Tasks Today</h3>
-      <div class="big-num">{done_today}<span>/ {done_today + total_active}</span></div>
-      <div class="rate-bar"><div class="rate-fill" style="width:{todo_rate}%"></div></div>
-      <div class="rate-label">{todo_rate}% complete &nbsp;·&nbsp; {total_active} remaining</div>
+    <div class="notepad-card">
+<div class="notepad-header"><div class="notepad-title-row"><span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--slate-400)">Tasks Today</span></div></div>
+      <div class="notepad-body">
+        <div class="big-num">{done_today}<span>/ {done_today + total_active}</span></div>
+        <div class="rate-bar"><div class="rate-fill" style="width:{todo_rate}%"></div></div>
+        <div class="rate-label">{todo_rate}% complete &nbsp;·&nbsp; {total_active} remaining</div>
+      </div>
     </div>
-    <div class="db-card">
-      <h3>Habits Today</h3>
-      <div class="big-num">{done_habits_today}<span>/ {total_habits}</span></div>
-      <div class="rate-bar"><div class="rate-fill" style="width:{habit_rate}%"></div></div>
-      <div class="rate-label">{habit_rate}% done &nbsp;·&nbsp; {total_habits} total</div>
+    <div class="notepad-card">
+<div class="notepad-header"><div class="notepad-title-row"><span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--slate-400)">Habits Today</span></div></div>
+      <div class="notepad-body">
+        <div class="big-num">{done_habits_today}<span>/ {total_habits}</span></div>
+        <div class="rate-bar"><div class="rate-fill" style="width:{habit_rate}%"></div></div>
+        <div class="rate-label">{habit_rate}% done &nbsp;·&nbsp; {total_habits} total</div>
+      </div>
     </div>
   </div>
 
-  <div class="db-card" style="margin-bottom:20px">
-    <h3>Tasks This Week</h3>
-    <div style="margin-top:12px">
+  <div class="notepad-card" style="margin-bottom:20px">
+<div class="notepad-header"><div class="notepad-title-row"><span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--slate-400)">Tasks This Week</span></div></div>
+    <div class="notepad-body">
       <div class="bar-chart">{todo_bars}</div>
     </div>
   </div>
 
-  <div class="habit-grid-card">
-    <h3>Habits This Week</h3>
-    <div class="week-labels"><div style="flex:1"></div>{week_label_html}</div>
-    {habit_grid_html}
+  <div class="notepad-card" style="margin-bottom:28px">
+<div class="notepad-header"><div class="notepad-title-row"><span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--slate-400)">Habits This Week</span></div></div>
+    <div class="notepad-body">
+      <div class="week-labels"><div style="flex:1"></div>{week_label_html}</div>
+      {habit_grid_html}
+    </div>
   </div>
 
 </div>

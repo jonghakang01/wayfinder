@@ -329,7 +329,15 @@ _CSS = """
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg);color:var(--text);font-family:'Pretendard Variable',Pretendard,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;min-height:100vh}
 .container{width:100%;max-width:720px;margin:0 auto;padding:32px 24px 80px;display:flex;flex-direction:column;gap:24px}
-.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:24px;box-shadow:0 4px 20px rgba(0,0,0,0.03)}
+.notepad-card{background:white;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06)}
+.notepad-header{background:#fefce8;padding:10px 16px 12px}
+.notepad-title-row{display:flex;align-items:center;gap:10px}
+.notepad-chevron{font-size:0.7rem;color:var(--text-muted);cursor:pointer;transition:transform 0.2s;user-select:none}
+.notepad-card.collapsed .notepad-chevron{transform:rotate(-90deg)}
+.notepad-name{font-weight:700;font-size:var(--text,0.9rem);color:var(--text);flex:1}
+.notepad-count{font-size:11px;font-weight:700;padding:2px 8px;background:var(--accent);color:white;border-radius:99px;min-width:20px;text-align:center}
+.notepad-body{padding:8px 12px 4px}
+.notepad-card.collapsed .notepad-body{display:none}
 nav{position:sticky;top:0;left:0;right:0;padding:13px 32px;background:rgba(15,23,42,0.92);backdrop-filter:blur(12px);border-bottom:1px solid rgba(255,255,255,0.07);display:flex;align-items:center;justify-content:space-between;z-index:100}
 nav a{color:#94a3b8;text-decoration:none;font-weight:500;font-size:0.875rem;transition:color 0.15s}
 nav a:hover{color:white}
@@ -345,8 +353,6 @@ h2{font-size:18px;font-weight:700;margin-bottom:16px;color:var(--text)}
 .add-form input[type=number]{width:72px}
 .add-form input:focus{border-color:var(--accent);outline:none}
 .add-form select{padding:9px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:14px}
-.add-form button{padding:9px 18px;background:var(--text);color:white;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;transition:opacity 0.2s;align-self:flex-end}
-.add-form button:hover{opacity:0.85}
 .habit-row{display:flex;align-items:center;gap:14px;padding:14px 16px;border-radius:var(--radius-md);border:1px solid var(--border);background:white;margin-bottom:8px;transition:box-shadow 0.2s,transform 0.2s;position:relative;overflow:hidden}
 .habit-row::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--accent)}
 .habit-row:hover{box-shadow:0 4px 12px rgba(0,0,0,0.05);transform:translateY(-2px)}
@@ -364,23 +370,11 @@ h2{font-size:18px;font-weight:700;margin-bottom:16px;color:var(--text)}
 .inline-log-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .log-label-inp{flex:1;min-width:100px;padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;background:white;color:var(--text)}
 .log-val-inp{width:80px;padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;background:white;color:var(--text)}
-.btn-log-ok{background:var(--accent);color:white;border:none;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap}
-.btn-log-ok:hover{opacity:.88}
 .log-clear-form{margin-top:6px}
-.btn-log-clear{background:none;border:1px solid var(--border);color:var(--text-muted);border-radius:8px;padding:5px 12px;font-size:12px;cursor:pointer}
-.btn-log-clear:hover{border-color:#ef4444;color:#ef4444}
-@media(max-width:600px){.inline-log-row{flex-direction:column}.log-label-inp,.log-val-inp{width:100%}.btn-log-ok{width:100%;min-height:44px}}
+@media(max-width:600px){.inline-log-row{flex-direction:column}.log-label-inp,.log-val-inp{width:100%}.btn.btn-accent{width:100%;min-height:44px}}
 .streak-sm{font-size:13px;color:var(--streak);font-weight:600}
 .today-count{font-size:12px;color:var(--text-muted);font-weight:600}
 .today-count.done{color:#10b981}
-.btn-sm{padding:6px 14px;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;transition:0.2s}
-.btn-detail{background:var(--bg);color:var(--text-muted);text-decoration:none;padding:6px 14px;border-radius:6px;font-size:13px;font-weight:600;border:1px solid var(--border)}
-.btn-detail:hover{border-color:var(--accent);color:var(--accent)}
-.btn-checkin-sm{background:var(--text);color:white}
-.btn-checkin-sm:hover{opacity:0.85}
-.btn-checkin-sm.checked{background:var(--bg);color:var(--text-muted);border:1px solid var(--border);cursor:default}
-.btn-del-sm{background:transparent;color:var(--text-muted);font-size:12px;border:1px solid var(--border)}
-.btn-del-sm:hover{color:#ef4444;border-color:#fecaca;background:#fef2f2}
 .header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
 .habit-title{display:flex;align-items:center;gap:10px}
 .habit-icon-lg{width:38px;height:38px;background:linear-gradient(135deg,#1f6feb,#388bfd);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px}
@@ -419,9 +413,6 @@ h1{font-size:20px;font-weight:700;color:var(--text)}
 .tooltip{position:fixed;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:12px;color:var(--text);pointer-events:none;opacity:0;transition:opacity .15s;z-index:100;white-space:nowrap;box-shadow:0 4px 12px rgba(0,0,0,0.08)}
 .tooltip.show{opacity:1}
 .checkin-wrap{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
-.btn-checkin{display:inline-flex;align-items:center;gap:8px;padding:12px 28px;background:var(--text);color:white;font-size:15px;font-weight:600;border:none;border-radius:var(--radius);cursor:pointer;transition:opacity .15s,transform .1s;user-select:none}
-.btn-checkin:hover{opacity:0.85;transform:translateY(-1px)}
-.btn-checkin.checked{background:var(--bg);color:var(--text-muted);border:1px solid var(--border);cursor:default;box-shadow:none}
 .checkin-note{font-size:13px;color:var(--text-muted)}
 /* Counter UI for multi-metric */
 .counter-wrap{display:flex;align-items:center;gap:20px;flex-wrap:wrap}
@@ -431,8 +422,6 @@ h1{font-size:20px;font-weight:700;color:var(--text)}
 .counter-sep{font-size:1.5rem;color:var(--text-muted)}
 .counter-target{font-size:1.1rem;color:var(--text-muted);font-weight:600}
 .counter-btns{display:flex;gap:8px}
-.btn-counter{width:44px;height:44px;border:2px solid var(--border);border-radius:12px;background:var(--bg);color:var(--text);font-size:1.4rem;font-weight:700;cursor:pointer;transition:0.15s;display:flex;align-items:center;justify-content:center}
-.btn-counter:hover{border-color:var(--accent);color:var(--accent);background:#eff6ff}
 .counter-progress{height:6px;background:var(--border);border-radius:9999px;overflow:hidden;width:180px;margin-top:8px}
 .counter-fill{height:100%;border-radius:9999px;background:linear-gradient(90deg,#bae6fd,var(--cell-4));transition:width .4s ease}
 /* Calendar */
@@ -462,10 +451,6 @@ h1{font-size:20px;font-weight:700;color:var(--text)}
 .progress-fill{height:100%;border-radius:9999px;background:linear-gradient(90deg,var(--cell-2),var(--cell-4));transition:width .6s ease}
 .empty{color:var(--text-muted);font-size:14px;text-align:center;padding:20px 0}
 .tab-row{display:flex;gap:4px;margin-bottom:20px}
-.tab-btn{padding:6px 14px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text-muted);font-size:13px;font-weight:600;cursor:pointer;transition:0.15s}
-.tab-btn.active{background:var(--text);color:white;border-color:var(--text)}
-.btn-cal-nav{background:none;border:1px solid var(--border);border-radius:8px;cursor:pointer;font-size:18px;color:var(--text-muted);width:44px;height:44px;display:inline-flex;align-items:center;justify-content:center;transition:0.15s}
-.btn-cal-nav:hover{border-color:var(--accent);color:var(--accent)}
 /* Rich check-in */
 .rich-checkin{display:flex;flex-direction:column;gap:14px}
 .today-entries{display:flex;flex-direction:column;gap:6px;margin-bottom:4px}
@@ -483,12 +468,6 @@ h1{font-size:20px;font-weight:700;color:var(--text)}
 .entry-del-btn{background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:18px;line-height:1;padding:4px;transition:.15s}
 .entry-del-btn:hover{color:#ef4444}
 .rich-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.btn-add-row{padding:8px 16px;background:var(--bg);border:1px solid var(--border);border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;color:var(--text-muted);transition:.2s}
-.btn-add-row:hover{border-color:var(--accent);color:var(--accent)}
-.btn-save-rich{padding:10px 24px;background:var(--text);color:white;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;transition:opacity .15s}
-.btn-save-rich:hover{opacity:.85}
-.btn-clear-rich{padding:8px 14px;background:transparent;border:1px solid #fecaca;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;color:#ef4444;transition:.2s}
-.btn-clear-rich:hover{background:#fef2f2}
 /* By Category */
 .cat-period-row{display:flex;gap:4px;margin-bottom:16px}
 .cat-period-btn{padding:5px 14px;border:1px solid var(--border);border-radius:20px;background:var(--bg);color:var(--text-muted);font-size:12px;font-weight:600;cursor:pointer;transition:.15s}
@@ -507,31 +486,18 @@ h1{font-size:20px;font-weight:700;color:var(--text)}
 .tag-pill-inp{border:none;outline:none;background:transparent;font-size:13px;color:var(--text);min-width:80px;flex:1;padding:2px 0}
 .add-form .tag-pill-inp{min-width:0;flex:1}
 .field-hint{font-size:11px;color:var(--text-muted);margin-top:3px}
-.btn-add-new{padding:6px 16px;background:var(--text);color:white;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;transition:opacity .15s;white-space:nowrap}
-.btn-add-new:hover{opacity:.8}
-.btn-add-group{padding:6px 16px;background:var(--bg);color:var(--text-muted);border:1px solid var(--border);border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;transition:0.2s;white-space:nowrap}
-.btn-add-group:hover{border-color:var(--accent);color:var(--accent)}
-.habit-group-accordion{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:12px;overflow:hidden}
-.habit-group-accordion[open]>.habit-group-summary .habit-group-chevron{transform:rotate(90deg)}
-.habit-group-summary{display:flex;align-items:center;gap:10px;padding:12px 20px;cursor:pointer;list-style:none;user-select:none;background:var(--bg);border-bottom:1px solid transparent}
-.habit-group-accordion[open]>.habit-group-summary{border-bottom-color:var(--border)}
-.habit-group-summary::-webkit-details-marker{display:none}
-.habit-group-chevron{font-size:0.7rem;color:var(--text-muted);transition:transform 0.2s;display:inline-block}
-.habit-group-name{font-weight:700;font-size:0.9rem;color:var(--text);flex:1}
-.habit-group-count{font-size:0.72rem;font-weight:700;padding:2px 8px;background:var(--accent);color:white;border-radius:99px;min-width:20px;text-align:center}
-.habit-group-body{padding:8px 16px 4px}
 @media (max-width:600px){
   .container{padding:12px 12px calc(80px + env(safe-area-inset-bottom,0px))}
   nav{padding:8px 14px}
   .nav-user{font-size:11px}
   .nav-user a{min-height:44px;display:inline-flex;align-items:center;padding:8px 10px}
-  .card{padding:16px}
+  .notepad-card .notepad-body{padding:12px 10px 4px}
   .header{flex-direction:column;align-items:flex-start;gap:12px}
   h1{font-size:17px}
   h2{font-size:16px}
   .habit-row{flex-wrap:wrap;gap:8px;padding:12px 0}
   .habit-actions{width:100%;justify-content:flex-end;margin-top:4px}
-  .btn-sm,.btn-checkin-sm,.btn-del-sm{min-height:40px;padding:8px 14px;font-size:13px}
+  .btn-sm{min-height:40px;padding:8px 14px;font-size:13px}
   .btn-detail{min-height:40px;padding:8px 14px;font-size:13px}
   .add-form{flex-direction:column}
   .add-form label{width:100%}
@@ -546,7 +512,7 @@ h1{font-size:20px;font-weight:700;color:var(--text)}
   .stat-divider{display:none}
   .stat-value{font-size:22px}
   .tab-row{gap:6px}
-  .tab-btn{flex:1;text-align:center;padding:10px 4px;min-height:44px;font-size:13px}
+  .tab-row .btn{flex:1;text-align:center;min-height:44px;font-size:13px}
   .heatmap-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
   .streak-badge{font-size:12px;padding:5px 10px}
   #editToggle{min-height:40px;padding:8px 12px}
@@ -691,11 +657,15 @@ if(trendEl){
 }
 
 // ── Tab switching ─────────────────────────────────────────
-document.querySelectorAll('.tab-btn').forEach(btn=>{
+document.querySelectorAll('.tab-row .btn[data-tab]').forEach(btn=>{
   btn.addEventListener('click',()=>{
     const target=btn.dataset.tab;
-    document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
-    btn.classList.add('active');
+    document.querySelectorAll('.tab-row .btn[data-tab]').forEach(b=>{
+      b.classList.remove('btn-primary');
+      b.classList.add('btn-ghost');
+    });
+    btn.classList.remove('btn-ghost');
+    btn.classList.add('btn-primary');
     document.querySelectorAll('.tab-panel').forEach(p=>{
       p.style.display=p.id===target?'':'none';
     });
@@ -726,19 +696,19 @@ def render_list(habits, user, readonly=False):
         del_btn = "" if readonly else (
             f'<form method="POST" action="/habit/{h["id"]}/delete" style="display:inline"'
             f' onsubmit="return confirm(\'Delete habit: {h["name"]}?\')">'
-            f'<button class="btn-sm btn-del-sm" type="submit">Delete</button></form>'
+            f'<button class="btn btn-danger btn-sm" type="submit">Delete</button></form>'
         )
 
         hid = h["id"]
         inline_log_html = ""
         if readonly:
-            checkin_btn = f'<span class="btn-sm btn-checkin-sm {"checked" if checked else ""}">{"✓ Done" if checked else "Not done"}</span>'
+            checkin_btn = f'<span class="btn {"btn-secondary" if checked else "btn-ghost"} btn-sm">{"✓ Done" if checked else "Not done"}</span>'
         elif h.get("track") == "detail":
             count_label = f'<span class="today-count {"done" if checked else ""}">{today_count}/{target}{unit}</span>'
             log_label = "✓ Logged" if checked else "+ Log"
             checkin_btn = (
                 f'{count_label}'
-                f'<button type="button" class="btn-sm btn-checkin-sm" onclick="toggleLog({hid})">'
+                f'<button type="button" class="btn {"btn-secondary" if checked else "btn-primary"} btn-sm" onclick="toggleLog({hid})">'
                 f'{log_label}'
                 f'</button>'
             )
@@ -755,7 +725,7 @@ def render_list(habits, user, readonly=False):
                 f'<form method="POST" action="/habit/{hid}/checkin" class="log-clear-form">'
                 f'<input type="hidden" name="clear" value="1">'
                 f'<input type="hidden" name="next" value="/habit">'
-                f'<button type="submit" class="btn-sm btn-log-clear">Clear today</button></form>'
+                f'<button type="submit" class="btn btn-danger btn-sm">Clear today</button></form>'
             ) if today_count > 0 else ""
             inline_log_html = (
                 f'<div class="inline-log-panel" id="log-{hid}" style="display:none">'
@@ -764,7 +734,7 @@ def render_list(habits, user, readonly=False):
                 f'<div class="inline-log-row">'
                 f'{label_inp}'
                 f'<input type="number" name="value" placeholder="{unit}" class="log-val-inp" min="0" step="0.1" required>'
-                f'<button type="submit" class="btn-sm btn-log-ok">+ Add</button>'
+                f'<button type="submit" class="btn btn-accent btn-sm">+ Add</button>'
                 f'</div></form>'
                 f'{clear_btn}'
                 f'</div>'
@@ -776,14 +746,15 @@ def render_list(habits, user, readonly=False):
                 f'<form method="POST" action="/habit/{h["id"]}/checkin" style="display:inline">'
                 f'<input type="hidden" name="delta" value="1">'
                 f'<input type="hidden" name="next" value="/habit">'
-                f'<button class="btn-sm btn-checkin-sm" type="submit">+1{unit}</button></form>'
+                f'<button class="btn btn-primary btn-sm" type="submit">+1{unit}</button></form>'
             )
         else:
+            btn_cls = "btn btn-secondary btn-sm" if checked else "btn btn-primary btn-sm"
             checkin_btn = (
                 f'<form method="POST" action="/habit/{h["id"]}/checkin" style="display:inline">'
                 f'<input type="hidden" name="toggle" value="1">'
                 f'<input type="hidden" name="next" value="/habit">'
-                f'<button class="btn-sm btn-checkin-sm{"  checked" if checked else ""}" '
+                f'<button class="{btn_cls}" '
                 f'{"type=button" if checked else "type=submit"}>{"✓ Done" if checked else "Check in"}</button></form>'
             )
         # Sub-activity entries for today
@@ -808,7 +779,7 @@ def render_list(habits, user, readonly=False):
           <div class="habit-actions">
             <span class="streak-sm">🔥 {streak}d</span>
             {checkin_btn}
-            <a class="btn-detail" href="/habit/{h["id"]}">Detail</a>
+            <a class="btn btn-ghost btn-sm" href="/habit/{h["id"]}">Detail</a>
             {del_btn}
           </div>
         </div>
@@ -828,18 +799,23 @@ def render_list(habits, user, readonly=False):
         for _grp in sorted(_gmap.keys()):
             _items = "".join(_gmap[_grp])
             _cnt = len(_gmap[_grp])
-            rows += f'''<details open class="habit-group-accordion">
-  <summary class="habit-group-summary"><span class="habit-group-chevron">▶</span><span class="habit-group-name">{_grp}</span><span class="habit-group-count">{_cnt}</span></summary>
-  <div class="habit-group-body">{_items}</div>
-</details>'''
+            rows += f'''<div class="notepad-card" style="margin-bottom:12px">
+  <div class="notepad-header" onclick="this.closest('.notepad-card').classList.toggle('collapsed')" style="cursor:pointer">
+    <div class="notepad-title-row">
+      <span class="notepad-chevron">▼</span>
+      <span class="notepad-name">{_grp}</span>
+      <span class="notepad-count">{_cnt}</span>
+    </div>
+  </div>
+  <div class="notepad-body">{_items}</div>
+</div>'''
 
     _add_display = 'block' if not habits else 'none'
     add_card = "" if readonly else (
-        f'<div class="card" id="addHabitCard" style="display:{_add_display}">'
-        '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">'
-        '<h2 style="margin:0">Add New Habit</h2>'
-        '<button type="button" onclick="toggleAddForm()" style="background:none;border:none;cursor:pointer;font-size:22px;color:var(--text-muted);padding:0 4px;line-height:1">×</button>'
-        '</div>'
+        f'<div class="notepad-card" id="addHabitCard" style="display:{_add_display}">''<div class="notepad-header"><div class="notepad-title-row"><span class="notepad-name">Add New Habit</span>'
+        '<button type="button" onclick="toggleAddForm()" class="btn btn-ghost btn-sm">✕</button>'
+        '</div></div>'
+        '<div class="notepad-body">'
         '<form class="add-form" method="POST" action="/habit/add">'
         '<label>Habit name<input type="text" name="name" placeholder="e.g. Exercise, Read, Drink water" required></label>'
         '<label>Frequency<select name="freq"><option value="daily">Daily</option><option value="weekly">Weekly</option></select></label>'
@@ -869,8 +845,8 @@ def render_list(habits, user, readonly=False):
         + f'<select name="group" style="width:100%"><option value="">No group</option>'
         + "".join(f'<option value="{g}">{g}</option>' for g in all_groups)
         + '</select></label>'
-        '<button type="submit">Add</button>'
-        '</form></div>'
+        '<button type="submit" class="btn btn-primary">Add</button>'
+        '</form></div></div>'
     )
 
     from server import app_tabs
@@ -880,14 +856,14 @@ def render_list(habits, user, readonly=False):
         '<div id="addGroupCard" style="display:none;background:white;border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:12px">'
         '<form method="POST" action="/habit/group/add" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
         '<input type="text" name="name" id="newHabitGroupInput" placeholder="Group name..." style="flex:1;min-width:160px;padding:9px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px">'
-        '<button type="submit" class="btn-add-new" style="padding:9px 18px">Add</button>'
-        '<button type="button" onclick="toggleAddGroupForm()" style="padding:9px 12px;background:transparent;border:1px solid var(--border);border-radius:8px;cursor:pointer;color:var(--text-muted);font-size:14px">✕</button>'
+        '<button type="submit" class="btn btn-primary">Add</button>'
+        '<button type="button" onclick="toggleAddGroupForm()" class="btn btn-ghost">✕</button>'
         '</form></div>'
     )
     group_btn_html = "" if readonly else (
         '<div style="display:flex;gap:8px">'
-        '<button type="button" onclick="toggleAddGroupForm()" class="btn-add-group">＋ Group</button>'
-        '<button type="button" onclick="toggleAddForm()" class="btn-add-new">＋ New Habit</button>'
+        '<button type="button" onclick="toggleAddGroupForm()" class="btn btn-ghost">＋ Group</button>'
+        '<button type="button" onclick="toggleAddForm()" class="btn btn-primary btn-lg">＋ New Habit</button>'
         '</div>'
     )
 
@@ -910,12 +886,16 @@ def render_list(habits, user, readonly=False):
   {add_card}
   {add_group_card}
 
-  <div class="card">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-      <h2 style="margin:0">{("🏃 " + user + "'s ") if readonly else ""}Habits</h2>
-      {group_btn_html}
+  <div class="notepad-card">
+<div class="notepad-header">
+      <div class="notepad-title-row">
+        <span class="notepad-name">{("🏃 " + user + "'s ") if readonly else ""}Habits</span>
+        {group_btn_html}
+      </div>
     </div>
-    {rows}
+    <div class="notepad-body">
+      {rows}
+    </div>
   </div>
 
 </div>
@@ -1114,7 +1094,7 @@ def render_detail(habit, user):
             f'<form method="POST" action="/habit/{hid}/checkin" style="display:inline">'
             f'<input type="hidden" name="clear" value="1">'
             f'<input type="hidden" name="next" value="/habit/{hid}">'
-            f'<button class="btn-clear-rich" type="submit">Clear today</button></form>'
+            f'<button class="btn btn-danger btn-sm" type="submit">Clear today</button></form>'
         ) if today_entries else ""
         if categories:
             initial_rows_html = "".join(
@@ -1144,8 +1124,8 @@ def render_detail(habit, user):
               {initial_rows_html}
             </div>
             <div class="rich-actions" style="margin-top:10px">
-              <button type="button" class="btn-add-row" onclick="addEntryRow()">+ Add entry</button>
-              <button type="submit" class="btn-save-rich">Save</button>
+              <button type="button" class="btn btn-ghost btn-sm" onclick="addEntryRow()">+ Add entry</button>
+              <button type="submit" class="btn btn-primary">Save</button>
               {clear_btn}
             </div>
           </form>
@@ -1155,10 +1135,10 @@ def render_detail(habit, user):
             checkin_block = (
                 f'<form method="POST" action="/habit/{hid}/checkin" style="display:inline">'
                 f'<input type="hidden" name="toggle" value="1">'
-                f'<button class="btn-checkin" type="submit">✓ Complete {habit_name} today!</button></form>'
+                f'<button class="btn btn-primary btn-lg" type="submit">✓ Complete {habit_name} today!</button></form>'
             )
         else:
-            checkin_block = '<button class="btn-checkin checked" type="button">✓ Done today!</button>'
+            checkin_block = '<button class="btn btn-secondary btn-lg" type="button">✓ Done today!</button>'
         checkin_note = (
             f"Great job completing {habit_name} today! {habit_icon}"
             if today_done else
@@ -1175,13 +1155,13 @@ def render_detail(habit, user):
             f'<form method="POST" action="/habit/{hid}/checkin" style="display:inline">'
             f'<input type="hidden" name="delta" value="-1">'
             f'<input type="hidden" name="next" value="/habit/{hid}">'
-            f'<button class="btn-counter" type="submit">−</button></form>'
+            f'<button class="btn btn-secondary" type="submit" style="width:44px;height:44px;font-size:1.4rem">−</button></form>'
         )
         plus_btn = (
             f'<form method="POST" action="/habit/{hid}/checkin" style="display:inline">'
             f'<input type="hidden" name="delta" value="1">'
             f'<input type="hidden" name="next" value="/habit/{hid}">'
-            f'<button class="btn-counter" type="submit">＋</button></form>'
+            f'<button class="btn btn-secondary" type="submit" style="width:44px;height:44px;font-size:1.4rem">＋</button></form>'
         )
         note = f"Goal reached: {target} {unit}! Well done {habit_icon}" if today_done else f"Today: {today_count}/{target} {unit}. {target - today_count} {unit} to go."
         checkin_section = f'''
@@ -1207,14 +1187,16 @@ def render_detail(habit, user):
         import json as _json
         cat_json = _json.dumps(cat_stats)
         by_cat_section = f'''
-  <div class="card">
-    <div class="section-title">By Activity Label</div>
+  <div class="notepad-card">
+<div class="notepad-header"><div class="notepad-title-row"><span class="notepad-name" style="font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted)">By Activity Label</span></div></div>
+    <div class="notepad-body" style="padding:16px">
     <div class="cat-period-row">
       <button class="cat-period-btn active" onclick="showCatPeriod(this,'week')">This week</button>
       <button class="cat-period-btn" onclick="showCatPeriod(this,'month')">This month</button>
       <button class="cat-period-btn" onclick="showCatPeriod(this,'all')">All time</button>
     </div>
     <div class="cat-bars" id="catBars"></div>
+    </div>
   </div>
   <script>
   (function(){{
@@ -1263,20 +1245,23 @@ def render_detail(habit, user):
 </nav>
 <div class="container">
 
-  <div class="card">
-    <div class="header">
-      <div class="habit-title">
-        <div class="habit-icon-lg">{habit_icon}</div>
-        <div>
-          <h1>{habit_name}</h1>
-          <div class="habit-sub">{started_display} · {freq_lbl} · Goal: {target} {unit}</div>
+  <div class="notepad-card">
+<div class="notepad-header">
+      <div class="notepad-title-row">
+        <div class="habit-title" style="flex:1">
+          <div class="habit-icon-lg">{habit_icon}</div>
+          <div>
+            <h1 style="font-size:18px">{habit_name}</h1>
+            <div class="habit-sub">{started_display} · {freq_lbl} · Goal: {target} {unit}</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <div class="streak-badge">🔥 {streak} streak</div>
+          <button id="editToggle" onclick="var f=document.getElementById('editForm');f.style.display=f.style.display==='none'?'block':'none';this.textContent=f.style.display==='none'?'Edit':'Cancel'" class="btn btn-ghost btn-sm">Edit</button>
         </div>
       </div>
-      <div style="display:flex;gap:8px;align-items:center">
-        <div class="streak-badge">🔥 {streak} streak</div>
-        <button id="editToggle" onclick="var f=document.getElementById('editForm');f.style.display=f.style.display==='none'?'block':'none';this.textContent=f.style.display==='none'?'Edit':'Cancel'" class="btn-cal-nav" style="font-size:13px;width:auto;padding:0 14px">Edit</button>
-      </div>
     </div>
+    <div class="notepad-body" style="padding:16px">
     <form id="editForm" method="POST" action="/habit/{hid}/edit" style="display:none;margin-top:20px;padding-top:20px;border-top:1px solid var(--border)">
       <div class="add-form">
         <label>Name<input type="text" name="name" value="{habit_name}" required></label>
@@ -1309,7 +1294,7 @@ def render_detail(habit, user):
         <input type="text" name="group" value="{habit.get('group','')}" list="detail-groups" placeholder="e.g. Morning, Health..." style="width:100%">
         <datalist id="detail-groups">{"".join(f'<option value="{g}">' for g in load_habit_groups(user))}</datalist>
         </label>
-        <button type="submit">Save</button>
+        <button type="submit" class="btn btn-primary">Save</button>
       </div>
     </form>
     <div style="height:20px"></div>
@@ -1326,61 +1311,70 @@ def render_detail(habit, user):
       <div class="progress-label"><span>12-week rate</span><span>{done_12w} / {days_12w} days</span></div>
       <div class="progress-bar"><div class="progress-fill" style="width:{rate_12w}%"></div></div>
     </div>
+    </div>
   </div>
 
-  <div class="card">
-    <div class="heatmap-header">
-      <span class="heatmap-title">Activity — Last 12 weeks</span>
-      <div class="legend">
-        <span>0</span>
-        <div class="legend-cell" style="background:var(--cell-0);border:1px solid var(--border)"></div>
-        <div class="legend-cell" style="background:#e0f2fe"></div>
-        <div class="legend-cell" style="background:#bae6fd"></div>
-        <div class="legend-cell" style="background:var(--cell-4)"></div>
-        <span>Goal</span>
-      </div>
-    </div>
-    <div class="heatmap-wrap">
-      <div class="heatmap-grid-wrap">
-        <div class="dow-labels">
-          <div class="dow-label">Su</div><div class="dow-label">Mo</div>
-          <div class="dow-label">Tu</div><div class="dow-label">We</div>
-          <div class="dow-label">Th</div><div class="dow-label">Fr</div>
-          <div class="dow-label">Sa</div>
-        </div>
-        <div class="weeks-wrap">
-          <div class="month-labels" id="monthLabels"></div>
-          <div class="weeks" id="heatmapGrid"></div>
+  <div class="notepad-card">
+<div class="notepad-header">
+      <div class="notepad-title-row">
+        <span class="notepad-name" style="font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted)">Activity — Last 12 weeks</span>
+        <div class="legend" style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-muted)">
+          <span>0</span>
+          <div class="legend-cell" style="width:11px;height:11px;border-radius:2px;background:var(--cell-0);border:1px solid var(--border)"></div>
+          <div class="legend-cell" style="width:11px;height:11px;border-radius:2px;background:#e0f2fe"></div>
+          <div class="legend-cell" style="width:11px;height:11px;border-radius:2px;background:#bae6fd"></div>
+          <div class="legend-cell" style="width:11px;height:11px;border-radius:2px;background:var(--cell-4)"></div>
+          <span>Goal</span>
         </div>
       </div>
     </div>
-  </div>
-
-  <div class="card">
-    <div class="section-title">Today's Check-in</div>
-    {checkin_section}
-  </div>
-
-  <div class="card">
-    <div class="tab-row">
-      <button class="tab-btn active" data-tab="tabCalendar">📅 Calendar</button>
-      <button class="tab-btn" data-tab="tabTrend">📈 Trend</button>
-    </div>
-
-    <div id="tabCalendar" class="tab-panel">
-      <div class="cal-header">
-        <button id="calPrev" class="btn-cal-nav">‹</button>
-        <span class="cal-title" id="calTitle"></span>
-        <button id="calNext" class="btn-cal-nav">›</button>
+    <div class="notepad-body">
+      <div class="heatmap-wrap">
+        <div class="heatmap-grid-wrap">
+          <div class="dow-labels">
+            <div class="dow-label">Su</div><div class="dow-label">Mo</div>
+            <div class="dow-label">Tu</div><div class="dow-label">We</div>
+            <div class="dow-label">Th</div><div class="dow-label">Fr</div>
+            <div class="dow-label">Sa</div>
+          </div>
+          <div class="weeks-wrap">
+            <div class="month-labels" id="monthLabels"></div>
+            <div class="weeks" id="heatmapGrid"></div>
+          </div>
+        </div>
       </div>
-      <div id="monthCalendar"></div>
     </div>
+  </div>
 
-    <div id="tabTrend" class="tab-panel" style="display:none">
-      <div class="section-title" style="margin-bottom:8px">Weekly Trend (12 weeks)</div>
-      <div style="position:relative">
-        <div class="trend-zero"></div>
-        <div class="trend-wrap" id="trendChart"></div>
+  <div class="notepad-card">
+<div class="notepad-header"><div class="notepad-title-row"><span class="notepad-name" style="font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted)">Today's Check-in</span></div></div>
+    <div class="notepad-body" style="padding:16px">
+      {checkin_section}
+    </div>
+  </div>
+
+  <div class="notepad-card">
+<div class="notepad-body" style="padding:16px">
+      <div class="tab-row">
+        <button class="btn btn-primary btn-sm" data-tab="tabCalendar">📅 Calendar</button>
+        <button class="btn btn-ghost btn-sm" data-tab="tabTrend">📈 Trend</button>
+      </div>
+
+      <div id="tabCalendar" class="tab-panel">
+        <div class="cal-header">
+          <button id="calPrev" class="btn btn-ghost">‹</button>
+          <span class="cal-title" id="calTitle"></span>
+          <button id="calNext" class="btn btn-ghost">›</button>
+        </div>
+        <div id="monthCalendar"></div>
+      </div>
+
+      <div id="tabTrend" class="tab-panel" style="display:none">
+        <div class="section-title" style="margin-bottom:8px">Weekly Trend (12 weeks)</div>
+        <div style="position:relative">
+          <div class="trend-zero"></div>
+          <div class="trend-wrap" id="trendChart"></div>
+        </div>
       </div>
     </div>
   </div>

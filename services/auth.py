@@ -154,18 +154,19 @@ def handle(method, path, body, ctx=None):
         return ("set_cookie_redirect", "/login", "session=; Max-Age=0; Path=/; HttpOnly")
 
     if method == "POST":
+        action = body.get("action", ["login"])[0]
         username = body.get("username", [""])[0].strip().lower()
         password = body.get("password", [""])[0]
+
         if not username or not password:
             return ("html", render_login("아이디와 비밀번호를 입력하세요."))
 
         users = load_users()
         pw_hash = hash_pw(password)
 
-        if username in users:
-            if users[username]["pw"] != pw_hash:
-                return ("html", render_login("비밀번호가 틀렸습니다."))
-        else:
+        if action == "register":
+            if username in users:
+                return ("html", render_login(register_error="이미 존재하는 아이디입니다."))
             role = "admin" if username == ADMIN_USERNAME else "user"
             email = body.get("email", [""])[0].strip()
             services_raw = body.get("services", [])
@@ -175,6 +176,11 @@ def handle(method, path, body, ctx=None):
                 "email": email, "services": services_list,
             }
             save_users(users)
+        else:
+            if username not in users:
+                return ("html", render_login("존재하지 않는 아이디입니다."))
+            if users[username]["pw"] != pw_hash:
+                return ("html", render_login("비밀번호가 틀렸습니다."))
 
         data_dir(username)
         token = secrets.token_urlsafe(32)
@@ -186,7 +192,7 @@ def handle(method, path, body, ctx=None):
     return ("html", render_login())
 
 
-def render_login(error=""):
+def render_login(error="", register_error=""):
     settings = load_settings()
     available = settings.get("available_services", [])
     svc_labels = {"todo": "📋 Todo", "habit": "🏃 습관 트래커"}
@@ -198,11 +204,13 @@ def render_login(error=""):
             for s in available
         )
         svc_html = f'''<div class="field">
-      <label>서비스 선택 <span class="hint-inline">(신규 가입 시 적용)</span></label>
+      <label>서비스 선택</label>
       <div class="svc-checks">{checks}</div>
     </div>'''
 
     err = f'<div class="error">{error}</div>' if error else ""
+    reg_err = f'<div class="error">{register_error}</div>' if register_error else ""
+
     return f'''<!DOCTYPE html>
 <html lang="ko"><head>
 <meta charset="UTF-8">
@@ -210,35 +218,48 @@ def render_login(error=""):
 <title>로그인 · Wayfinder</title>
 <style>
 *,*::before,*::after{{box-sizing:border-box;margin:0;padding:0}}
-body{{background:#0d1117;color:#e6edf3;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh}}
-.box{{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:40px;width:100%;max-width:380px}}
-h1{{font-size:22px;font-weight:700;margin-bottom:6px;text-align:center}}
-.sub{{font-size:13px;color:#8b949e;text-align:center;margin-bottom:28px}}
-.field{{margin-bottom:16px}}
+body{{background:#0d1117;color:#e6edf3;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:40px 16px}}
+.wrap{{width:100%;max-width:380px;display:flex;flex-direction:column;gap:16px}}
+.box{{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:32px}}
+h1{{font-size:22px;font-weight:700;margin-bottom:24px;text-align:center}}
+h2{{font-size:15px;font-weight:600;color:#8b949e;margin-bottom:20px}}
+.field{{margin-bottom:14px}}
 label{{display:block;font-size:13px;color:#8b949e;margin-bottom:6px}}
 input[type=text],input[type=password],input[type=email]{{width:100%;padding:10px 14px;background:#0d1117;border:1px solid #30363d;border-radius:8px;color:#e6edf3;font-size:14px;outline:none;transition:border-color .15s}}
 input[type=text]:focus,input[type=password]:focus,input[type=email]:focus{{border-color:#58a6ff}}
-button{{width:100%;padding:11px;background:linear-gradient(135deg,#238636,#2ea043);color:#fff;border:none;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;margin-top:8px;transition:filter .15s}}
-button:hover{{filter:brightness(1.1)}}
-.error{{background:rgba(248,81,73,.12);border:1px solid rgba(248,81,73,.4);color:#f85149;border-radius:6px;padding:10px 14px;font-size:13px;margin-bottom:16px}}
-.hint{{font-size:12px;color:#8b949e;text-align:center;margin-top:16px;line-height:1.5}}
-.hint-inline{{font-size:11px;color:#6e7681}}
+.btn-login{{width:100%;padding:11px;background:linear-gradient(135deg,#1f6feb,#388bfd);color:#fff;border:none;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;margin-top:4px;transition:filter .15s}}
+.btn-register{{width:100%;padding:11px;background:#21262d;color:#e6edf3;border:1px solid #30363d;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;margin-top:4px;transition:filter .15s}}
+.btn-login:hover,.btn-register:hover{{filter:brightness(1.15)}}
+.error{{background:rgba(248,81,73,.12);border:1px solid rgba(248,81,73,.4);color:#f85149;border-radius:6px;padding:10px 14px;font-size:13px;margin-bottom:14px}}
+.divider{{border:none;border-top:1px solid #21262d;margin:0}}
 .svc-checks{{display:flex;gap:12px;flex-wrap:wrap;margin-top:6px}}
 .svc-check{{display:flex;align-items:center;gap:6px;font-size:13px;color:#c9d1d9;cursor:pointer}}
 .svc-check input{{width:auto}}
 </style>
 </head><body>
-<div class="box">
-  <h1>🧭 Wayfinder</h1>
-  <p class="sub">로그인하거나 새 계정을 만드세요</p>
-  {err}
-  <form method="POST" action="/login">
-    <div class="field"><label>아이디</label><input type="text" name="username" autofocus autocomplete="username" placeholder="username"></div>
-    <div class="field"><label>비밀번호</label><input type="password" name="password" autocomplete="current-password" placeholder="••••••••"></div>
-    <div class="field"><label>이메일 <span class="hint-inline">(선택)</span></label><input type="email" name="email" autocomplete="email" placeholder="you@example.com"></div>
-    {svc_html}
-    <button type="submit">로그인 / 가입</button>
-  </form>
-  <p class="hint">처음 입력하는 아이디는 자동으로 계정이 생성됩니다</p>
+<div class="wrap">
+  <div class="box">
+    <h1>🧭 Wayfinder</h1>
+    {err}
+    <form method="POST" action="/login">
+      <input type="hidden" name="action" value="login">
+      <div class="field"><label>아이디</label><input type="text" name="username" autofocus autocomplete="username" placeholder="username"></div>
+      <div class="field"><label>비밀번호</label><input type="password" name="password" autocomplete="current-password" placeholder="••••••••"></div>
+      <button class="btn-login" type="submit">로그인</button>
+    </form>
+  </div>
+  <hr class="divider">
+  <div class="box">
+    <h2>새 계정 만들기</h2>
+    {reg_err}
+    <form method="POST" action="/login">
+      <input type="hidden" name="action" value="register">
+      <div class="field"><label>아이디</label><input type="text" name="username" autocomplete="username" placeholder="username"></div>
+      <div class="field"><label>비밀번호</label><input type="password" name="password" autocomplete="new-password" placeholder="••••••••"></div>
+      <div class="field"><label>이메일 <span style="font-size:11px;color:#6e7681">(선택)</span></label><input type="email" name="email" autocomplete="email" placeholder="you@example.com"></div>
+      {svc_html}
+      <button class="btn-register" type="submit">가입</button>
+    </form>
+  </div>
 </div>
 </body></html>'''
