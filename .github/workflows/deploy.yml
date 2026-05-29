@@ -20,6 +20,7 @@ jobs:
             ${{ secrets.GOOGLE_CREDENTIALS }}
             GCREDS
             echo '${{ secrets.CARDCONV_TEMPLATE_B64 }}' | base64 -d > ~/.appdata/cardconv/template.xlsx 2>/dev/null || true
+            sed -i "s|ANTHROPIC_API_KEY=.*|ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}|" ~/webapp/.env || true
 
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
