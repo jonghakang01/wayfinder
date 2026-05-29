@@ -584,10 +584,24 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", len(data))
             self.end_headers()
             self.wfile.write(data)
+        elif t == "binary":
+            # Serve in-memory bytes inline (filename=None) or as attachment
+            data, mime = result[1], result[2]
+            fname = result[3] if len(result) > 3 else None
+            code = result[4] if len(result) > 4 else 200
+            self.send_response(code)
+            self.send_header("Content-Type", mime)
+            if fname:
+                self.send_header("Content-Disposition", f'attachment; filename="{fname}"')
+            else:
+                self.send_header("Content-Disposition", "inline")
+            self.send_header("Content-Length", len(data))
+            self.end_headers()
+            self.wfile.write(data)
 
     def get_ctx(self):
         cookie = self.headers.get("Cookie", "")
-        return {"cookie": cookie, "user": auth.get_user(cookie)}
+        return {"cookie": cookie, "user": auth.get_user(cookie), "headers": self.headers}
 
     def do_GET(self):
         parsed = urlparse(self.path)
