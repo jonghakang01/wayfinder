@@ -164,6 +164,25 @@ def _save_receipts(username: str, receipts: list):
     _receipts_file(username).write_text(json.dumps(receipts, ensure_ascii=False, indent=2))
 
 
+def _drive_meta_file(username: str) -> Path:
+    return DATA_DIR / f"drive_meta_{username}.json"
+
+
+def _load_drive_meta(username: str) -> dict:
+    f = _drive_meta_file(username)
+    if f.exists():
+        try:
+            return json.loads(f.read_text())
+        except Exception:
+            pass
+    return {}
+
+
+def _save_drive_meta(username: str, meta: dict):
+    _ensure_dirs()
+    _drive_meta_file(username).write_text(json.dumps(meta, ensure_ascii=False, indent=2))
+
+
 # ── Drive OAuth helpers ───────────────────────────────────────────────────────
 
 def _get_creds(username: str):
@@ -213,25 +232,54 @@ def _get_or_create_folder(service, name: str, parent_id: str = None) -> str:
     return service.files().create(body=meta, fields='id').execute()['id']
 
 
+def _get_receipts_folder_ids(service, username: str) -> tuple:
+    """Return (receipts_folder_id, matched_folder_id), creating folders if needed."""
+    wayfinder_id = _get_or_create_folder(service, 'Wayfinder')
+    receipts_id  = _get_or_create_folder(service, 'Receipts', wayfinder_id)
+    matched_id   = _get_or_create_folder(service, 'Matched', receipts_id)
+    # Cache receipts folder ID for UI link
+    meta = _load_drive_meta(username)
+    if meta.get('receipts_folder_id') != receipts_id:
+        meta['receipts_folder_id'] = receipts_id
+        _save_drive_meta(username, meta)
+    return receipts_id, matched_id
+
+
 def _upload_file_to_drive(username: str, file_bytes: bytes, filename: str,
-                           mime_type: str, folder_ym: str) -> tuple:
-    """Upload to Drive under Wayfinder/Receipts/YYYY-MM/. Returns (file_id, drive_url)."""
+                           mime_type: str) -> tuple:
+    """Upload to Drive under Wayfinder/Receipts/. Returns (file_id, drive_url)."""
     from googleapiclient.http import MediaIoBaseUpload
     service = _get_drive_service(username)
     if not service:
         return None, None
-    wayfinder_id = _get_or_create_folder(service, 'Wayfinder')
-    receipts_id  = _get_or_create_folder(service, 'Receipts', wayfinder_id)
-    month_id     = _get_or_create_folder(service, folder_ym, receipts_id)
+    receipts_id, _ = _get_receipts_folder_ids(service, username)
     media  = MediaIoBaseUpload(io.BytesIO(file_bytes), mimetype=mime_type)
     result = service.files().create(
-        body={'name': filename, 'parents': [month_id]},
+        body={'name': filename, 'parents': [receipts_id]},
         media_body=media,
         fields='id,webViewLink'
     ).execute()
     fid = result.get('id')
     url = result.get('webViewLink') or f'https://drive.google.com/file/d/{fid}/view'
     return fid, url
+
+
+def _move_to_matched_folder(username: str, file_id: str) -> bool:
+    """Move receipt file from Wayfinder/Receipts/ to Wayfinder/Receipts/Matched/."""
+    try:
+        service = _get_drive_service(username)
+        if not service:
+            return False
+        receipts_id, matched_id = _get_receipts_folder_ids(service, username)
+        service.files().update(
+            fileId=file_id,
+            addParents=matched_id,
+            removeParents=receipts_id,
+            fields='id,parents'
+        ).execute()
+        return True
+    except Exception:
+        return False
 
 
 # ── OCR ───────────────────────────────────────────────────────────────────────
@@ -379,9 +427,12 @@ def convert(csv_bytes: bytes, filename: str, username: str = None) -> tuple:
     unmatched  = 0
 
     # Build receipt lookup: (date_str, rounded_amount) → receipt record
-    receipts_map = {}
+    receipts      = []
+    receipts_map  = {}
+    receipts_dirty = False
     if username:
-        for r in _load_receipts(username):
+        receipts = _load_receipts(username)
+        for r in receipts:
             rdate   = r.get("ocr_date")
             ramount = r.get("ocr_amount")
             if rdate and ramount is not None:
@@ -436,7 +487,7 @@ def convert(csv_bytes: bytes, filename: str, username: str = None) -> tuple:
         ws.cell(start, 25).value = None
         ws.cell(start, 26).value = amount
 
-        # Receipt match in column 27
+        # Receipt match in column 27; move matched receipts to Matched folder
         if receipts_map and inv_dt:
             inv_date_str  = inv_dt.strftime("%Y-%m-%d")
             amt_rounded   = round(amount, 2)
@@ -450,10 +501,24 @@ def convert(csv_bytes: bytes, filename: str, username: str = None) -> tuple:
                 fn  = receipt_match.get('filename', '')
                 url = receipt_match.get('drive_url', '')
                 ws.cell(start, 27).value = f"✅ {fn} ({url})" if url else f"✅ {fn}"
+                # Move to Matched folder on first match
+                fid = receipt_match.get('file_id')
+                if fid and username and not receipt_match.get('matched'):
+                    if _move_to_matched_folder(username, fid):
+                        receipt_match['matched'] = True
+                        receipt_match['matched_transaction'] = {
+                            'date':   inv_date_str,
+                            'amount': amt_rounded,
+                            'vendor': vendor,
+                        }
+                        receipts_dirty = True
             else:
                 ws.cell(start, 27).value = "❌ Missing"
 
         start += 1
+
+    if receipts_dirty and username:
+        _save_receipts(username, receipts)
 
     buf = io.BytesIO()
     wb.save(buf)
@@ -474,6 +539,10 @@ def handle(method, path, body, ctx=None):
         return _handle_drive_connect(user)
     if method == "POST" and path == "/cardconv/drive/auth":
         return _handle_drive_auth(user, body)
+
+    # Drive sync
+    if method == "POST" and path == "/cardconv/drive/sync":
+        return _handle_drive_sync(user)
 
     # Receipt upload
     if method == "POST" and path == "/cardconv/receipts/upload":
@@ -527,7 +596,6 @@ def _handle_drive_connect(username: str):
     try:
         import urllib.parse as _up
         c = _get_client_info()
-        # Build auth URL manually — no PKCE, no library
         params = {
             "client_id":     c["client_id"],
             "redirect_uri":  "urn:ietf:wg:oauth:2.0:oob",
@@ -563,7 +631,6 @@ def _handle_drive_auth(username: str, body):
         token_json = _json.loads(resp.read())
         if "error" in token_json:
             raise Exception(f"{token_json['error']}: {token_json.get('error_description','')}")
-        # Save in google.oauth2.credentials.Credentials format
         c = _get_client_info()
         save_data = {
             "token":         token_json.get("access_token"),
@@ -581,6 +648,52 @@ def _handle_drive_auth(username: str, body):
     return ("redirect", "/cardconv")
 
 
+def _handle_drive_sync(username: str):
+    """Scan Drive Wayfinder/Receipts/ folder, OCR new files, append to receipts json."""
+    service = _get_drive_service(username)
+    if not service:
+        return ("redirect", "/cardconv")
+    try:
+        receipts_id, _ = _get_receipts_folder_ids(service, username)
+        # List files directly in Receipts (exclude subfolders)
+        results = service.files().list(
+            q=(f"'{receipts_id}' in parents and trashed=false "
+               f"and mimeType!='application/vnd.google-apps.folder'"),
+            fields="files(id,name,mimeType,webViewLink)"
+        ).execute()
+        drive_files = results.get('files', [])
+
+        existing     = _load_receipts(username)
+        existing_ids = {r.get('file_id') for r in existing}
+        supported    = {'image/jpeg', 'image/png', 'application/pdf', 'image/gif', 'image/webp'}
+
+        for f in drive_files:
+            fid = f.get('id')
+            if fid in existing_ids:
+                continue
+            mime = f.get('mimeType', '')
+            if mime not in supported:
+                continue
+            content = service.files().get_media(fileId=fid).execute()
+            ocr     = _ocr_receipt(content, mime)
+            url     = f.get('webViewLink') or f'https://drive.google.com/file/d/{fid}/view'
+            existing.append({
+                "file_id":      fid,
+                "filename":     f.get('name', ''),
+                "drive_url":    url,
+                "uploaded_at":  datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "ocr_date":     ocr.get("date"),
+                "ocr_amount":   ocr.get("amount"),
+                "ocr_merchant": ocr.get("merchant"),
+            })
+
+        _save_receipts(username, existing)
+    except Exception as e:
+        return ("html", f"<p style='padding:20px;color:var(--danger)'>Sync error: {e} "
+                        f"<a href='/cardconv' style='color:var(--accent)'>Back</a></p>")
+    return ("redirect", "/cardconv")
+
+
 def _handle_receipt_upload(username: str, body):
     raw = body.get("__raw_handler__")
     if raw is None:
@@ -594,13 +707,12 @@ def _handle_receipt_upload(username: str, body):
         return ("redirect", "/cardconv")
 
     receipts  = _load_receipts(username)
-    folder_ym = datetime.now().strftime("%Y-%m")
     supported = {'image/jpeg', 'image/png', 'application/pdf', 'image/gif', 'image/webp'}
 
     for filename, content, mime_type in files:
         if mime_type not in supported:
             continue
-        file_id, drive_url = _upload_file_to_drive(username, content, filename, mime_type, folder_ym)
+        file_id, drive_url = _upload_file_to_drive(username, content, filename, mime_type)
         ocr = _ocr_receipt(content, mime_type)
         receipts.append({
             "file_id":      file_id,
@@ -709,14 +821,25 @@ def _render_drive_connect(username: str, auth_url: str) -> str:
 
 def _render(user: str) -> str:
     from server import CSS_VER
-    kws      = _load_kw()
-    hist     = _load_hist()
-    receipts = _load_receipts(user)
+    kws       = _load_kw()
+    hist      = _load_hist()
+    receipts  = _load_receipts(user)
     connected = _is_drive_connected(user)
+    meta      = _load_drive_meta(user)
+    receipts_folder_id = meta.get('receipts_folder_id')
 
     # ── Drive status section ──
     if connected:
-        drive_status_html = '<span style="font-size:.88rem;font-weight:600;color:var(--success)">✅ Connected</span>'
+        folder_link = ""
+        if receipts_folder_id:
+            folder_link = (f'<a href="https://drive.google.com/drive/folders/{receipts_folder_id}" '
+                           f'target="_blank" class="btn btn-ghost btn-sm">📂 Open in Drive →</a>')
+        drive_status_html = f'''
+      <span style="font-size:.88rem;font-weight:600;color:var(--success)">✅ Connected</span>
+      {folder_link}
+      <form method="POST" action="/cardconv/drive/sync" style="display:inline;margin-left:4px">
+        <button type="submit" class="btn btn-ghost btn-sm">🔄 Sync from Drive</button>
+      </form>'''
     else:
         drive_status_html = (
             '<span style="font-size:.88rem;font-weight:600;color:var(--danger)">❌ Not connected</span>'
@@ -751,13 +874,17 @@ def _render(user: str) -> str:
             ocr_parts.append(f'${r["ocr_amount"]}')
         if r.get("ocr_merchant"):
             ocr_parts.append(r["ocr_merchant"])
-        ocr_info = f'<div style="font-size:.72rem;color:var(--text-muted);margin-top:2px">{" · ".join(ocr_parts)}</div>' if ocr_parts else ''
+        ocr_info = (f'<div style="font-size:.72rem;color:var(--text-muted);margin-top:2px">'
+                    f'{" · ".join(ocr_parts)}</div>') if ocr_parts else ''
+        matched_badge = ('<span style="font-size:.68rem;font-weight:700;color:var(--success);'
+                         'background:rgba(34,197,94,.12);padding:1px 6px;border-radius:10px">MATCHED</span> '
+                         if r.get('matched') else '')
         drive_link = (f'<a href="{r["drive_url"]}" target="_blank" class="btn btn-ghost btn-sm">🔗</a>'
                       if r.get("drive_url") else "")
         receipt_rows += f'''<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)">
       <span style="font-size:.75rem;color:var(--text-muted);min-width:110px;flex-shrink:0">{r.get("uploaded_at","")}</span>
       <div style="flex:1;min-width:0">
-        <div style="font-size:.85rem;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{r.get("filename","")}</div>
+        <div style="font-size:.85rem;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{matched_badge}{r.get("filename","")}</div>
         {ocr_info}
       </div>
       {drive_link}
@@ -828,7 +955,7 @@ def _render(user: str) -> str:
     <div class="notepad-header">
       <span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--slate-400)">Google Drive</span>
     </div>
-    <div class="notepad-body" style="padding:14px 20px;display:flex;align-items:center;gap:16px">
+    <div class="notepad-body" style="padding:14px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap">
       {drive_status_html}
     </div>
   </div>
