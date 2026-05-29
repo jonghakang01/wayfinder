@@ -16,7 +16,10 @@ TEMPLATE_FALLBACK = Path(os.path.expanduser(
     "~/Desktop/US업무/법카 정산/Automation/for upload.xlsx"
 ))
 
-SCOPES = ['https://www.googleapis.com/auth/drive.file']
+SCOPES = [
+    'https://www.googleapis.com/auth/drive.file',
+    'https://www.googleapis.com/auth/drive.readonly',
+]
 ADMIN  = "jongha.kang"
 TARGET_NAMES = {"JONG KANG", "JONGHA KANG"}
 
