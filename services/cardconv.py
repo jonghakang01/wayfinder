@@ -675,12 +675,15 @@ def _handle_drive_sync(username: str):
         drive_files = results.get('files', [])
 
         existing     = _load_receipts(username)
-        existing_ids = {r.get('file_id') for r in existing}
+        # IDs where OCR already succeeded — skip those only
+        ocr_done_ids = {r.get('file_id') for r in existing
+                        if r.get('ocr_amount') is not None or r.get('matched')}
+        existing_map = {r.get('file_id'): r for r in existing}
         supported    = {'image/jpeg', 'image/png', 'application/pdf', 'image/gif', 'image/webp'}
 
         for f in drive_files:
             fid = f.get('id')
-            if fid in existing_ids:
+            if fid in ocr_done_ids:
                 continue
             mime = f.get('mimeType', '')
             if mime not in supported:
@@ -688,15 +691,23 @@ def _handle_drive_sync(username: str):
             content = service.files().get_media(fileId=fid).execute()
             ocr     = _ocr_receipt(content, mime)
             url     = f.get('webViewLink') or f'https://drive.google.com/file/d/{fid}/view'
-            existing.append({
+            # Fix: treat "YYYY-MM-DD" placeholder as None
+            ocr_date = ocr.get("date")
+            if ocr_date == "YYYY-MM-DD":
+                ocr_date = None
+            entry = {
                 "file_id":      fid,
                 "filename":     f.get('name', ''),
                 "drive_url":    url,
                 "uploaded_at":  datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "ocr_date":     ocr.get("date"),
+                "ocr_date":     ocr_date,
                 "ocr_amount":   ocr.get("amount"),
                 "ocr_merchant": ocr.get("merchant"),
-            })
+            }
+            if fid in existing_map:
+                existing_map[fid].update(entry)
+            else:
+                existing.append(entry)
 
         _save_receipts(username, existing)
     except Exception as e:
