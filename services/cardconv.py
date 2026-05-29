@@ -161,6 +161,9 @@ def _migrate_entry(e: dict) -> dict:
         e["id"] = "rcpt_" + (e.get("file_id") or uuid.uuid4().hex)[:8]
     if "ocr_status" not in e:
         e["ocr_status"] = "done" if e.get("ocr_amount") is not None else "pending"
+    # v2.1: handwritten-priority OCR. Legacy entries keep ocr_amount as printed total.
+    e.setdefault("ocr_printed_amount", e.get("ocr_amount"))
+    e.setdefault("ocr_handwritten_amount", None)
     if "match_status" not in e:
         if e.get("matched"):
             e["match_status"] = "matched"
@@ -237,6 +240,25 @@ def _load_drive_meta(username: str) -> dict:
 def _save_drive_meta(username: str, meta: dict):
     _ensure_dirs()
     _drive_meta_file(username).write_text(json.dumps(meta, ensure_ascii=False, indent=2))
+
+
+def _review_file(username: str) -> Path:
+    return DATA_DIR / f"review_{username}.json"
+
+
+def _load_review(username: str) -> dict:
+    f = _review_file(username)
+    if f.exists():
+        try:
+            return json.loads(f.read_text())
+        except Exception:
+            pass
+    return {}
+
+
+def _save_review(username: str, review: dict):
+    _ensure_dirs()
+    _review_file(username).write_text(json.dumps(review, ensure_ascii=False, indent=2))
 
 
 # ── Drive OAuth helpers ───────────────────────────────────────────────────────
@@ -340,8 +362,48 @@ def _move_to_matched_folder(username: str, file_id: str) -> bool:
 
 # ── OCR ───────────────────────────────────────────────────────────────────────
 
+_OCR_PROMPT = (
+    'Extract data from this receipt and return JSON only. Fields: '
+    'date (YYYY-MM-DD), merchant (name), '
+    'printed_amount (the printed/typed total, number only), '
+    'handwritten_amount (a hand-written final amount including tip if one is visible, '
+    'otherwise null). A hand-written amount, when present, is the real final amount and '
+    'overrides the printed total. '
+    'Return JSON: {"date":"YYYY-MM-DD","merchant":"name","printed_amount":0.00,"handwritten_amount":null}'
+)
+
+
+def _normalize_ocr(result: dict) -> dict:
+    """Derive the final `amount` (handwritten priority) and coerce numeric fields.
+
+    Keeps backward compat with the old single-`amount` shape: if a model still returns
+    only `amount`, it is treated as the printed total.
+    """
+    if not result:
+        return result
+
+    def _num(v):
+        if v is None:
+            return None
+        try:
+            return round(float(v), 2)
+        except (ValueError, TypeError):
+            return None
+
+    printed = _num(result.get("printed_amount"))
+    handwritten = _num(result.get("handwritten_amount"))
+    legacy = _num(result.get("amount"))
+    if printed is None and legacy is not None:
+        printed = legacy
+    result["printed_amount"] = printed
+    result["handwritten_amount"] = handwritten
+    # Handwritten (tip-inclusive) total wins; fall back to printed.
+    result["amount"] = handwritten if handwritten is not None else printed
+    return result
+
+
 def _ocr_receipt(file_bytes: bytes, mime_type: str) -> dict:
-    """OCR receipt using Claude Vision. Returns {date, amount, merchant} or {}."""
+    """OCR receipt using Claude Vision. Returns {date, amount, merchant, ...} or {}."""
     api_key = os.environ.get('ANTHROPIC_API_KEY')
     if not api_key:
         return {}
@@ -364,27 +426,18 @@ def _ocr_receipt(file_bytes: bytes, mime_type: str) -> dict:
             max_tokens=256,
             messages=[{"role": "user", "content": [
                 block,
-                {"type": "text", "text": (
-                    'Extract from this receipt: date (YYYY-MM-DD), total amount (number only), '
-                    'merchant name. Return JSON: {"date": "YYYY-MM-DD", "amount": 0.00, "merchant": "name"}'
-                )}
+                {"type": "text", "text": _OCR_PROMPT}
             ]}]
         )
         text = resp.content[0].text.strip()
         m = re.search(r'\{[^{}]+\}', text, re.DOTALL)
         if m:
-            result = json.loads(m.group(0))
+            result = _normalize_ocr(json.loads(m.group(0)))
             result["_model"] = "Claude"
             return result
     except Exception:
         pass
     return {}
-
-
-_OCR_PROMPT = (
-    'Extract from this receipt: date (YYYY-MM-DD), total amount (number only), '
-    'merchant name. Return JSON: {"date": "YYYY-MM-DD", "amount": 0.00, "merchant": "name"}'
-)
 
 
 # Configurable via GEMINI_OCR_MODEL (.env). gemini-2.5-flash: fast/cheap, strong on
@@ -414,7 +467,7 @@ def _ocr_receipt_gemini(file_bytes: bytes, mime_type: str) -> dict:
         text = (resp.text or "").strip()
         m = re.search(r'\{[^{}]+\}', text, re.DOTALL)
         if m:
-            result = json.loads(m.group(0))
+            result = _normalize_ocr(json.loads(m.group(0)))
             result["_model"] = "Gemini"
             return result
     except Exception:
@@ -530,6 +583,8 @@ def convert(csv_bytes: bytes, filename: str, username: str = None) -> tuple:
 
     posting_dt = datetime(today.year, today.month, today.day)
     unmatched  = 0
+    review_rows     = []   # per-transaction rows for the Review page
+    receipt_matched = 0    # transactions with a matched receipt
 
     # Build receipt lookup: (date_str, rounded_amount) → receipt record
     receipts      = []
@@ -597,9 +652,10 @@ def convert(csv_bytes: bytes, filename: str, username: str = None) -> tuple:
         ws.cell(start, 26).value = amount
 
         # Receipt match in column 27; move matched receipts to Matched folder
+        inv_date_str = inv_dt.strftime("%Y-%m-%d") if inv_dt else None
+        amt_rounded  = round(amount, 2)
+        receipt_match = None
         if receipts_map:
-            inv_date_str  = inv_dt.strftime("%Y-%m-%d") if inv_dt else None
-            amt_rounded   = round(amount, 2)
             receipt_match = receipts_map.get((inv_date_str, amt_rounded))
             if not receipt_match:
                 for (rdate, ramt), r in receipts_map.items():
@@ -633,10 +689,46 @@ def convert(csv_bytes: bytes, filename: str, username: str = None) -> tuple:
             else:
                 ws.cell(start, 27).value = "❌ Missing"
 
+        # Collect a Review row for this transaction
+        rcpt_info = None
+        if receipt_match:
+            receipt_matched += 1
+            rcpt_info = {
+                "file_id":    receipt_match.get("file_id"),
+                "filename":   receipt_match.get("filename"),
+                "drive_url":  receipt_match.get("drive_url"),
+                "ocr_amount": receipt_match.get("ocr_amount"),
+            }
+        review_rows.append({
+            "id":          "rv_" + uuid.uuid4().hex[:8],
+            "date":        inv_date_str,
+            "merchant":    vendor,
+            "amount":      amt_rounded,
+            "gl":          gl,
+            "ser":         ser,
+            "purpose":     purpose,
+            "matched":     bool(receipt_match),
+            "receipt":     rcpt_info,
+            "loss_reason": "",
+        })
+
         start += 1
 
     if receipts_dirty and username:
         _save_receipts(username, receipts)
+
+    # Persist Review snapshot for the Review page
+    if username:
+        _save_review(username, {
+            "generated_at": datetime.now().isoformat(),
+            "source":       filename,
+            "out_filename": out_fn,
+            "total":        len(rows),
+            "matched":      receipt_matched,
+            "unmatched":    len(rows) - receipt_matched,
+            "kw_unmatched": unmatched,
+            "rows":         review_rows,
+        })
 
     buf = io.BytesIO()
     wb.save(buf)
@@ -697,6 +789,8 @@ def _run_batch_ocr(username: str) -> dict:
                 "ocr_status":   "done" if has_ocr else "failed",
                 "ocr_date":     ocr_date,
                 "ocr_amount":   ocr.get("amount"),
+                "ocr_printed_amount":     ocr.get("printed_amount"),
+                "ocr_handwritten_amount": ocr.get("handwritten_amount"),
                 "ocr_merchant": ocr.get("merchant"),
                 "ocr_model":    ocr.get("_model"),
             }
@@ -811,6 +905,18 @@ def handle(method, path, body, ctx=None):
     if user != ADMIN:
         return ("html", "<h2 style='padding:40px;color:#f87171'>Access denied</h2>")
 
+    # Tab pages: Ledger (main) | Convert | Review | Keywords
+    if method == "GET" and path == "/cardconv":
+        return ("redirect", "/cardconv/ledger")
+    if method == "GET" and path == "/cardconv/convert":
+        return ("html", _render_convert(user))
+    if method == "GET" and path == "/cardconv/review":
+        return ("html", _render_review(user))
+    if method == "GET" and path == "/cardconv/keywords":
+        return ("html", _render_keywords(user))
+    if method == "POST" and path == "/cardconv/review/reason":
+        return _handle_review_reason(user, body)
+
     # Ledger
     if method == "GET" and path == "/cardconv/ledger":
         return ("html", _render_ledger(user))
@@ -863,16 +969,16 @@ def handle(method, path, body, ctx=None):
             if not any(k["kw"] == kw for k in kws):
                 kws.insert(0, {"kw": kw, "gl": int(gl), "ser": ser, "purpose": purpose})
                 _save_kw(kws)
-        return ("redirect", "/cardconv")
+        return ("redirect", "/cardconv/keywords")
 
     # Keyword delete
     if method == "POST" and path == "/cardconv/keyword/delete":
         kw  = (body.get("kw", [""])[0]).strip().upper()
         kws = [k for k in _load_kw() if k["kw"].upper() != kw]
         _save_kw(kws)
-        return ("redirect", "/cardconv")
+        return ("redirect", "/cardconv/keywords")
 
-    return ("html", _render(user))
+    return ("redirect", "/cardconv/ledger")
 
 
 def _get_client_info():
@@ -905,7 +1011,7 @@ def _handle_drive_auth(username: str, body):
     raw = body.get("code", "")
     code = (raw[0] if isinstance(raw, list) else str(raw)).strip()
     if not code:
-        return ("redirect", "/cardconv")
+        return ("redirect", "/cardconv/ledger")
     try:
         import json as _json, urllib.request as _req, urllib.parse as _up
         c = _get_client_info()
@@ -935,15 +1041,15 @@ def _handle_drive_auth(username: str, body):
         (TOKENS_DIR / f"{username}.json").write_text(_json.dumps(save_data))
     except Exception as e:
         return ("html", f"<p style='padding:20px;color:var(--danger)'>Auth error: {e} "
-                        f"<a href='/cardconv' style='color:var(--accent)'>Back</a></p>")
-    return ("redirect", "/cardconv")
+                        f"<a href='/cardconv/ledger' style='color:var(--accent)'>Back</a></p>")
+    return ("redirect", "/cardconv/ledger")
 
 
 def _handle_drive_sync(username: str):
     """Scan Drive Wayfinder/Receipts/ folder, OCR new files, append to receipts json."""
     service = _get_drive_service(username)
     if not service:
-        return ("redirect", "/cardconv")
+        return ("redirect", "/cardconv/ledger")
     try:
         receipts_id, _ = _get_receipts_folder_ids(service, username)
         # List files directly in Receipts (exclude subfolders)
@@ -985,6 +1091,8 @@ def _handle_drive_sync(username: str):
                 "ocr_status":   "done" if has_ocr else "failed",
                 "ocr_date":     ocr_date,
                 "ocr_amount":   ocr.get("amount"),
+                "ocr_printed_amount":     ocr.get("printed_amount"),
+                "ocr_handwritten_amount": ocr.get("handwritten_amount"),
                 "ocr_merchant": ocr.get("merchant"),
                 "ocr_model":    ocr.get("_model"),
             }
@@ -999,21 +1107,21 @@ def _handle_drive_sync(username: str):
         _save_receipts(username, existing)
     except Exception as e:
         return ("html", f"<p style='padding:20px;color:var(--danger)'>Sync error: {e} "
-                        f"<a href='/cardconv' style='color:var(--accent)'>Back</a></p>")
-    return ("redirect", "/cardconv")
+                        f"<a href='/cardconv/ledger' style='color:var(--accent)'>Back</a></p>")
+    return ("redirect", "/cardconv/ledger")
 
 
 def _handle_receipt_upload(username: str, body):
     raw = body.get("__raw_handler__")
     if raw is None:
-        return ("redirect", "/cardconv")
+        return ("redirect", "/cardconv/ledger")
     if not _is_drive_connected(username):
         return ("html", "<p style='padding:20px;color:var(--danger)'>Connect Google Drive first. "
-                        "<a href='/cardconv' style='color:var(--accent)'>Back</a></p>")
+                        "<a href='/cardconv/ledger' style='color:var(--accent)'>Back</a></p>")
 
     files = _parse_multipart_files(raw)
     if not files:
-        return ("redirect", "/cardconv")
+        return ("redirect", "/cardconv/ledger")
 
     receipts  = _load_receipts(username)
     supported = {'image/jpeg', 'image/png', 'application/pdf', 'image/gif', 'image/webp'}
@@ -1038,13 +1146,15 @@ def _handle_receipt_upload(username: str, body):
             "ocr_status":   "done" if has_ocr else "failed",
             "ocr_date":     ocr_date,
             "ocr_amount":   ocr.get("amount"),
+            "ocr_printed_amount":     ocr.get("printed_amount"),
+            "ocr_handwritten_amount": ocr.get("handwritten_amount"),
             "ocr_merchant": ocr.get("merchant"),
             "ocr_model":    ocr.get("_model"),
             "match_status": "unmatched" if has_ocr else "pending_match",
         })
 
     _save_receipts(username, receipts)
-    return ("redirect", "/cardconv")
+    return ("redirect", "/cardconv/ledger")
 
 
 def _handle_upload(body, user=None):
@@ -1077,7 +1187,7 @@ def _handle_upload(body, user=None):
         break
 
     if not csv_bytes:
-        return ("redirect", "/cardconv")
+        return ("redirect", "/cardconv/ledger")
 
     try:
         xlsx_bytes, out_fn, total, unmatched = convert(csv_bytes, csv_name, username=user)
@@ -1088,9 +1198,8 @@ def _handle_upload(body, user=None):
             "unmatched": unmatched,
             "date":      datetime.now().strftime("%Y-%m-%d %H:%M"),
         })
-        return ("file_inline", xlsx_bytes,
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                out_fn)
+        # Conversion result is staged in review_{user}.json; review before download.
+        return ("redirect", "/cardconv/review")
     except Exception as e:
         return ("html", f"<p style='color:red;padding:20px'>Error: {e}</p>")
 
@@ -1107,7 +1216,7 @@ def _render_drive_connect(username: str, auth_url: str) -> str:
 </head><body>
 <nav>
   <span class="nav-brand">🔗 Connect Google Drive</span>
-  <span class="nav-user"><a href="/cardconv" class="nav-back">← Back to Card Converter</a></span>
+  <span class="nav-user"><a href="/cardconv/ledger" class="nav-back">← Back to Ledger</a></span>
 </nav>
 <div class="container" style="max-width:640px">
   <div class="notepad-card">
@@ -1138,17 +1247,54 @@ def _render_drive_connect(username: str, auth_url: str) -> str:
 </body></html>'''
 
 
-def _render(user: str) -> str:
-    from server import CSS_VER
-    kws       = _load_kw()
-    hist      = _load_hist()
-    receipts  = _load_receipts(user)
-    unmatched_n = _ledger_stats(receipts)["unmatched"]
-    connected = _is_drive_connected(user)
-    meta      = _load_drive_meta(user)
-    receipts_folder_id = meta.get('receipts_folder_id')
+# ── Shared tab bar ───────────────────────────────────────────────────────────
 
-    # ── Drive status section ──
+_CC_TAB_CSS = (
+    ".cc-tabs{display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:20px;flex-wrap:wrap}"
+    ".cc-tab{padding:10px 20px;font-size:.82rem;font-weight:600;color:var(--text-muted);"
+    "border-bottom:2px solid transparent;text-decoration:none;transition:color .15s,border-color .15s}"
+    ".cc-tab:hover{color:var(--text)}"
+    ".cc-tab.active{color:var(--accent);border-bottom-color:var(--accent)}"
+    ".tab-badge{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;"
+    "background:#ef4444;border-radius:8px;font-size:.62rem;font-weight:700;color:#fff;padding:0 4px;"
+    "margin-left:5px;vertical-align:middle}"
+)
+
+
+def _tab_bar(active: str, user: str) -> str:
+    """Shared Card Converter tab bar. active ∈ ledger|convert|review|keywords."""
+    unmatched_n = _ledger_stats(_ledger_entries(user))["unmatched"]
+    badge = f'<span class="tab-badge">{unmatched_n}</span>' if unmatched_n else ''
+    tabs = [
+        ("ledger",   "/cardconv/ledger",   "Receipt Ledger" + badge),
+        ("convert",  "/cardconv/convert",  "Convert"),
+        ("review",   "/cardconv/review",   "Review"),
+        ("keywords", "/cardconv/keywords", "Keywords"),
+    ]
+    out = ['<div class="cc-tabs">']
+    for key, href, label in tabs:
+        cls = "cc-tab active" if key == active else "cc-tab"
+        out.append(f'<a href="{href}" class="{cls}">{label}</a>')
+    out.append('</div>')
+    return "".join(out)
+
+
+# Shared upload-zone CSS (used by Convert and Ledger register section)
+_UPLOAD_CSS = (
+    ".upload-zone{border:2px dashed var(--border);border-radius:var(--radius-lg);padding:40px 20px;"
+    "text-align:center;cursor:pointer;transition:.2s;background:var(--surface)}"
+    ".upload-zone:hover,.upload-zone.drag-over{border-color:var(--accent);background:var(--surface-2)}"
+    ".upload-zone input[type=file]{display:none}"
+)
+
+
+# ── Ledger register section (Drive + receipt upload) ───────────────────────────
+
+def _register_section(user: str) -> str:
+    """Drive status + receipt upload — moved onto the Ledger page."""
+    connected = _is_drive_connected(user)
+    meta = _load_drive_meta(user)
+    receipts_folder_id = meta.get('receipts_folder_id')
     if connected:
         folder_link = ""
         if receipts_folder_id:
@@ -1160,14 +1306,6 @@ def _render(user: str) -> str:
       <form method="POST" action="/cardconv/drive/sync" style="display:inline;margin-left:4px">
         <button type="submit" class="btn btn-ghost btn-sm">🔄 Sync from Drive</button>
       </form>'''
-    else:
-        drive_status_html = (
-            '<span style="font-size:.88rem;font-weight:600;color:var(--danger)">❌ Not connected</span>'
-            '<a href="/cardconv/drive/connect" class="btn btn-primary btn-sm">Connect Google Drive</a>'
-        )
-
-    # ── Receipt upload section ──
-    if connected:
         receipt_upload_html = '''
       <form id="rcptForm" method="POST" action="/cardconv/receipts/upload" enctype="multipart/form-data">
         <div class="upload-zone" id="rcptZone" onclick="document.getElementById('rcptFiles').click()">
@@ -1182,67 +1320,146 @@ def _render(user: str) -> str:
         </div>
       </form>'''
     else:
-        receipt_upload_html = '<p style="color:var(--text-muted);font-size:.85rem">Connect Google Drive above to enable receipt upload.</p>'
-
-    # ── Receipts list ──
-    receipt_rows = ""
-    for r in receipts[:30]:
-        ocr_parts = []
-        if r.get("ocr_date"):
-            ocr_parts.append(r["ocr_date"])
-        if r.get("ocr_amount") is not None:
-            ocr_parts.append(f'${r["ocr_amount"]}')
-        if r.get("ocr_merchant"):
-            ocr_parts.append(r["ocr_merchant"])
-        ocr_info = (f'<div style="font-size:.72rem;color:var(--text-muted);margin-top:2px">'
-                    f'{" · ".join(ocr_parts)}</div>') if ocr_parts else ''
-        matched_badge = ('<span style="font-size:.68rem;font-weight:700;color:var(--success);'
-                         'background:rgba(34,197,94,.12);padding:1px 6px;border-radius:10px">MATCHED</span> '
-                         if r.get('matched') else '')
-        _model = r.get("ocr_model") or ""
-        if _model == "Claude":
-            ai_badge = '<span style="font-size:.62rem;font-weight:700;color:#7c3aed;background:rgba(124,58,237,.1);padding:1px 6px;border-radius:10px;white-space:nowrap">Claude OCR</span>'
-        elif _model == "Gemini":
-            ai_badge = '<span style="font-size:.62rem;font-weight:700;color:#1a73e8;background:rgba(26,115,232,.1);padding:1px 6px;border-radius:10px;white-space:nowrap">Gemini OCR</span>'
-        else:
-            ai_badge = ""
-        drive_link = (f'<a href="{r["drive_url"]}" target="_blank" class="btn btn-ghost btn-sm">🔗</a>'
-                      if r.get("drive_url") else "")
-        receipt_rows += f'''<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)">
-      <span style="font-size:.75rem;color:var(--text-muted);min-width:110px;flex-shrink:0">{r.get("uploaded_at","")}</span>
-      <div style="flex:1;min-width:0">
-        <div style="font-size:.85rem;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:flex;align-items:center;gap:6px">{matched_badge}<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{r.get("filename","")}</span>{ai_badge}</div>
-        {ocr_info}
-      </div>
-      {drive_link}
-    </div>'''
-
-    receipts_section = ""
-    if receipts:
-        receipts_section = f'''
+        drive_status_html = (
+            '<span style="font-size:.88rem;font-weight:600;color:var(--danger)">❌ Not connected</span>'
+            '<a href="/cardconv/drive/connect" class="btn btn-primary btn-sm">Connect Google Drive</a>'
+        )
+        receipt_upload_html = ('<p style="color:var(--text-muted);font-size:.85rem">'
+                               'Connect Google Drive above to enable receipt upload.</p>')
+    return f'''
   <div class="notepad-card" style="margin-bottom:20px">
     <div class="notepad-header">
-      <span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--slate-400)">Receipts ({len(receipts)})</span>
+      <span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--slate-400)">Google Drive</span>
     </div>
-    <div class="notepad-body" style="padding:8px 16px 12px">
-      {receipt_rows}
+    <div class="notepad-body" style="padding:14px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+      {drive_status_html}
+    </div>
+  </div>
+  <div class="notepad-card" style="margin-bottom:20px">
+    <div class="notepad-header">
+      <span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--accent)">Register Receipts</span>
+    </div>
+    <div class="notepad-body" style="padding:20px">
+      {receipt_upload_html}
     </div>
   </div>'''
 
-    # ── History rows ──
+
+# Receipt-upload drop-zone JS (injected into the Ledger page)
+_RCPT_JS = r'''
+const rcptZone = document.getElementById('rcptZone');
+const rcptInfo = document.getElementById('rcptInfo');
+const rcptList = document.getElementById('rcptFileList');
+function handleRcptFiles(input){
+  if(input.files.length>0){
+    rcptList.innerHTML = Array.from(input.files).map(f =>
+      '<span style="background:var(--surface-3);padding:3px 8px;border-radius:4px;font-size:.78rem">'+f.name+'</span>').join('');
+    rcptInfo.style.display='block';
+    rcptZone.style.borderColor='var(--accent)';
+  }
+}
+if(rcptZone){
+  rcptZone.addEventListener('dragover', e => { e.preventDefault(); rcptZone.classList.add('drag-over'); });
+  rcptZone.addEventListener('dragleave', () => rcptZone.classList.remove('drag-over'));
+  rcptZone.addEventListener('drop', e => {
+    e.preventDefault(); rcptZone.classList.remove('drag-over');
+    const input = document.getElementById('rcptFiles');
+    if(e.dataTransfer.files.length>0){ input.files = e.dataTransfer.files; handleRcptFiles(input); }
+  });
+}
+'''
+
+
+# ── Convert page ───────────────────────────────────────────────────────────────
+
+def _render_convert(user: str) -> str:
+    from server import CSS_VER
+    hist = _load_hist()
     hist_rows = ""
     for h in hist:
-        hist_rows += f'''<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)">
-      <span style="font-size:.8rem;color:var(--text-muted);min-width:130px">{h["date"]}</span>
-      <span style="flex:1;font-size:.85rem;color:var(--text);font-weight:600">{h["filename"]}</span>
-      <span style="font-size:.78rem;color:var(--success)">{h["rows"]} rows</span>
-      {f'<span style="font-size:.72rem;color:var(--warn)">{h["unmatched"]} unmatched</span>' if h.get("unmatched") else ""}
-      <a href="/cardconv/download/{h["filename"]}" class="btn btn-ghost btn-sm">⬇ Download</a>
-    </div>'''
+        unm = (f'<span style="font-size:.72rem;color:var(--warn)">{h["unmatched"]} unmatched</span>'
+               if h.get("unmatched") else "")
+        hist_rows += (
+            f'<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)">'
+            f'<span style="font-size:.8rem;color:var(--text-muted);min-width:130px">{h["date"]}</span>'
+            f'<span style="flex:1;font-size:.85rem;color:var(--text);font-weight:600">{h["filename"]}</span>'
+            f'<span style="font-size:.78rem;color:var(--success)">{h["rows"]} rows</span>'
+            f'{unm}'
+            f'<a href="/cardconv/download/{h["filename"]}" class="btn btn-ghost btn-sm">⬇ Download</a>'
+            f'</div>')
     if not hist_rows:
         hist_rows = '<div style="color:var(--text-muted);font-size:.85rem;padding:16px 0">No conversions yet</div>'
 
-    # ── Keyword rows ──
+    return f'''<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>💳 Convert · Wayfinder</title>
+<link rel="stylesheet" href="/static/style.css?v={CSS_VER}">
+<style>{_CC_TAB_CSS}{_UPLOAD_CSS}</style>
+</head><body>
+<nav>
+  <span class="nav-brand">💳 Card Converter</span>
+  <span class="nav-user">👤 {user} &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
+</nav>
+<div class="container" style="max-width:860px">
+  {_tab_bar("convert", user)}
+
+  <div class="notepad-card" style="margin-bottom:20px">
+    <div class="notepad-header">
+      <span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--accent)">Upload CSV</span>
+    </div>
+    <div class="notepad-body" style="padding:20px">
+      <form id="upForm" method="POST" action="/cardconv/upload" enctype="multipart/form-data">
+        <div class="upload-zone" id="dropZone" onclick="document.getElementById('csvFile').click()">
+          <div style="font-size:2rem;margin-bottom:8px">📎</div>
+          <div style="font-weight:700;color:var(--text);margin-bottom:4px">Drop Posted_*.csv here</div>
+          <div style="font-size:.8rem;color:var(--text-muted)">or click to browse</div>
+          <input type="file" id="csvFile" name="file" accept=".csv" onchange="handleCsvFile(this)">
+        </div>
+        <div id="fileInfo" style="display:none;margin-top:12px;padding:12px 16px;background:var(--surface-2);border-radius:var(--radius-md);align-items:center;gap:12px">
+          <span style="font-size:1.2rem">📄</span>
+          <span id="fileName" style="flex:1;font-size:.85rem;font-weight:600;color:var(--text)"></span>
+          <button type="submit" class="btn btn-primary">Convert → Review</button>
+        </div>
+      </form>
+      <p style="font-size:.78rem;color:var(--text-muted);margin-top:14px">
+        Conversion matches receipts from the Ledger and opens the <b>Review</b> page before download.
+      </p>
+    </div>
+  </div>
+
+  <div class="notepad-card" style="margin-bottom:20px">
+    <div class="notepad-header">
+      <span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--slate-400)">Recent Conversions</span>
+    </div>
+    <div class="notepad-body" style="padding:8px 16px 12px">
+      {hist_rows}
+    </div>
+  </div>
+</div>
+<script>
+const csvZone = document.getElementById('dropZone');
+const csvInfo = document.getElementById('fileInfo');
+const csvName = document.getElementById('fileName');
+function handleCsvFile(input){{
+  if(input.files[0]){{ csvName.textContent = input.files[0].name; csvInfo.style.display='flex'; csvZone.style.display='none'; }}
+}}
+csvZone.addEventListener('dragover', e => {{ e.preventDefault(); csvZone.classList.add('drag-over'); }});
+csvZone.addEventListener('dragleave', () => csvZone.classList.remove('drag-over'));
+csvZone.addEventListener('drop', e => {{
+  e.preventDefault(); csvZone.classList.remove('drag-over');
+  const f = e.dataTransfer.files[0];
+  if(f){{ document.getElementById('csvFile').files = e.dataTransfer.files; csvName.textContent=f.name; csvInfo.style.display='flex'; csvZone.style.display='none'; }}
+}});
+</script>
+</body></html>'''
+
+
+# ── Keywords page ────────────────────────────────────────────────────────────
+
+def _render_keywords(user: str) -> str:
+    from server import CSS_VER
+    kws = _load_kw()
     kw_rows = ""
     for k in kws:
         kw_rows += f'''<tr>
@@ -1258,14 +1475,10 @@ def _render(user: str) -> str:
 
     return f'''<!DOCTYPE html>
 <html lang="en"><head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>💳 Card Converter · Wayfinder</title>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>🔑 Keywords · Wayfinder</title>
 <link rel="stylesheet" href="/static/style.css?v={CSS_VER}">
-<style>
-.upload-zone{{border:2px dashed var(--border);border-radius:var(--radius-lg);padding:40px 20px;text-align:center;cursor:pointer;transition:.2s;background:var(--surface)}}
-.upload-zone:hover,.upload-zone.drag-over{{border-color:var(--accent);background:var(--surface-2)}}
-.upload-zone input[type=file]{{display:none}}
+<style>{_CC_TAB_CSS}
 .kw-table{{width:100%;border-collapse:collapse;font-size:.82rem}}
 .kw-table td{{padding:8px 10px;border-bottom:1px solid var(--border)}}
 .kw-table tr:last-child td{{border-bottom:none}}
@@ -1276,69 +1489,8 @@ def _render(user: str) -> str:
   <span class="nav-user">👤 {user} &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
 </nav>
 <div class="container" style="max-width:860px">
+  {_tab_bar("keywords", user)}
 
-  <!-- Tab bar -->
-  <div class="cc-tabs" style="display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:20px">
-    <a href="/cardconv" class="cc-tab active" style="padding:10px 20px;font-size:.82rem;font-weight:600;color:var(--accent);border-bottom:2px solid var(--accent);text-decoration:none">Convert</a>
-    <a href="/cardconv/ledger" class="cc-tab" style="padding:10px 20px;font-size:.82rem;font-weight:600;color:var(--text-muted);border-bottom:2px solid transparent;text-decoration:none">Receipt Ledger{f' <span style="display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;background:#ef4444;border-radius:8px;font-size:.62rem;font-weight:700;color:#fff;padding:0 4px;vertical-align:middle">{unmatched_n}</span>' if unmatched_n else ''}</a>
-    <a href="#keywords" class="cc-tab" style="padding:10px 20px;font-size:.82rem;font-weight:600;color:var(--text-muted);border-bottom:2px solid transparent;text-decoration:none">Keywords</a>
-  </div>
-
-  <!-- Google Drive Status -->
-  <div class="notepad-card" style="margin-bottom:20px">
-    <div class="notepad-header">
-      <span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--slate-400)">Google Drive</span>
-    </div>
-    <div class="notepad-body" style="padding:14px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap">
-      {drive_status_html}
-    </div>
-  </div>
-
-  <!-- Receipt Upload -->
-  <div class="notepad-card" style="margin-bottom:20px">
-    <div class="notepad-header">
-      <span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--accent)">Upload Receipts</span>
-    </div>
-    <div class="notepad-body" style="padding:20px">
-      {receipt_upload_html}
-    </div>
-  </div>
-
-  {receipts_section}
-
-  <!-- CSV Upload -->
-  <div class="notepad-card" style="margin-bottom:20px">
-    <div class="notepad-header">
-      <span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--accent)">Upload CSV</span>
-    </div>
-    <div class="notepad-body" style="padding:20px">
-      <form id="upForm" method="POST" action="/cardconv/upload" enctype="multipart/form-data">
-        <div class="upload-zone" id="dropZone" onclick="document.getElementById('csvFile').click()">
-          <div style="font-size:2rem;margin-bottom:8px">📎</div>
-          <div style="font-weight:700;color:var(--text);margin-bottom:4px">Drop Posted_*.csv here</div>
-          <div style="font-size:.8rem;color:var(--text-muted)">or click to browse</div>
-          <input type="file" id="csvFile" name="file" accept=".csv" onchange="handleCsvFile(this)">
-        </div>
-        <div id="fileInfo" style="display:none;margin-top:12px;padding:12px 16px;background:var(--surface-2);border-radius:var(--radius-md);display:flex;align-items:center;gap:12px">
-          <span style="font-size:1.2rem">📄</span>
-          <span id="fileName" style="flex:1;font-size:.85rem;font-weight:600;color:var(--text)"></span>
-          <button type="submit" class="btn btn-primary">Convert &amp; Download</button>
-        </div>
-      </form>
-    </div>
-  </div>
-
-  <!-- History -->
-  <div class="notepad-card" style="margin-bottom:20px">
-    <div class="notepad-header">
-      <span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--slate-400)">Recent Conversions</span>
-    </div>
-    <div class="notepad-body" style="padding:8px 16px 12px">
-      {hist_rows}
-    </div>
-  </div>
-
-  <!-- Keywords -->
   <div class="notepad-card" id="keywords">
     <div class="notepad-header" style="display:flex;align-items:center;justify-content:space-between">
       <span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--slate-400)">Keywords ({len(kws)})</span>
@@ -1363,7 +1515,7 @@ def _render(user: str) -> str:
         </div>
         <button type="submit" class="btn btn-primary btn-sm" style="align-self:flex-end">+ Add</button>
       </form>
-      <div style="max-height:320px;overflow-y:auto">
+      <div style="max-height:480px;overflow-y:auto">
         <table class="kw-table">
           <thead style="position:sticky;top:0;background:var(--surface)">
             <tr style="border-bottom:1px solid var(--border)">
@@ -1379,76 +1531,171 @@ def _render(user: str) -> str:
       </div>
     </div>
   </div>
+</div>
+</body></html>'''
 
+
+# ── Review page ──────────────────────────────────────────────────────────────
+
+def _handle_review_reason(username: str, body: dict):
+    """POST /cardconv/review/reason — save a loss reason for an unmatched row."""
+    def _val(k):
+        v = body.get(k, "")
+        return (v[0] if isinstance(v, list) else str(v))
+    rid = _val("id").strip()
+    reason = _val("reason")
+    if not rid:
+        return ("json", {"error": "missing id"}, 400)
+    review = _load_review(username)
+    for r in review.get("rows", []):
+        if r.get("id") == rid:
+            r["loss_reason"] = reason
+            _save_review(username, review)
+            return ("json", {"ok": True})
+    return ("json", {"error": "not found"}, 404)
+
+
+def _esc(s) -> str:
+    return (str(s).replace("&", "&amp;").replace("<", "&lt;")
+            .replace(">", "&gt;").replace('"', "&quot;")) if s is not None else ""
+
+
+def _render_review(user: str) -> str:
+    from server import CSS_VER
+    review    = _load_review(user)
+    rows      = review.get("rows", [])
+    total     = review.get("total", len(rows))
+    matched   = review.get("matched", 0)
+    unmatched = review.get("unmatched", 0)
+    out_fn    = review.get("out_filename", "")
+    source    = review.get("source", "")
+    gen_at    = (review.get("generated_at", "") or "")[:19].replace("T", " ")
+
+    if not rows:
+        body_html = ('<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:40px">'
+                     'No conversion yet — upload a CSV on the '
+                     '<a href="/cardconv/convert" style="color:var(--accent)">Convert</a> tab.</td></tr>')
+    else:
+        trs = []
+        for r in rows:
+            is_matched = r.get("matched")
+            rc = r.get("receipt") or {}
+            if is_matched and rc.get("file_id"):
+                fid   = rc["file_id"]
+                tn    = f'https://drive.google.com/thumbnail?id={fid}&sz=w80'
+                proxy = f'/cardconv/receipts/image/{fid}'
+                amt   = rc.get("ocr_amount")
+                amt_s = f'${amt:,.2f}' if isinstance(amt, (int, float)) else ''
+                link  = (f'<a href="{_esc(rc.get("drive_url"))}" target="_blank" class="btn btn-ghost btn-sm" '
+                         f'style="padding:2px 6px">🔗</a>' if rc.get("drive_url") else '')
+                receipt_cell = (
+                    '<div style="display:flex;align-items:center;gap:8px">'
+                    f'<img class="receipt-thumb" src="{tn}" loading="lazy" '
+                    f'onerror="this.onerror=null;this.src=\'{proxy}\'">'
+                    f'<span style="font-size:.78rem;color:var(--text-muted)">{amt_s}</span>{link}</div>')
+                action_cell = '<span class="status-badge status-matched">✅ Matched</span>'
+            else:
+                receipt_cell = '<span style="color:var(--danger);font-size:.8rem;font-weight:600">❌ Missing</span>'
+                action_cell = (f'<textarea class="reason-input" data-id="{_esc(r.get("id"))}" rows="1" '
+                               f'placeholder="영수증 분실 사유 입력...">{_esc(r.get("loss_reason"))}</textarea>')
+            amount   = r.get("amount")
+            amt_disp = f'${amount:,.2f}' if isinstance(amount, (int, float)) else (_esc(amount) or '–')
+            row_cls  = '' if is_matched else ' class="row-unmatched"'
+            trs.append(
+                f'<tr{row_cls}>'
+                f'<td>{_esc(r.get("date")) or "–"}</td>'
+                f'<td style="font-weight:600">{_esc(r.get("merchant"))}</td>'
+                f'<td>{amt_disp}</td>'
+                f'<td style="color:var(--text-muted)">{_esc(r.get("gl"))}</td>'
+                f'<td>{receipt_cell}</td>'
+                f'<td>{action_cell}</td>'
+                '</tr>')
+        body_html = "".join(trs)
+
+    download_btn = (f'<a href="/cardconv/download/{out_fn}" class="btn btn-primary">⬇ Download xlsx</a>'
+                    if out_fn else '')
+    meta_line = f'{_esc(source)} &nbsp;·&nbsp; {gen_at}' if source else 'No conversion staged'
+
+    return f'''<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>🔍 Review · Wayfinder</title>
+<link rel="stylesheet" href="/static/style.css?v={CSS_VER}">
+<style>{_CC_TAB_CSS}
+.stat-grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px}}
+.stat-card{{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md);padding:16px 20px;text-align:center}}
+.stat-value{{font-size:1.6rem;font-weight:700;color:var(--text);line-height:1.2}}
+.stat-label{{font-size:.73rem;color:var(--text-muted);margin-top:4px;text-transform:uppercase;letter-spacing:.06em}}
+.rv-table{{width:100%;border-collapse:collapse;font-size:.83rem}}
+.rv-table th{{padding:8px 12px;text-align:left;font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);border-bottom:1px solid var(--border)}}
+.rv-table td{{padding:10px 12px;border-bottom:1px solid var(--border);vertical-align:middle}}
+.rv-table tr:last-child td{{border-bottom:none}}
+.row-unmatched td{{background:rgba(239,68,68,.07)}}
+.receipt-thumb{{width:40px;height:40px;border-radius:6px;object-fit:cover;border:1px solid var(--border);background:var(--surface-3)}}
+.status-badge{{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:999px;font-size:.72rem;font-weight:700;white-space:nowrap}}
+.status-matched{{background:rgba(34,197,94,.15);color:#22c55e}}
+.reason-input{{width:100%;min-width:160px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.78rem;padding:5px 8px;outline:none;resize:vertical;font-family:inherit}}
+.reason-input:focus{{border-color:var(--accent)}}
+.rv-foot{{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 4px;flex-wrap:wrap}}
+@media(max-width:600px){{.stat-grid{{grid-template-columns:1fr 1fr 1fr}}}}
+</style>
+</head><body>
+<nav>
+  <span class="nav-brand">💳 Card Converter</span>
+  <span class="nav-user">👤 {user} &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
+</nav>
+<div class="container" style="max-width:920px">
+  {_tab_bar("review", user)}
+
+  <div style="font-size:.8rem;color:var(--text-muted);margin-bottom:12px">{meta_line}</div>
+
+  <div class="stat-grid">
+    <div class="stat-card"><div class="stat-value">{total}</div><div class="stat-label">Total</div></div>
+    <div class="stat-card"><div class="stat-value" style="color:#22c55e">{matched}</div><div class="stat-label">Matched</div></div>
+    <div class="stat-card"><div class="stat-value" style="color:#ef4444">{unmatched}</div><div class="stat-label">Unmatched</div></div>
+  </div>
+
+  <div class="notepad-card">
+    <div class="notepad-body" style="padding:8px 16px 4px;overflow-x:auto">
+      <table class="rv-table">
+        <thead><tr>
+          <th>Date</th><th>Merchant</th><th>Amount</th><th>G/L Account</th><th>Receipt</th><th>Action</th>
+        </tr></thead>
+        <tbody>{body_html}</tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="rv-foot">
+    <span style="font-size:.78rem;color:var(--text-muted)">미매칭 거래는 빨간색으로 표시되며 분실 사유를 입력하면 자동 저장됩니다.</span>
+    {download_btn}
+  </div>
 </div>
 <script>
-// CSV upload zone
-const csvZone = document.getElementById('dropZone');
-const csvInfo = document.getElementById('fileInfo');
-const csvName = document.getElementById('fileName');
-
-function handleCsvFile(input) {{
-  if (input.files[0]) {{
-    csvName.textContent = input.files[0].name;
-    csvInfo.style.display = 'flex';
-    csvZone.style.display = 'none';
-  }}
-}}
-
-csvZone.addEventListener('dragover', e => {{ e.preventDefault(); csvZone.classList.add('drag-over'); }});
-csvZone.addEventListener('dragleave', () => csvZone.classList.remove('drag-over'));
-csvZone.addEventListener('drop', e => {{
-  e.preventDefault();
-  csvZone.classList.remove('drag-over');
-  const f = e.dataTransfer.files[0];
-  if (f) {{
-    document.getElementById('csvFile').files = e.dataTransfer.files;
-    csvName.textContent = f.name;
-    csvInfo.style.display = 'flex';
-    csvZone.style.display = 'none';
-  }}
-}});
-
-// Receipt upload zone
-const rcptZone = document.getElementById('rcptZone');
-const rcptInfo = document.getElementById('rcptInfo');
-const rcptList = document.getElementById('rcptFileList');
-
-function handleRcptFiles(input) {{
-  if (input.files.length > 0) {{
-    rcptList.innerHTML = Array.from(input.files).map(f =>
-      `<span style="background:var(--surface-3);padding:3px 8px;border-radius:4px;font-size:.78rem">${{f.name}}</span>`
-    ).join('');
-    rcptInfo.style.display = 'block';
-    rcptZone.style.borderColor = 'var(--accent)';
-  }}
-}}
-
-if (rcptZone) {{
-  rcptZone.addEventListener('dragover', e => {{ e.preventDefault(); rcptZone.classList.add('drag-over'); }});
-  rcptZone.addEventListener('dragleave', () => rcptZone.classList.remove('drag-over'));
-  rcptZone.addEventListener('drop', e => {{
-    e.preventDefault();
-    rcptZone.classList.remove('drag-over');
-    const input = document.getElementById('rcptFiles');
-    if (e.dataTransfer.files.length > 0) {{
-      input.files = e.dataTransfer.files;
-      handleRcptFiles(input);
-    }}
+document.querySelectorAll('.reason-input').forEach(t => {{
+  let last = t.value;
+  t.addEventListener('blur', () => {{
+    if(t.value === last) return;
+    last = t.value;
+    fetch('/cardconv/review/reason', {{
+      method:'POST', headers:{{'Content-Type':'application/json'}},
+      body: JSON.stringify({{id: t.dataset.id, reason: t.value}})
+    }});
   }});
-}}
+}});
 </script>
 </body></html>'''
 
 
 def _render_ledger(user: str) -> str:
     from server import CSS_VER
-    unmatched_n = _ledger_stats(_ledger_entries(user))["unmatched"]
-    badge = f'<span class="tab-badge">{unmatched_n}</span>' if unmatched_n else ''
     return (_LEDGER_HTML
             .replace("__CSSVER__", str(CSS_VER))
             .replace("__USER__", user)
-            .replace("__BADGE__", badge))
+            .replace("__TABS__", _tab_bar("ledger", user))
+            .replace("__REGISTER__", _register_section(user))
+            .replace("__TABCSS__", _CC_TAB_CSS + _UPLOAD_CSS)
+            .replace("__RCPTJS__", _RCPT_JS))
 
 
 # Raw (non-f) template so CSS/JS braces need no escaping; only __TOKENS__ are filled.
@@ -1459,14 +1706,7 @@ _LEDGER_HTML = r'''<!DOCTYPE html>
 <title>🧾 Receipt Ledger · Wayfinder</title>
 <link rel="stylesheet" href="/static/style.css?v=__CSSVER__">
 <style>
-.cc-tabs{display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:20px}
-.cc-tab{padding:10px 20px;font-size:.82rem;font-weight:600;color:var(--text-muted);
-  border-bottom:2px solid transparent;text-decoration:none;transition:color .15s,border-color .15s}
-.cc-tab:hover{color:var(--text)}
-.cc-tab.active{color:var(--accent);border-bottom-color:var(--accent)}
-.tab-badge{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;
-  background:#ef4444;border-radius:8px;font-size:.62rem;font-weight:700;color:#fff;padding:0 4px;
-  margin-left:5px;vertical-align:middle}
+__TABCSS__
 .stat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px}
 .stat-card{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md);
   padding:16px 20px;text-align:center}
@@ -1525,11 +1765,9 @@ _LEDGER_HTML = r'''<!DOCTYPE html>
 </nav>
 <div class="container" style="max-width:860px">
 
-  <div class="cc-tabs">
-    <a href="/cardconv" class="cc-tab">Convert</a>
-    <a href="/cardconv/ledger" class="cc-tab active">Receipt Ledger__BADGE__</a>
-    <a href="/cardconv#keywords" class="cc-tab">Keywords</a>
-  </div>
+  __TABS__
+
+  __REGISTER__
 
   <div class="stat-grid">
     <div class="stat-card"><div class="stat-value" id="statTotal">–</div><div class="stat-label">Total</div></div>
@@ -1580,7 +1818,9 @@ _LEDGER_HTML = r'''<!DOCTYPE html>
   <div class="detail-section">
     <div class="detail-section-title">OCR Result</div>
     <div class="detail-row"><span class="key">Date</span><span class="val" id="dDate">–</span></div>
-    <div class="detail-row"><span class="key">Amount</span><span class="val" id="dAmount">–</span></div>
+    <div class="detail-row"><span class="key">Amount (final)</span><span class="val" id="dAmount">–</span></div>
+    <div class="detail-row"><span class="key">Printed</span><span class="val" id="dPrinted">–</span></div>
+    <div class="detail-row"><span class="key">Handwritten</span><span class="val" id="dHand">–</span></div>
     <div class="detail-row"><span class="key">Merchant</span><span class="val" id="dMerchant">–</span></div>
     <div class="detail-row"><span class="key">AI Model</span><span class="val" id="dModel">–</span></div>
   </div>
@@ -1663,6 +1903,10 @@ function openPanel(e){
   CUR_ID = e.id;
   $('dDate').textContent = e.ocr_date || '–';
   $('dAmount').textContent = fmtAmt(e.ocr_amount);
+  $('dPrinted').textContent = fmtAmt(e.ocr_printed_amount);
+  const hand = (e.ocr_handwritten_amount===null||e.ocr_handwritten_amount===undefined);
+  $('dHand').textContent = hand ? '–' : (fmtAmt(e.ocr_handwritten_amount) + ' ✍️');
+  $('dHand').style.color = hand ? '' : '#f59e0b';
   $('dMerchant').textContent = e.ocr_merchant || '–';
   $('dModel').textContent = e.ocr_model || '–';
   const img = $('dImage');
@@ -1721,4 +1965,5 @@ $('pNext').addEventListener('click', () => { if(CUR_PAGE<window._pages){CUR_PAGE
 setDefaultDates();
 load();
 </script>
+<script>__RCPTJS__</script>
 </body></html>'''
