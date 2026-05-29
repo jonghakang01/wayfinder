@@ -165,7 +165,7 @@ def _migrate_entry(e: dict) -> dict:
         if e.get("matched"):
             e["match_status"] = "matched"
         elif e.get("ocr_amount") is None:
-            e["match_status"] = "pending_ocr"
+            e["match_status"] = "pending_match"
         else:
             e["match_status"] = "unmatched"
     return e
@@ -203,9 +203,9 @@ def _ledger_entries(username: str) -> list:
 def _ledger_stats(entries: list) -> dict:
     matched = sum(1 for e in entries if e.get("match_status") == "matched")
     unmatched = sum(1 for e in entries if e.get("match_status") == "unmatched")
-    pending = sum(1 for e in entries if e.get("match_status") == "pending_ocr")
+    pending = sum(1 for e in entries if e.get("match_status") == "pending_match")
     return {"total": len(entries), "matched": matched,
-            "unmatched": unmatched, "pending_ocr": pending}
+            "unmatched": unmatched, "pending_match": pending}
 
 
 def _load_receipts(username: str) -> list:
@@ -702,10 +702,10 @@ def _run_batch_ocr(username: str) -> dict:
             }
             if existing:
                 existing.update(update)
-                existing.setdefault("match_status", "unmatched" if has_ocr else "pending_ocr")
+                existing.setdefault("match_status", "unmatched" if has_ocr else "pending_match")
             else:
                 update["id"] = "rcpt_" + (fid or uuid.uuid4().hex)[:8]
-                update["match_status"] = "unmatched" if has_ocr else "pending_ocr"
+                update["match_status"] = "unmatched" if has_ocr else "pending_match"
                 update["uploaded_at"] = datetime.now().strftime("%Y-%m-%d %H:%M")
                 update["synced_at"] = datetime.now().isoformat()
                 entries.append(update)
@@ -765,7 +765,7 @@ def _handle_ledger_api(username: str, query: dict):
         "total":       stats["total"],
         "matched":     stats["matched"],
         "unmatched":   stats["unmatched"],
-        "pending_ocr": stats["pending_ocr"],
+        "pending_match": stats["pending_match"],
         "page":        page,
         "pages":       pages,
         "entries":     filtered[start:start + limit],
@@ -776,7 +776,7 @@ def _handle_status_change(username: str, entry_id: str, body: dict):
     """POST /cardconv/ledger/<id>/status — manual status override."""
     raw = body.get("status", "")
     status = (raw[0] if isinstance(raw, list) else str(raw)).strip()
-    if status not in ("matched", "unmatched", "pending_ocr"):
+    if status not in ("matched", "unmatched", "pending_match"):
         return ("json", {"error": "invalid status"}, 400)
     ledger = _load_ledger(username)
     for e in ledger["entries"]:
@@ -992,7 +992,7 @@ def _handle_drive_sync(username: str):
                 existing_map[fid].update(entry)
             else:
                 entry["id"] = "rcpt_" + (fid or uuid.uuid4().hex)[:8]
-                entry["match_status"] = "unmatched" if has_ocr else "pending_ocr"
+                entry["match_status"] = "unmatched" if has_ocr else "pending_match"
                 entry["synced_at"] = datetime.now().isoformat()
                 existing.append(entry)
 
@@ -1040,7 +1040,7 @@ def _handle_receipt_upload(username: str, body):
             "ocr_amount":   ocr.get("amount"),
             "ocr_merchant": ocr.get("merchant"),
             "ocr_model":    ocr.get("_model"),
-            "match_status": "unmatched" if has_ocr else "pending_ocr",
+            "match_status": "unmatched" if has_ocr else "pending_match",
         })
 
     _save_receipts(username, receipts)
@@ -1491,7 +1491,7 @@ _LEDGER_HTML = r'''<!DOCTYPE html>
   font-size:.72rem;font-weight:700;white-space:nowrap}
 .status-matched{background:rgba(34,197,94,.15);color:#22c55e}
 .status-unmatched{background:rgba(239,68,68,.15);color:#ef4444}
-.status-pending_ocr{background:rgba(245,158,11,.15);color:#f59e0b}
+.status-pending_match{background:rgba(245,158,11,.15);color:#f59e0b}
 .ai-badge{font-size:.62rem;font-weight:700;padding:1px 6px;border-radius:10px;white-space:nowrap}
 .ai-badge.gemini{color:#1a73e8;background:rgba(26,115,232,.1)}
 .ai-badge.claude{color:#7c3aed;background:rgba(124,58,237,.1)}
@@ -1544,7 +1544,7 @@ _LEDGER_HTML = r'''<!DOCTYPE html>
       <option value="all">All</option>
       <option value="matched">Matched</option>
       <option value="unmatched">Unmatched</option>
-      <option value="pending_ocr">Pending OCR</option>
+      <option value="pending_match">Pending Match</option>
     </select>
     <button class="btn btn-ghost btn-sm" id="fReset">Reset</button>
   </div>
@@ -1597,14 +1597,14 @@ _LEDGER_HTML = r'''<!DOCTYPE html>
   <div class="detail-actions">
     <button class="btn btn-ghost btn-sm" data-set="matched" style="color:#22c55e">✅ Mark Matched</button>
     <button class="btn btn-ghost btn-sm" data-set="unmatched" style="color:#ef4444">❌ Mark Unmatched</button>
-    <button class="btn btn-ghost btn-sm" data-set="pending_ocr" style="color:#f59e0b">⏳ Mark Pending</button>
+    <button class="btn btn-ghost btn-sm" data-set="pending_match" style="color:#f59e0b">⏳ Mark Pending</button>
   </div>
 </div>
 
 <script>
 let CUR_PAGE = 1, CUR_ID = null, ENTRIES = [];
 const $ = id => document.getElementById(id);
-const STATUS_LABEL = {matched:'✅ Matched', unmatched:'❌ Unmatched', pending_ocr:'⏳ Pending OCR'};
+const STATUS_LABEL = {matched:'✅ Matched', unmatched:'❌ Unmatched', pending_match:'⏳ Pending Match'};
 
 function fmtAmt(a){ return (a===null||a===undefined) ? '–' : '$' + Number(a).toFixed(2); }
 
