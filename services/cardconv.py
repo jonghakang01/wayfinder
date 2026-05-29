@@ -363,13 +363,18 @@ def _move_to_matched_folder(username: str, file_id: str) -> bool:
 # ── OCR ───────────────────────────────────────────────────────────────────────
 
 _OCR_PROMPT = (
-    'Extract data from this receipt and return JSON only. Fields: '
-    'date (YYYY-MM-DD), merchant (name), '
-    'printed_amount (the printed/typed total, number only), '
-    'handwritten_amount (a hand-written final amount including tip if one is visible, '
-    'otherwise null). A hand-written amount, when present, is the real final amount and '
-    'overrides the printed total. '
-    'Return JSON: {"date":"YYYY-MM-DD","merchant":"name","printed_amount":0.00,"handwritten_amount":null}'
+    'Look at this receipt CAREFULLY. There may be handwritten numbers '
+    '(e.g., tip amount, final total written by hand on top of the printed receipt). '
+    'Inspect tip line, total line, and any margin notes for handwriting. '
+    'Extract: '
+    '1) date (YYYY-MM-DD), '
+    '2) merchant name, '
+    '3) printed_amount: the PRINTED/typed total (number only), '
+    '4) handwritten_amount: any HAND-WRITTEN final amount including tip (number only, '
+    'null if none visible). '
+    'Handwritten amount, when present, is the REAL final amount and overrides printed. '
+    'Return JSON only: '
+    '{"date":"YYYY-MM-DD","merchant":"name","printed_amount":0.00,"handwritten_amount":null}'
 )
 
 
@@ -1791,7 +1796,7 @@ __TABCSS__
     <div class="notepad-body" style="padding:8px 16px 4px">
       <table class="ledger-table">
         <thead><tr>
-          <th>Date</th><th>Amount</th><th>Merchant</th><th>Receipt</th><th>Status</th><th>AI</th>
+          <th>Date</th><th>Printed</th><th>Handwritten</th><th>Final</th><th>Merchant</th><th>Receipt</th><th>Status</th><th>AI</th>
         </tr></thead>
         <tbody id="ledgerBody"></tbody>
       </table>
@@ -1876,19 +1881,25 @@ async function load(){
   ENTRIES = d.entries;
   const body = $('ledgerBody');
   if(!d.entries.length){
-    body.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:30px">No receipts</td></tr>';
+    body.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:30px">No receipts</td></tr>';
   } else {
-    body.innerHTML = d.entries.map((e,i) =>
-      '<tr data-i="' + i + '">' +
+    body.innerHTML = d.entries.map((e,i) => {
+      const h = e.ocr_handwritten_amount;
+      const handCell = (h===null||h===undefined)
+        ? '<td style="color:var(--text-muted)">–</td>'
+        : '<td style="color:#f59e0b;font-weight:600">' + fmtAmt(h) + ' ✍️</td>';
+      return '<tr data-i="' + i + '">' +
         '<td>' + (e.ocr_date||'–') + '</td>' +
-        '<td>' + fmtAmt(e.ocr_amount) + '</td>' +
+        '<td style="color:var(--text-muted)">' + fmtAmt(e.ocr_printed_amount) + '</td>' +
+        handCell +
+        '<td style="font-weight:700">' + fmtAmt(e.ocr_amount) + '</td>' +
         '<td>' + (e.ocr_merchant||'–') + '</td>' +
         '<td>' + thumb(e) + '</td>' +
         '<td><span class="status-badge status-' + (e.match_status||'unmatched') + '">' +
           (STATUS_LABEL[e.match_status]||e.match_status||'–') + '</span></td>' +
         '<td>' + aiBadge(e.ocr_model) + '</td>' +
-      '</tr>'
-    ).join('');
+      '</tr>';
+    }).join('');
     body.querySelectorAll('tr[data-i]').forEach(tr =>
       tr.addEventListener('click', () => openPanel(ENTRIES[+tr.dataset.i])));
   }
