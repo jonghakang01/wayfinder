@@ -10,7 +10,8 @@ HIST_FILE  = DATA_DIR / "history.json"
 OUT_DIR    = DATA_DIR / "outputs"
 TOKENS_DIR = DATA_DIR / "tokens"
 CREDS_FILE = DATA_DIR / "google_credentials.json"
-TEMPLATE   = Path(os.path.expanduser(
+TEMPLATE   = DATA_DIR / "template.xlsx"  # primary location (deployed)
+TEMPLATE_FALLBACK = Path(os.path.expanduser(
     "~/Desktop/US업무/법카 정산/Automation/for upload.xlsx"
 ))
 
@@ -404,13 +405,12 @@ def convert(csv_bytes: bytes, filename: str, username: str = None) -> tuple:
     tag    = m.group(1) if m else today.strftime("%Y-%m-%d")
     out_fn = f"for_upload_{tag}.xlsx"
 
-    if not TEMPLATE.exists():
-        alts = list(Path.home().rglob("for upload.xlsx"))
-        if not alts:
-            raise FileNotFoundError("Template 'for upload.xlsx' not found on server.")
-        template_path = alts[0]
-    else:
+    if TEMPLATE.exists():
         template_path = TEMPLATE
+    elif TEMPLATE_FALLBACK.exists():
+        template_path = TEMPLATE_FALLBACK
+    else:
+        raise FileNotFoundError("Template file not found. Please upload 'for upload.xlsx' to ~/.appdata/cardconv/template.xlsx")
 
     text   = csv_bytes.decode("utf-8-sig", errors="replace")
     reader = csv.DictReader(io.StringIO(text))

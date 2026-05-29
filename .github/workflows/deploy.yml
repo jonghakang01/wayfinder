@@ -19,6 +19,7 @@ jobs:
             cat > ~/.appdata/cardconv/google_credentials.json << 'GCREDS'
             ${{ secrets.GOOGLE_CREDENTIALS }}
             GCREDS
+            echo '${{ secrets.CARDCONV_TEMPLATE_B64 }}' | base64 -d > ~/.appdata/cardconv/template.xlsx 2>/dev/null || true
 
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
