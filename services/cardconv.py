@@ -413,8 +413,7 @@ def convert(csv_bytes: bytes, filename: str, username: str = None) -> tuple:
     else:
         raise FileNotFoundError("Template file not found. Please upload 'for upload.xlsx' to ~/.appdata/cardconv/template.xlsx")
 
-    text   = csv_bytes.decode("utf-8-sig", errors="replace").replace('\r\n', '\n').replace('\r', '\n')
-    reader = csv.DictReader(io.StringIO(text, newline=''))
+    reader = csv.DictReader(io.TextIOWrapper(io.BytesIO(csv_bytes), encoding='utf-8-sig', newline=''))
     rows   = [r for r in reader if r.get("Card Member Name","").strip().upper() in TARGET_NAMES]
 
     wb = openpyxl.load_workbook(template_path)
@@ -436,9 +435,13 @@ def convert(csv_bytes: bytes, filename: str, username: str = None) -> tuple:
         for r in receipts:
             rdate   = r.get("ocr_date")
             ramount = r.get("ocr_amount")
-            if rdate and ramount is not None:
+            # Treat literal "YYYY-MM-DD" placeholder as None
+            if rdate == "YYYY-MM-DD":
+                rdate = None
+            if ramount is not None:
                 try:
-                    receipts_map[(rdate, round(float(ramount), 2))] = r
+                    key = (rdate, round(float(ramount), 2))
+                    receipts_map[key] = r
                 except (ValueError, TypeError):
                     pass
 
@@ -489,13 +492,20 @@ def convert(csv_bytes: bytes, filename: str, username: str = None) -> tuple:
         ws.cell(start, 26).value = amount
 
         # Receipt match in column 27; move matched receipts to Matched folder
-        if receipts_map and inv_dt:
-            inv_date_str  = inv_dt.strftime("%Y-%m-%d")
+        if receipts_map:
+            inv_date_str  = inv_dt.strftime("%Y-%m-%d") if inv_dt else None
             amt_rounded   = round(amount, 2)
             receipt_match = receipts_map.get((inv_date_str, amt_rounded))
             if not receipt_match:
                 for (rdate, ramt), r in receipts_map.items():
-                    if rdate == inv_date_str and abs(ramt - amt_rounded) <= 0.01:
+                    amt_match  = abs(ramt - amt_rounded) <= 0.01
+                    date_match = (rdate is None or rdate == inv_date_str)
+                    # Also try merchant name fuzzy match
+                    ocr_merchant = (r.get("ocr_merchant") or "").upper()
+                    merch_match  = ocr_merchant and (
+                        ocr_merchant in vendor.upper() or vendor.upper()[:10] in ocr_merchant
+                    )
+                    if amt_match and (date_match or merch_match):
                         receipt_match = r
                         break
             if receipt_match:
