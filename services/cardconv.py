@@ -10,7 +10,8 @@ HIST_FILE  = DATA_DIR / "history.json"
 OUT_DIR    = DATA_DIR / "outputs"
 TOKENS_DIR = DATA_DIR / "tokens"
 CREDS_FILE = DATA_DIR / "google_credentials.json"
-TEMPLATE   = DATA_DIR / "template.xlsx"  # primary location (deployed)
+_SVC_DIR   = Path(__file__).parent
+TEMPLATE   = _SVC_DIR / "cardconv_template.xlsx"  # bundled with service
 TEMPLATE_FALLBACK = Path(os.path.expanduser(
     "~/Desktop/US업무/법카 정산/Automation/for upload.xlsx"
 ))
