@@ -28,6 +28,8 @@ check "Report (auth required)"    "$BASE/report"     "302"
 check "Dashboard (auth required)" "$BASE/dashboard" "302"
 check "Static CSS"              "$BASE/static/style.css" "200"
 check "CardConv (auth required)"  "$BASE/cardconv"         "302"
+check "Ledger (auth required)"    "$BASE/cardconv/ledger"  "302"
+check "Ledger API (auth required)" "$BASE/cardconv/ledger/api" "302"
 
 echo ""
 echo "Result: $PASS passed, $FAIL failed"

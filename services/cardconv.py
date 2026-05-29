@@ -395,15 +395,19 @@ def _ocr_receipt_gemini(file_bytes: bytes, mime_type: str) -> dict:
     if not api_key:
         return {}
     try:
-        import google.generativeai as genai
-        genai.configure(api_key=api_key)
+        # New unified SDK (google-genai). Old google.generativeai is deprecated.
+        from google import genai
+        from google.genai import types
+        client = genai.Client(api_key=api_key)
         model_name = os.environ.get('GEMINI_OCR_MODEL', _DEFAULT_GEMINI_OCR_MODEL)
-        model = genai.GenerativeModel(model_name)
-        # Inline blob handles both images and PDFs (<20MB)
-        resp = model.generate_content([
-            _OCR_PROMPT,
-            {"mime_type": mime_type, "data": file_bytes},
-        ])
+        # Inline bytes handle both images and PDFs (<20MB)
+        resp = client.models.generate_content(
+            model=model_name,
+            contents=[
+                types.Part.from_bytes(data=file_bytes, mime_type=mime_type),
+                _OCR_PROMPT,
+            ],
+        )
         text = (resp.text or "").strip()
         m = re.search(r'\{[^{}]+\}', text, re.DOTALL)
         if m:
@@ -1430,5 +1434,288 @@ if (rcptZone) {{
     }}
   }});
 }}
+</script>
+</body></html>'''
+
+
+def _render_ledger(user: str) -> str:
+    from server import CSS_VER
+    unmatched_n = _ledger_stats(_ledger_entries(user))["unmatched"]
+    badge = f'<span class="tab-badge">{unmatched_n}</span>' if unmatched_n else ''
+    return (_LEDGER_HTML
+            .replace("__CSSVER__", str(CSS_VER))
+            .replace("__USER__", user)
+            .replace("__BADGE__", badge))
+
+
+# Raw (non-f) template so CSS/JS braces need no escaping; only __TOKENS__ are filled.
+_LEDGER_HTML = r'''<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>🧾 Receipt Ledger · Wayfinder</title>
+<link rel="stylesheet" href="/static/style.css?v=__CSSVER__">
+<style>
+.cc-tabs{display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:20px}
+.cc-tab{padding:10px 20px;font-size:.82rem;font-weight:600;color:var(--text-muted);
+  border-bottom:2px solid transparent;text-decoration:none;transition:color .15s,border-color .15s}
+.cc-tab:hover{color:var(--text)}
+.cc-tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+.tab-badge{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;
+  background:#ef4444;border-radius:8px;font-size:.62rem;font-weight:700;color:#fff;padding:0 4px;
+  margin-left:5px;vertical-align:middle}
+.stat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px}
+.stat-card{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md);
+  padding:16px 20px;text-align:center}
+.stat-value{font-size:1.6rem;font-weight:700;color:var(--text);line-height:1.2}
+.stat-label{font-size:.73rem;color:var(--text-muted);margin-top:4px;text-transform:uppercase;letter-spacing:.06em}
+.filter-bar{display:flex;align-items:center;gap:10px;padding:10px 16px;background:var(--surface-2);
+  border:1px solid var(--border);border-radius:var(--radius-md);margin-bottom:14px;flex-wrap:wrap}
+.filter-bar input[type=date],.filter-bar select{background:var(--surface);border:1px solid var(--border);
+  border-radius:6px;color:var(--text);font-size:.82rem;padding:5px 8px;outline:none}
+.filter-bar input[type=date]:focus,.filter-bar select:focus{border-color:var(--accent)}
+.ledger-table{width:100%;border-collapse:collapse;font-size:.83rem}
+.ledger-table th{padding:8px 12px;text-align:left;font-size:.72rem;font-weight:700;text-transform:uppercase;
+  letter-spacing:.07em;color:var(--text-muted);border-bottom:1px solid var(--border)}
+.ledger-table td{padding:10px 12px;border-bottom:1px solid var(--border);vertical-align:middle}
+.ledger-table tbody tr:hover td{background:var(--surface-2);cursor:pointer}
+.ledger-table tr:last-child td{border-bottom:none}
+.receipt-thumb{width:40px;height:40px;border-radius:6px;object-fit:cover;border:1px solid var(--border);
+  background:var(--surface-3);cursor:zoom-in}
+.receipt-thumb-placeholder{width:40px;height:40px;border-radius:6px;border:1px dashed var(--border);
+  display:flex;align-items:center;justify-content:center;font-size:.75rem;color:var(--text-muted)}
+.status-badge{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:999px;
+  font-size:.72rem;font-weight:700;white-space:nowrap}
+.status-matched{background:rgba(34,197,94,.15);color:#22c55e}
+.status-unmatched{background:rgba(239,68,68,.15);color:#ef4444}
+.status-pending_ocr{background:rgba(245,158,11,.15);color:#f59e0b}
+.ai-badge{font-size:.62rem;font-weight:700;padding:1px 6px;border-radius:10px;white-space:nowrap}
+.ai-badge.gemini{color:#1a73e8;background:rgba(26,115,232,.1)}
+.ai-badge.claude{color:#7c3aed;background:rgba(124,58,237,.1)}
+.overlay-bg{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:100;opacity:0;pointer-events:none;transition:opacity .2s}
+.overlay-bg.open{opacity:1;pointer-events:all}
+.detail-panel{position:fixed;top:0;right:0;width:420px;max-width:100vw;height:100vh;background:var(--surface);
+  border-left:1px solid var(--border);z-index:101;transform:translateX(100%);
+  transition:transform .25s cubic-bezier(.4,0,.2,1);overflow-y:auto;display:flex;flex-direction:column}
+.detail-panel.open{transform:translateX(0)}
+.detail-panel-header{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;
+  border-bottom:1px solid var(--border)}
+.detail-section{padding:16px 20px;border-bottom:1px solid var(--border)}
+.detail-section-title{font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;
+  color:var(--text-muted);margin-bottom:10px}
+.detail-row{display:flex;justify-content:space-between;font-size:.84rem;padding:4px 0}
+.detail-row .key{color:var(--text-muted)}
+.detail-row .val{font-weight:600;color:var(--text)}
+.receipt-image-full{width:100%;border-radius:var(--radius-md);border:1px solid var(--border);
+  object-fit:contain;max-height:320px;background:var(--surface-2)}
+.detail-actions{padding:16px 20px;display:flex;flex-direction:column;gap:8px;margin-top:auto}
+.pagination{display:flex;align-items:center;justify-content:center;gap:12px;padding:14px;font-size:.82rem;color:var(--text-muted)}
+.pagination button{background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);
+  padding:4px 12px;font-size:.8rem;cursor:pointer}
+.pagination button:disabled{opacity:.4;cursor:default}
+@media(max-width:600px){.detail-panel{width:100vw}.stat-grid{grid-template-columns:1fr 1fr}}
+</style>
+</head><body>
+<nav>
+  <span class="nav-brand">💳 Card Converter</span>
+  <span class="nav-user">👤 __USER__ &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
+</nav>
+<div class="container" style="max-width:860px">
+
+  <div class="cc-tabs">
+    <a href="/cardconv" class="cc-tab">Convert</a>
+    <a href="/cardconv/ledger" class="cc-tab active">Receipt Ledger__BADGE__</a>
+    <a href="/cardconv#keywords" class="cc-tab">Keywords</a>
+  </div>
+
+  <div class="stat-grid">
+    <div class="stat-card"><div class="stat-value" id="statTotal">–</div><div class="stat-label">Total</div></div>
+    <div class="stat-card"><div class="stat-value" id="statMatched" style="color:#22c55e">–</div><div class="stat-label">Matched</div></div>
+    <div class="stat-card"><div class="stat-value" id="statUnmatched" style="color:#ef4444">–</div><div class="stat-label">Unmatched</div></div>
+  </div>
+
+  <div class="filter-bar">
+    📅 <input type="date" id="fFrom"> ~ <input type="date" id="fTo">
+    <span style="margin-left:8px">Status:</span>
+    <select id="fStatus">
+      <option value="all">All</option>
+      <option value="matched">Matched</option>
+      <option value="unmatched">Unmatched</option>
+      <option value="pending_ocr">Pending OCR</option>
+    </select>
+    <button class="btn btn-ghost btn-sm" id="fReset">Reset</button>
+  </div>
+
+  <div class="notepad-card">
+    <div class="notepad-body" style="padding:8px 16px 4px">
+      <table class="ledger-table">
+        <thead><tr>
+          <th>Date</th><th>Amount</th><th>Merchant</th><th>Receipt</th><th>Status</th><th>AI</th>
+        </tr></thead>
+        <tbody id="ledgerBody"></tbody>
+      </table>
+      <div class="pagination">
+        <button id="pPrev">Prev</button>
+        <span id="pInfo">1 / 1</span>
+        <button id="pNext">Next</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="overlay-bg" id="overlay"></div>
+<div class="detail-panel" id="panel">
+  <div class="detail-panel-header">
+    <span style="font-weight:700;font-size:.95rem">Receipt Detail</span>
+    <button class="btn btn-ghost btn-sm" id="panelClose">× Close</button>
+  </div>
+  <div class="detail-section">
+    <div class="detail-section-title">Receipt Image</div>
+    <img class="receipt-image-full" id="dImage" alt="receipt">
+  </div>
+  <div class="detail-section">
+    <div class="detail-section-title">OCR Result</div>
+    <div class="detail-row"><span class="key">Date</span><span class="val" id="dDate">–</span></div>
+    <div class="detail-row"><span class="key">Amount</span><span class="val" id="dAmount">–</span></div>
+    <div class="detail-row"><span class="key">Merchant</span><span class="val" id="dMerchant">–</span></div>
+    <div class="detail-row"><span class="key">AI Model</span><span class="val" id="dModel">–</span></div>
+  </div>
+  <div class="detail-section" id="dMatchSection">
+    <div class="detail-section-title">Matched CSV Transaction</div>
+    <div class="detail-row"><span class="key">Date</span><span class="val" id="dmDate">–</span></div>
+    <div class="detail-row"><span class="key">Amount</span><span class="val" id="dmAmount">–</span></div>
+    <div class="detail-row"><span class="key">Vendor</span><span class="val" id="dmVendor">–</span></div>
+  </div>
+  <div class="detail-section">
+    <div class="detail-section-title">Status</div>
+    <div id="dStatus"></div>
+  </div>
+  <div class="detail-actions">
+    <button class="btn btn-ghost btn-sm" data-set="matched" style="color:#22c55e">✅ Mark Matched</button>
+    <button class="btn btn-ghost btn-sm" data-set="unmatched" style="color:#ef4444">❌ Mark Unmatched</button>
+    <button class="btn btn-ghost btn-sm" data-set="pending_ocr" style="color:#f59e0b">⏳ Mark Pending</button>
+  </div>
+</div>
+
+<script>
+let CUR_PAGE = 1, CUR_ID = null, ENTRIES = [];
+const $ = id => document.getElementById(id);
+const STATUS_LABEL = {matched:'✅ Matched', unmatched:'❌ Unmatched', pending_ocr:'⏳ Pending OCR'};
+
+function fmtAmt(a){ return (a===null||a===undefined) ? '–' : '$' + Number(a).toFixed(2); }
+
+function thumb(e){
+  if(!e.file_id) return '<div class="receipt-thumb-placeholder">🧾</div>';
+  const proxy = '/cardconv/receipts/image/' + e.file_id;
+  const tn = 'https://drive.google.com/thumbnail?id=' + e.file_id + '&sz=w80';
+  return '<img class="receipt-thumb" src="' + tn + '" loading="lazy" ' +
+         'onerror="this.onerror=null;this.src=\'' + proxy + '\'">';
+}
+
+function aiBadge(m){
+  if(m==='Gemini') return '<span class="ai-badge gemini">Gemini</span>';
+  if(m==='Claude') return '<span class="ai-badge claude">Claude</span>';
+  return '<span style="color:var(--text-muted);font-size:.72rem">–</span>';
+}
+
+async function load(){
+  const p = new URLSearchParams();
+  if($('fFrom').value) p.set('from', $('fFrom').value);
+  if($('fTo').value)   p.set('to', $('fTo').value);
+  p.set('status', $('fStatus').value);
+  p.set('page', CUR_PAGE);
+  const r = await fetch('/cardconv/ledger/api?' + p.toString());
+  const d = await r.json();
+  $('statTotal').textContent = d.total;
+  $('statMatched').textContent = d.matched;
+  $('statUnmatched').textContent = d.unmatched;
+  ENTRIES = d.entries;
+  const body = $('ledgerBody');
+  if(!d.entries.length){
+    body.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:30px">No receipts</td></tr>';
+  } else {
+    body.innerHTML = d.entries.map((e,i) =>
+      '<tr data-i="' + i + '">' +
+        '<td>' + (e.ocr_date||'–') + '</td>' +
+        '<td>' + fmtAmt(e.ocr_amount) + '</td>' +
+        '<td>' + (e.ocr_merchant||'–') + '</td>' +
+        '<td>' + thumb(e) + '</td>' +
+        '<td><span class="status-badge status-' + (e.match_status||'unmatched') + '">' +
+          (STATUS_LABEL[e.match_status]||e.match_status||'–') + '</span></td>' +
+        '<td>' + aiBadge(e.ocr_model) + '</td>' +
+      '</tr>'
+    ).join('');
+    body.querySelectorAll('tr[data-i]').forEach(tr =>
+      tr.addEventListener('click', () => openPanel(ENTRIES[+tr.dataset.i])));
+  }
+  $('pInfo').textContent = d.page + ' / ' + d.pages;
+  $('pPrev').disabled = d.page <= 1;
+  $('pNext').disabled = d.page >= d.pages;
+  CUR_PAGE = d.page;
+  window._pages = d.pages;
+}
+
+function openPanel(e){
+  CUR_ID = e.id;
+  $('dDate').textContent = e.ocr_date || '–';
+  $('dAmount').textContent = fmtAmt(e.ocr_amount);
+  $('dMerchant').textContent = e.ocr_merchant || '–';
+  $('dModel').textContent = e.ocr_model || '–';
+  const img = $('dImage');
+  if(e.file_id){ img.src = '/cardconv/receipts/image/' + e.file_id; img.style.display='block'; }
+  else { img.style.display='none'; }
+  const mt = e.matched_transaction;
+  $('dMatchSection').style.display = mt ? 'block' : 'none';
+  if(mt){
+    $('dmDate').textContent = mt.date || '–';
+    $('dmAmount').textContent = fmtAmt(mt.amount);
+    $('dmVendor').textContent = mt.vendor || '–';
+  }
+  $('dStatus').innerHTML = '<span class="status-badge status-' + (e.match_status||'unmatched') + '">' +
+    (STATUS_LABEL[e.match_status]||e.match_status||'–') + '</span>';
+  $('overlay').classList.add('open');
+  $('panel').classList.add('open');
+}
+
+function closePanel(){
+  $('overlay').classList.remove('open');
+  $('panel').classList.remove('open');
+  CUR_ID = null;
+}
+
+async function setStatus(status){
+  if(!CUR_ID) return;
+  await fetch('/cardconv/ledger/' + CUR_ID + '/status', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({status: status})
+  });
+  closePanel();
+  load();
+}
+
+function setDefaultDates(){
+  const now = new Date();
+  const first = new Date(now.getFullYear(), now.getMonth(), 1);
+  const iso = d => d.toISOString().slice(0,10);
+  $('fFrom').value = iso(first);
+  $('fTo').value = iso(now);
+}
+
+document.querySelectorAll('.detail-actions button').forEach(b =>
+  b.addEventListener('click', () => setStatus(b.dataset.set)));
+$('panelClose').addEventListener('click', closePanel);
+$('overlay').addEventListener('click', closePanel);
+document.addEventListener('keydown', e => { if(e.key==='Escape') closePanel(); });
+$('fFrom').addEventListener('change', () => { CUR_PAGE=1; load(); });
+$('fTo').addEventListener('change', () => { CUR_PAGE=1; load(); });
+$('fStatus').addEventListener('change', () => { CUR_PAGE=1; load(); });
+$('fReset').addEventListener('click', () => { $('fStatus').value='all'; setDefaultDates(); CUR_PAGE=1; load(); });
+$('pPrev').addEventListener('click', () => { if(CUR_PAGE>1){CUR_PAGE--; load();} });
+$('pNext').addEventListener('click', () => { if(CUR_PAGE<window._pages){CUR_PAGE++; load();} });
+
+setDefaultDates();
+load();
 </script>
 </body></html>'''
