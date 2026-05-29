@@ -413,8 +413,8 @@ def convert(csv_bytes: bytes, filename: str, username: str = None) -> tuple:
     else:
         raise FileNotFoundError("Template file not found. Please upload 'for upload.xlsx' to ~/.appdata/cardconv/template.xlsx")
 
-    text   = csv_bytes.decode("utf-8-sig", errors="replace")
-    reader = csv.DictReader(io.StringIO(text))
+    text   = csv_bytes.decode("utf-8-sig", errors="replace").replace('\r\n', '\n').replace('\r', '\n')
+    reader = csv.DictReader(io.StringIO(text, newline=''))
     rows   = [r for r in reader if r.get("Card Member Name","").strip().upper() in TARGET_NAMES]
 
     wb = openpyxl.load_workbook(template_path)
