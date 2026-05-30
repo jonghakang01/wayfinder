@@ -167,10 +167,10 @@ def _migrate_entry(e: dict) -> dict:
     if "match_status" not in e:
         if e.get("matched"):
             e["match_status"] = "matched"
-        elif e.get("ocr_amount") is None:
-            e["match_status"] = "pending_match"
         else:
-            e["match_status"] = "unmatched"
+            # Initial state is always pending_match. unmatched is reserved for
+            # receipts that were tried against a CSV but failed to match.
+            e["match_status"] = "pending_match"
     return e
 
 
@@ -759,19 +759,21 @@ def convert(csv_bytes: bytes, filename: str, username: str = None) -> tuple:
                 fn  = receipt_match.get('filename', '')
                 url = receipt_match.get('drive_url', '')
                 ws.cell(start, 27).value = f"✅ {fn} ({url})" if url else f"✅ {fn}"
-                # Move to Matched folder on first match
-                fid = receipt_match.get('file_id')
-                if fid and username and not receipt_match.get('matched'):
-                    if _move_to_matched_folder(username, fid):
-                        receipt_match['matched'] = True
-                        receipt_match['match_status'] = 'matched'
-                        receipt_match['matched_at'] = datetime.now().isoformat()
-                        receipt_match['matched_transaction'] = {
-                            'date':   inv_date_str,
-                            'amount': amt_rounded,
-                            'vendor': vendor,
-                        }
-                        receipts_dirty = True
+                # Update match metadata always (even if Drive folder move fails).
+                if not receipt_match.get('matched'):
+                    receipt_match['matched'] = True
+                    receipt_match['match_status'] = 'matched'
+                    receipt_match['matched_at'] = datetime.now().isoformat()
+                    receipt_match['matched_transaction'] = {
+                        'date':   inv_date_str,
+                        'amount': amt_rounded,
+                        'vendor': vendor,
+                    }
+                    receipts_dirty = True
+                    # Best-effort Drive folder move — failure does not block status update.
+                    fid = receipt_match.get('file_id')
+                    if fid and username:
+                        _move_to_matched_folder(username, fid)
             else:
                 ws.cell(start, 27).value = "❌ Missing"
 
@@ -882,10 +884,12 @@ def _run_batch_ocr(username: str) -> dict:
             }
             if existing:
                 existing.update(update)
-                existing.setdefault("match_status", "unmatched" if has_ocr else "pending_match")
+                # Initial state is always pending_match (CSV-dependent).
+                # Only Convert can set matched/unmatched.
+                existing.setdefault("match_status", "pending_match")
             else:
                 update["id"] = "rcpt_" + (fid or uuid.uuid4().hex)[:8]
-                update["match_status"] = "unmatched" if has_ocr else "pending_match"
+                update["match_status"] = "pending_match"
                 update["uploaded_at"] = datetime.now().strftime("%Y-%m-%d %H:%M")
                 update["synced_at"] = datetime.now().isoformat()
                 entries.append(update)
@@ -1455,7 +1459,7 @@ def _handle_drive_sync(username: str):
                 existing_map[fid].update(entry)
             else:
                 entry["id"] = "rcpt_" + (fid or uuid.uuid4().hex)[:8]
-                entry["match_status"] = "unmatched" if has_ocr else "pending_match"
+                entry["match_status"] = "pending_match"
                 entry["synced_at"] = datetime.now().isoformat()
                 existing.append(entry)
 
@@ -1509,7 +1513,7 @@ def _handle_receipt_upload(username: str, body):
             "ocr_handwritten_amount": ocr.get("handwritten_amount"),
             "ocr_merchant": ocr.get("merchant"),
             "ocr_model":    ocr.get("_model"),
-            "match_status": "unmatched" if has_ocr else "pending_match",
+            "match_status": "pending_match",
         })
 
     _save_receipts(username, receipts)
