@@ -932,6 +932,48 @@ def _apply_ledger_filters(entries: list, status: str, dfrom: str, dto: str) -> l
     )
 
 
+def _mark_duplicates(entries: list):
+    """Flag likely-duplicate receipts in-place.
+
+    Two receipts are considered duplicates when their OCR (date, final amount,
+    merchant) match. Within each duplicate group the first entry (already sorted
+    newest-first) is the keeper; the rest are flagged for easy bulk-deletion.
+    Sets e['dup'] (bool) and e['dup_keep'] (bool) on each entry.
+    """
+    groups = {}
+    for e in entries:
+        e["dup"] = False
+        e["dup_keep"] = False
+        date, amt = e.get("ocr_date"), e.get("ocr_amount")
+        if date is None or amt is None:
+            continue
+        merch = (e.get("ocr_merchant") or "").strip().lower()
+        groups.setdefault((date, round(amt, 2), merch), []).append(e)
+    for grp in groups.values():
+        if len(grp) > 1:
+            for i, e in enumerate(grp):
+                e["dup"] = True
+                e["dup_keep"] = (i == 0)
+
+
+def _handle_ledger_delete(username: str, body: dict):
+    """POST /cardconv/ledger/delete — remove entries by id from the ledger.
+
+    Body: {"ids": [...]}. Drive files are intentionally left untouched — the
+    user cleans up Drive separately.
+    """
+    raw = body.get("ids", [])
+    ids = {str(i) for i in (raw if isinstance(raw, list) else [raw]) if i}
+    if not ids:
+        return ("json", {"error": "no ids"}, 400)
+    ledger = _load_ledger(username)
+    before = len(ledger["entries"])
+    ledger["entries"] = [e for e in ledger["entries"] if e.get("id") not in ids]
+    removed = before - len(ledger["entries"])
+    _save_ledger(username, ledger)
+    return ("json", {"ok": True, "removed": removed})
+
+
 def _handle_ledger_api(username: str, query: dict):
     """GET /cardconv/ledger/api — filtered JSON data."""
     ledger  = _load_ledger(username)
@@ -949,6 +991,7 @@ def _handle_ledger_api(username: str, query: dict):
         limit = 50
 
     filtered = _apply_ledger_filters(entries, status, dfrom, dto)
+    _mark_duplicates(filtered)
 
     stats   = _ledger_stats(filtered)
     total_f = len(filtered)
@@ -1109,14 +1152,16 @@ def _handle_ledger_pdf(username: str, query: dict):
     # ── Table layout: one receipt per row, ~13-15 rows per A4 page ──
     # Column widths (mm) sum to the effective page width (180mm @ A4/15mm margins).
     epw = pdf.epw
+    # Wide thumbnail column + tall rows so receipts are legible by eye
+    # (~5-7 rows per A4 page instead of 13-15).
     COLS = [
-        ("",            "thumb",  16),
+        ("",            "thumb",  44),
         ("Date",        "date",   20),
-        ("Merchant",    "merch",  56),
-        ("Printed",     "print",  22),
-        ("Handwritten", "hand",   24),
-        ("Final",       "final",  22),
-        ("Status",      "status", 20),
+        ("Merchant",    "merch",  44),
+        ("Printed",     "print",  20),
+        ("Handwritten", "hand",   22),
+        ("Final",       "final",  20),
+        ("Status",      "status", 18),
     ]
     scale  = epw / sum(c[2] for c in COLS)
     widths = [c[2] * scale for c in COLS]
@@ -1124,7 +1169,7 @@ def _handle_ledger_pdf(username: str, query: dict):
     for w in widths:
         cx.append(cx[-1] + w)
     x0    = pdf.l_margin
-    ROW_H = 17.0
+    ROW_H = 33.0
     PAD   = 1.5
     HDR_H = 8.0
 
@@ -1158,12 +1203,12 @@ def _handle_ledger_pdf(username: str, query: dict):
         draw_header_row()
 
     for idx, e in enumerate(entries, 1):
-        # Compress the thumbnail small — table cells are ~14mm tall.
+        # Larger thumbnail — rows are ~33mm tall for eyeball verification.
         jpeg = dim = None
         if e.get("file_id"):
             comp = _compress_receipt_image(
                 _fetch_drive_image(service, e.get("file_id")) or b"",
-                max_w=220, quality=68)
+                max_w=460, quality=72)
             if comp:
                 jpeg, dim = comp
 
@@ -1254,6 +1299,8 @@ def handle(method, path, body, ctx=None):
         return _handle_ledger_api(user, body)  # GET passes query dict as body
     if method == "GET" and path == "/cardconv/ledger/download.pdf":
         return _handle_ledger_pdf(user, body)  # GET passes query dict as body
+    if method == "POST" and path == "/cardconv/ledger/delete":
+        return _handle_ledger_delete(user, body)
     if method == "POST" and path.startswith("/cardconv/ledger/") and path.endswith("/status"):
         entry_id = path[len("/cardconv/ledger/"):-len("/status")]
         return _handle_status_change(user, entry_id, body)
@@ -2189,6 +2236,16 @@ __TABCSS__
 .ledger-table td{padding:10px 12px;border-bottom:1px solid var(--border);vertical-align:middle}
 .ledger-table tbody tr:hover td{background:var(--surface-2);cursor:pointer}
 .ledger-table tr:last-child td{border-bottom:none}
+.ledger-table tr.dup-row td{background:rgba(250,204,21,.10)}
+.ledger-table tr.dup-row:hover td{background:rgba(250,204,21,.18)}
+.dup-tag{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:10px;font-size:.6rem;
+  font-weight:700;background:rgba(250,204,21,.22);color:#b45309;white-space:nowrap}
+.keep-tag{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:10px;font-size:.6rem;
+  font-weight:700;background:rgba(34,197,94,.16);color:#16a34a;white-space:nowrap}
+.row-check{width:15px;height:15px;cursor:pointer;accent-color:var(--accent)}
+.preset-btn{background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);
+  font-size:.76rem;padding:4px 9px;cursor:pointer}
+.preset-btn:hover{border-color:var(--accent)}
 .receipt-thumb{width:40px;height:40px;border-radius:6px;object-fit:cover;border:1px solid var(--border);
   background:var(--surface-3);cursor:zoom-in}
 .receipt-thumb-placeholder{width:40px;height:40px;border-radius:6px;border:1px dashed var(--border);
@@ -2254,10 +2311,23 @@ __TABCSS__
     <button class="btn btn-secondary btn-sm" id="fDownload" style="margin-left:auto">📄 Download as PDF</button>
   </div>
 
+  <div class="filter-bar" style="gap:8px">
+    <span style="font-size:.76rem;color:var(--text-muted)">Quick range:</span>
+    <button class="preset-btn" data-preset="month">This month</button>
+    <button class="preset-btn" data-preset="30d">Last 30 days</button>
+    <button class="preset-btn" data-preset="3m">Last 3 months</button>
+    <button class="preset-btn" data-preset="ytd">YTD</button>
+    <button class="preset-btn" data-preset="all">All time</button>
+    <button class="btn btn-sm" id="fDelete" disabled
+      style="margin-left:auto;background:rgba(239,68,68,.15);color:#ef4444;border:1px solid rgba(239,68,68,.3)">
+      🗑 Delete Selected (0)</button>
+  </div>
+
   <div class="notepad-card">
     <div class="notepad-body" style="padding:8px 16px 4px">
       <table class="ledger-table">
         <thead><tr>
+          <th style="width:24px"><input type="checkbox" class="row-check" id="checkAll" title="Select all"></th>
           <th>Date</th><th>Printed</th><th>Handwritten</th><th>Final</th><th>Merchant</th><th>Receipt</th><th>Status</th><th>AI</th><th>Action</th>
         </tr></thead>
         <tbody id="ledgerBody"></tbody>
@@ -2376,7 +2446,7 @@ async function load(){
   ENTRIES = d.entries;
   const body = $('ledgerBody');
   if(!d.entries.length){
-    body.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--text-muted);padding:30px">No receipts</td></tr>';
+    body.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--text-muted);padding:30px">No receipts</td></tr>';
   } else {
     body.innerHTML = d.entries.map((e,i) => {
       const h = e.ocr_handwritten_amount;
@@ -2387,8 +2457,17 @@ async function load(){
         ? '<td><button class="btn btn-ghost btn-sm act-undo" data-id="' + e.id +
           '" style="color:#f59e0b;padding:2px 8px" title="Undo match — reset to pending">↩ Undo</button></td>'
         : '<td></td>';
-      return '<tr data-i="' + i + '">' +
-        '<td>' + (e.ocr_date||'–') + '</td>' +
+      // Duplicate group: non-keeper rows are pre-checked for quick cleanup.
+      const preCheck = (e.dup && !e.dup_keep) ? ' checked' : '';
+      const checkCell = '<td><input type="checkbox" class="row-check sel" data-id="' +
+        e.id + '"' + preCheck + '></td>';
+      const dupTag = e.dup
+        ? (e.dup_keep ? '<span class="keep-tag">KEEP</span>'
+                      : '<span class="dup-tag">🔁 Duplicate</span>')
+        : '';
+      return '<tr data-i="' + i + '"' + (e.dup ? ' class="dup-row"' : '') + '>' +
+        checkCell +
+        '<td>' + (e.ocr_date||'–') + dupTag + '</td>' +
         '<td style="color:var(--text-muted)">' + fmtAmt(e.ocr_printed_amount) + '</td>' +
         handCell +
         '<td style="font-weight:700">' + fmtAmt(e.ocr_amount) + '</td>' +
@@ -2404,7 +2483,13 @@ async function load(){
       tr.addEventListener('click', () => openPanel(ENTRIES[+tr.dataset.i])));
     body.querySelectorAll('.act-undo').forEach(b =>
       b.addEventListener('click', ev => { ev.stopPropagation(); unmatchRow(b.dataset.id); }));
+    body.querySelectorAll('.sel').forEach(c =>
+      c.addEventListener('click', ev => ev.stopPropagation()));
+    body.querySelectorAll('.sel').forEach(c =>
+      c.addEventListener('change', updateDeleteBtn));
   }
+  $('checkAll').checked = false;
+  updateDeleteBtn();
   renderLastSynced(d.last_synced);
   $('pInfo').textContent = d.page + ' / ' + d.pages;
   $('pPrev').disabled = d.page <= 1;
@@ -2467,10 +2552,48 @@ async function unmatchRow(id){
   load();
 }
 
+function selectedIds(){
+  return [...document.querySelectorAll('.sel:checked')].map(c => c.dataset.id);
+}
+
+function updateDeleteBtn(){
+  const n = selectedIds().length;
+  const btn = $('fDelete');
+  btn.textContent = '🗑 Delete Selected (' + n + ')';
+  btn.disabled = n === 0;
+}
+
+async function deleteSelected(){
+  const ids = selectedIds();
+  if(!ids.length) return;
+  if(!confirm('Delete ' + ids.length + ' receipt(s) from the ledger?\n(Drive files are NOT deleted.)')) return;
+  await fetch('/cardconv/ledger/delete', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ids: ids})
+  });
+  load();
+}
+
+function iso(d){ return d.toISOString().slice(0,10); }
+
+function applyPreset(p){
+  const now = new Date();
+  let from = '', to = iso(now);
+  if(p==='month')    from = iso(new Date(now.getFullYear(), now.getMonth(), 1));
+  else if(p==='30d') from = iso(new Date(now.getTime() - 29*86400000));
+  else if(p==='3m')  from = iso(new Date(now.getFullYear(), now.getMonth()-3, now.getDate()));
+  else if(p==='ytd') from = iso(new Date(now.getFullYear(), 0, 1));
+  else if(p==='all'){ from = ''; to = ''; }
+  $('fFrom').value = from;
+  $('fTo').value = to;
+  CUR_PAGE = 1;
+  load();
+}
+
 function setDefaultDates(){
   const now = new Date();
   const first = new Date(now.getFullYear(), now.getMonth(), 1);
-  const iso = d => d.toISOString().slice(0,10);
   $('fFrom').value = iso(first);
   $('fTo').value = iso(now);
 }
@@ -2494,6 +2617,13 @@ $('fDownload').addEventListener('click', () => {
 });
 $('pPrev').addEventListener('click', () => { if(CUR_PAGE>1){CUR_PAGE--; load();} });
 $('pNext').addEventListener('click', () => { if(CUR_PAGE<window._pages){CUR_PAGE++; load();} });
+$('fDelete').addEventListener('click', deleteSelected);
+$('checkAll').addEventListener('change', () => {
+  document.querySelectorAll('.sel').forEach(c => { c.checked = $('checkAll').checked; });
+  updateDeleteBtn();
+});
+document.querySelectorAll('.preset-btn').forEach(b =>
+  b.addEventListener('click', () => applyPreset(b.dataset.preset)));
 
 setDefaultDates();
 load();
