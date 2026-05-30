@@ -3,9 +3,12 @@ name: Deploy to Server
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
   deploy:
+    # Only deploy when commit message contains [deploy] tag, or manually triggered
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[deploy]')
     runs-on: ubuntu-latest
     steps:
       - name: Write Google credentials
