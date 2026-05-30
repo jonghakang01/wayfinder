@@ -1300,6 +1300,7 @@ def handle(method, path, body, ctx=None):
 
     # Card member names (My Card Names)
     if method == "POST" and path == "/cardconv/cardnames/add":
+        # Section moved from Keywords to Convert page; redirect there.
         name = (body.get("name", [""])[0]).strip().upper()
         if name:
             s = _load_user_settings(user)
@@ -1308,14 +1309,14 @@ def handle(method, path, body, ctx=None):
                 names.append(name)
             s["card_member_names"] = names
             _save_user_settings(user, s)
-        return ("redirect", "/cardconv/keywords")
+        return ("redirect", "/cardconv/convert")
     if method == "POST" and path == "/cardconv/cardnames/delete":
         name = (body.get("name", [""])[0]).strip().upper()
         s = _load_user_settings(user)
         names = s.get("card_member_names") or list(DEFAULT_CARD_NAMES)
         s["card_member_names"] = [n for n in names if n.strip().upper() != name]
         _save_user_settings(user, s)
-        return ("redirect", "/cardconv/keywords")
+        return ("redirect", "/cardconv/convert")
 
     # Keyword add
     if method == "POST" and path == "/cardconv/keyword/add":
@@ -1819,6 +1820,19 @@ def _render_convert(user: str) -> str:
     if not up_rows:
         up_rows = '<div style="color:var(--text-muted);font-size:.85rem;padding:16px 0">No uploaded CSVs yet</div>'
 
+    # My Card Names section (moved from Keywords page)
+    names = _get_card_member_names(user)
+    name_chips = ""
+    for n in names:
+        name_chips += (
+            '<form method="POST" action="/cardconv/cardnames/delete" '
+            'style="display:inline-flex;align-items:center;gap:6px;background:var(--surface-2);'
+            'border:1px solid var(--border);border-radius:999px;padding:4px 6px 4px 12px;margin:0">'
+            f'<span style="font-size:.82rem;font-weight:600;color:var(--accent)">{_esc(n)}</span>'
+            f'<input type="hidden" name="name" value="{_esc(n)}">'
+            '<button class="btn btn-danger btn-sm" style="padding:0 7px;line-height:1.5">✕</button>'
+            '</form>')
+
     return f'''<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -1832,6 +1846,20 @@ def _render_convert(user: str) -> str:
 </nav>
 <div class="container" style="max-width:860px">
   {_tab_bar("convert", user)}
+
+  <div class="notepad-card" style="margin-bottom:20px">
+    <div class="notepad-header">
+      <span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--accent)">My Card Names</span>
+    </div>
+    <div class="notepad-body" style="padding:12px 16px">
+      <p style="font-size:.78rem;color:var(--text-muted);margin-bottom:12px">CSV의 'Card Member Name'이 아래 이름과 일치하는 거래만 변환됩니다.</p>
+      <form method="POST" action="/cardconv/cardnames/add" style="display:flex;gap:8px;margin-bottom:14px">
+        <input name="name" placeholder="e.g. JOHN DOE" required style="flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);color:var(--text);font-size:.82rem">
+        <button type="submit" class="btn btn-primary btn-sm">+ Add</button>
+      </form>
+      <div style="display:flex;flex-wrap:wrap;gap:8px">{name_chips}</div>
+    </div>
+  </div>
 
   <div class="notepad-card" style="margin-bottom:20px">
     <div class="notepad-header">
@@ -1911,18 +1939,6 @@ def _render_keywords(user: str) -> str:
       </form></td>
     </tr>'''
 
-    names = _get_card_member_names(user)
-    name_chips = ""
-    for n in names:
-        name_chips += (
-            '<form method="POST" action="/cardconv/cardnames/delete" '
-            'style="display:inline-flex;align-items:center;gap:6px;background:var(--surface-2);'
-            'border:1px solid var(--border);border-radius:999px;padding:4px 6px 4px 12px;margin:0">'
-            f'<span style="font-size:.82rem;font-weight:600;color:var(--accent)">{_esc(n)}</span>'
-            f'<input type="hidden" name="name" value="{_esc(n)}">'
-            '<button class="btn btn-danger btn-sm" style="padding:0 7px;line-height:1.5">✕</button>'
-            '</form>')
-
     return f'''<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -1940,20 +1956,6 @@ def _render_keywords(user: str) -> str:
 </nav>
 <div class="container" style="max-width:860px">
   {_tab_bar("keywords", user)}
-
-  <div class="notepad-card" style="margin-bottom:20px">
-    <div class="notepad-header">
-      <span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--accent)">My Card Names</span>
-    </div>
-    <div class="notepad-body" style="padding:12px 16px">
-      <p style="font-size:.78rem;color:var(--text-muted);margin-bottom:12px">CSV의 'Card Member Name'이 아래 이름과 일치하는 거래만 변환됩니다.</p>
-      <form method="POST" action="/cardconv/cardnames/add" style="display:flex;gap:8px;margin-bottom:14px">
-        <input name="name" placeholder="e.g. JOHN DOE" required style="flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);color:var(--text);font-size:.82rem">
-        <button type="submit" class="btn btn-primary btn-sm">+ Add</button>
-      </form>
-      <div style="display:flex;flex-wrap:wrap;gap:8px">{name_chips}</div>
-    </div>
-  </div>
 
   <div class="notepad-card" id="keywords">
     <div class="notepad-header" style="display:flex;align-items:center;justify-content:space-between">
