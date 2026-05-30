@@ -827,6 +827,26 @@ def _handle_batch_run(username: str, ctx):
     return ("json", _run_batch_ocr(username))
 
 
+def _apply_ledger_filters(entries: list, status: str, dfrom: str, dto: str) -> list:
+    """Filter + sort ledger entries by status and OCR-date range.
+
+    Shared by the JSON API and the PDF export so both honor identical filters.
+    Date filters keep entries without an OCR date always visible.
+    """
+    filtered = entries
+    if status and status != "all":
+        filtered = [e for e in filtered if e.get("match_status") == status]
+    if dfrom:
+        filtered = [e for e in filtered if not e.get("ocr_date") or e["ocr_date"] >= dfrom]
+    if dto:
+        filtered = [e for e in filtered if not e.get("ocr_date") or e["ocr_date"] <= dto]
+    return sorted(
+        filtered,
+        key=lambda e: e.get("ocr_date") or e.get("uploaded_at") or "",
+        reverse=True,
+    )
+
+
 def _handle_ledger_api(username: str, query: dict):
     """GET /cardconv/ledger/api — filtered JSON data."""
     entries = _ledger_entries(username)
@@ -842,19 +862,7 @@ def _handle_ledger_api(username: str, query: dict):
     except ValueError:
         limit = 50
 
-    filtered = entries
-    if status and status != "all":
-        filtered = [e for e in filtered if e.get("match_status") == status]
-    # Date filters skip entries without an OCR date (keep them always visible)
-    if dfrom:
-        filtered = [e for e in filtered if not e.get("ocr_date") or e["ocr_date"] >= dfrom]
-    if dto:
-        filtered = [e for e in filtered if not e.get("ocr_date") or e["ocr_date"] <= dto]
-    filtered = sorted(
-        filtered,
-        key=lambda e: e.get("ocr_date") or e.get("uploaded_at") or "",
-        reverse=True,
-    )
+    filtered = _apply_ledger_filters(entries, status, dfrom, dto)
 
     stats   = _ledger_stats(filtered)
     total_f = len(filtered)
@@ -903,6 +911,236 @@ def _handle_image_proxy(username: str, file_id: str):
         return ("html", f"<p>Image load error: {e}</p>", 404)
 
 
+# ── PDF export ────────────────────────────────────────────────────────────────
+
+_DEJAVU_DIR = "/usr/share/fonts/truetype/dejavu"
+# Font candidates, preferred first. A CJK font (e.g. apt install fonts-nanum on
+# the server) renders Korean merchant names; DejaVu covers Latin/symbols without
+# crashing on non-ASCII. Each entry is (family, regular_path, bold_path).
+_PDF_FONT_CANDIDATES = [
+    ("Nanum", "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+              "/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf"),
+    ("NotoKR", "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+               "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc"),
+    ("DejaVu", f"{_DEJAVU_DIR}/DejaVuSans.ttf",
+               f"{_DEJAVU_DIR}/DejaVuSans-Bold.ttf"),
+]
+_PDF_STATUS_LABEL = {"matched": "Matched", "unmatched": "Unmatched",
+                     "pending_match": "Pending Match"}
+_PDF_STATUS_COLOR = {"matched": (22, 163, 74), "unmatched": (220, 38, 38),
+                     "pending_match": (217, 119, 6)}
+
+
+def _compress_receipt_image(raw: bytes, max_w: int = 700, quality: int = 72):
+    """Resize + recompress a receipt image into a small JPEG.
+
+    Returns (jpeg_bytes, (w, h)) or None on failure. Caps width at max_w px and
+    re-encodes as JPEG to keep the embedded PDF small (~quality 70-75).
+    """
+    from PIL import Image
+    try:
+        img = Image.open(io.BytesIO(raw))
+        img = img.convert("RGB")  # flatten alpha/CMYK/palette for JPEG
+        if img.width > max_w:
+            h = max(1, round(img.height * max_w / img.width))
+            img = img.resize((max_w, h), Image.LANCZOS)
+        out = io.BytesIO()
+        img.save(out, format="JPEG", quality=quality, optimize=True)
+        return out.getvalue(), img.size
+    except Exception:
+        return None
+
+
+def _fetch_drive_image(service, file_id: str):
+    """Fetch raw image bytes from Drive, or None if unavailable."""
+    if not service or not file_id:
+        return None
+    try:
+        return service.files().get_media(fileId=file_id).execute()
+    except Exception:
+        return None
+
+
+def _handle_ledger_pdf(username: str, query: dict):
+    """GET /cardconv/ledger/download.pdf — filtered receipts as a compact PDF.
+
+    Honors the same status/date filters as the ledger view. Receipts are laid out
+    as a compact table (one row each: thumbnail, date, merchant, printed,
+    handwritten, final, status) fitting ~13-15 rows per A4 page.
+    """
+    from fpdf import FPDF
+
+    status = (query.get("status", ["all"]) or ["all"])[0]
+    dfrom  = (query.get("from", [""]) or [""])[0]
+    dto    = (query.get("to", [""]) or [""])[0]
+    entries = _apply_ledger_filters(_ledger_entries(username), status, dfrom, dto)
+    stats   = _ledger_stats(entries)
+    service = _get_drive_service(username)
+
+    pdf = FPDF(orientation="P", unit="mm", format="A4")
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.set_margins(15, 15, 15)
+
+    # Prefer a Unicode TTF so non-Latin-1 merchant names don't crash rendering.
+    FONT, unicode_ok = "Helvetica", False
+    for fam, reg, bold in _PDF_FONT_CANDIDATES:
+        if os.path.exists(reg) and os.path.exists(bold):
+            pdf.add_font(fam, "", reg)
+            pdf.add_font(fam, "B", bold)
+            FONT, unicode_ok = fam, True
+            break
+
+    def S(t):  # sanitize for core (Latin-1) font fallback
+        t = "" if t is None else str(t)
+        return t if unicode_ok else t.encode("latin-1", "replace").decode("latin-1")
+
+    def money(a):
+        return "-" if a is None else "$%.2f" % a
+
+    pdf.add_page()
+
+    # Header
+    pdf.set_font(FONT, "B", 16)
+    pdf.cell(0, 9, S("Receipt Ledger"), new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font(FONT, "", 9)
+    pdf.set_text_color(110, 110, 110)
+    flabel = {"all": "All"}.get(status) or _PDF_STATUS_LABEL.get(status, status)
+    rng = f"{dfrom or '...'} ~ {dto or '...'}"
+    pdf.cell(0, 5.5, S(f"User: {username}    Filter: {flabel}    Date: {rng}"),
+             new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 5.5, S(f"Total {stats['total']}   Matched {stats['matched']}   "
+                       f"Unmatched {stats['unmatched']}   Pending {stats['pending_match']}"),
+             new_x="LMARGIN", new_y="NEXT")
+    pdf.set_text_color(0, 0, 0)
+    pdf.ln(3)
+
+    if not entries:
+        pdf.set_font(FONT, "", 11)
+        pdf.cell(0, 12, S("No receipts for the selected filter."),
+                 new_x="LMARGIN", new_y="NEXT")
+
+    # ── Table layout: one receipt per row, ~13-15 rows per A4 page ──
+    # Column widths (mm) sum to the effective page width (180mm @ A4/15mm margins).
+    epw = pdf.epw
+    COLS = [
+        ("",            "thumb",  16),
+        ("Date",        "date",   20),
+        ("Merchant",    "merch",  56),
+        ("Printed",     "print",  22),
+        ("Handwritten", "hand",   24),
+        ("Final",       "final",  22),
+        ("Status",      "status", 20),
+    ]
+    scale  = epw / sum(c[2] for c in COLS)
+    widths = [c[2] * scale for c in COLS]
+    cx     = [pdf.l_margin]
+    for w in widths:
+        cx.append(cx[-1] + w)
+    x0    = pdf.l_margin
+    ROW_H = 17.0
+    PAD   = 1.5
+    HDR_H = 8.0
+
+    def fit(text, max_w, size):
+        # Truncate to fit a cell width at the given font size (handles CJK widths).
+        pdf.set_font(FONT, "", size)
+        text = S(text)
+        if pdf.get_string_width(text) <= max_w:
+            return text
+        ell = S("…")
+        while text and pdf.get_string_width(text + ell) > max_w:
+            text = text[:-1]
+        return text + ell
+
+    def draw_header_row():
+        y = pdf.get_y()
+        pdf.set_fill_color(243, 244, 246)
+        pdf.set_draw_color(200, 200, 200)
+        pdf.set_line_width(0.2)
+        pdf.set_font(FONT, "B", 8)
+        pdf.set_text_color(80, 80, 80)
+        for i, (label, key, _w) in enumerate(COLS):
+            align = "L" if key in ("thumb", "date", "merch") else \
+                    ("C" if key == "status" else "R")
+            pdf.set_xy(cx[i], y)
+            pdf.cell(widths[i], HDR_H, S(label), border=1, align=align, fill=True)
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_y(y + HDR_H)
+
+    if entries:
+        draw_header_row()
+
+    for idx, e in enumerate(entries, 1):
+        # Compress the thumbnail small — table cells are ~14mm tall.
+        jpeg = dim = None
+        if e.get("file_id"):
+            comp = _compress_receipt_image(
+                _fetch_drive_image(service, e.get("file_id")) or b"",
+                max_w=220, quality=68)
+            if comp:
+                jpeg, dim = comp
+
+        # Page break (repeat the header on the new page).
+        if pdf.get_y() + ROW_H > pdf.page_break_trigger:
+            pdf.add_page()
+            draw_header_row()
+
+        y0 = pdf.get_y()
+        if idx % 2 == 0:  # zebra striping for readability
+            pdf.set_fill_color(249, 250, 251)
+            pdf.rect(x0, y0, epw, ROW_H, style="F")
+
+        # Light cell grid
+        pdf.set_draw_color(228, 228, 228)
+        pdf.set_line_width(0.15)
+        for i in range(len(COLS)):
+            pdf.rect(cx[i], y0, widths[i], ROW_H)
+
+        # Thumbnail (centered) or placeholder
+        if jpeg and dim:
+            cw, ch = widths[0] - 2 * PAD, ROW_H - 2 * PAD
+            dw = cw
+            dh = dw * dim[1] / dim[0]
+            if dh > ch:
+                dh, dw = ch, ch * dim[0] / dim[1]
+            try:
+                pdf.image(io.BytesIO(jpeg),
+                          x=cx[0] + (widths[0] - dw) / 2,
+                          y=y0 + (ROW_H - dh) / 2, w=dw, h=dh)
+            except Exception:
+                pass
+        else:
+            pdf.set_xy(cx[0], y0)
+            pdf.set_font(FONT, "", 6)
+            pdf.set_text_color(180, 180, 180)
+            pdf.cell(widths[0], ROW_H, S("no img"), align="C")
+
+        def txt(i, text, align="R", bold=False, color=(0, 0, 0), size=8):
+            # fpdf2 vertically centers text within the cell height.
+            pdf.set_xy(cx[i] + 1, y0)
+            pdf.set_font(FONT, "B" if bold else "", size)
+            pdf.set_text_color(*color)
+            pdf.cell(widths[i] - 2, ROW_H, text, align=align)
+
+        txt(1, S(e.get("ocr_date") or "-"), align="L")
+        txt(2, fit(e.get("ocr_merchant") or "-", widths[2] - 2, 8), align="L")
+        txt(3, S(money(e.get("ocr_printed_amount"))), color=(130, 130, 130))
+        hw = e.get("ocr_handwritten_amount")
+        txt(4, S(money(hw)), color=(217, 119, 6) if hw is not None else (130, 130, 130))
+        txt(5, S(money(e.get("ocr_amount"))), bold=True)
+        st = e.get("match_status")
+        txt(6, S(_PDF_STATUS_LABEL.get(st, st or "-")), align="C", size=7,
+            color=_PDF_STATUS_COLOR.get(st, (0, 0, 0)))
+
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_y(y0 + ROW_H)
+
+    out = pdf.output()
+    data = bytes(out)
+    fname = f"receipts_{username}_{date.today().isoformat()}.pdf"
+    return ("binary", data, "application/pdf", fname)
+
+
 # ── HTTP handler ──────────────────────────────────────────────────────────────
 
 def handle(method, path, body, ctx=None):
@@ -927,6 +1165,8 @@ def handle(method, path, body, ctx=None):
         return ("html", _render_ledger(user))
     if method == "GET" and path == "/cardconv/ledger/api":
         return _handle_ledger_api(user, body)  # GET passes query dict as body
+    if method == "GET" and path == "/cardconv/ledger/download.pdf":
+        return _handle_ledger_pdf(user, body)  # GET passes query dict as body
     if method == "POST" and path.startswith("/cardconv/ledger/") and path.endswith("/status"):
         entry_id = path[len("/cardconv/ledger/"):-len("/status")]
         return _handle_status_change(user, entry_id, body)
@@ -1790,6 +2030,7 @@ __TABCSS__
       <option value="pending_match">Pending Match</option>
     </select>
     <button class="btn btn-ghost btn-sm" id="fReset">Reset</button>
+    <button class="btn btn-secondary btn-sm" id="fDownload" style="margin-left:auto">📄 Download as PDF</button>
   </div>
 
   <div class="notepad-card">
@@ -1970,6 +2211,14 @@ $('fFrom').addEventListener('change', () => { CUR_PAGE=1; load(); });
 $('fTo').addEventListener('change', () => { CUR_PAGE=1; load(); });
 $('fStatus').addEventListener('change', () => { CUR_PAGE=1; load(); });
 $('fReset').addEventListener('click', () => { $('fStatus').value='all'; setDefaultDates(); CUR_PAGE=1; load(); });
+$('fDownload').addEventListener('click', () => {
+  // Download respects the currently applied filters (status + date range).
+  const p = new URLSearchParams();
+  if($('fFrom').value) p.set('from', $('fFrom').value);
+  if($('fTo').value)   p.set('to', $('fTo').value);
+  p.set('status', $('fStatus').value);
+  window.location = '/cardconv/ledger/download.pdf?' + p.toString();
+});
 $('pPrev').addEventListener('click', () => { if(CUR_PAGE>1){CUR_PAGE--; load();} });
 $('pNext').addEventListener('click', () => { if(CUR_PAGE<window._pages){CUR_PAGE++; load();} });
 
