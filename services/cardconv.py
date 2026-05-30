@@ -261,6 +261,86 @@ def _save_review(username: str, review: dict):
     _review_file(username).write_text(json.dumps(review, ensure_ascii=False, indent=2))
 
 
+# ── User settings: card member names ──────────────────────────────────────────
+
+DEFAULT_CARD_NAMES = ["JONG KANG", "JONGHA KANG"]
+
+
+def _user_settings_file(username: str) -> Path:
+    return DATA_DIR / f"user_settings_{username}.json"
+
+
+def _load_user_settings(username: str) -> dict:
+    f = _user_settings_file(username)
+    if f.exists():
+        try:
+            return json.loads(f.read_text())
+        except Exception:
+            pass
+    return {}
+
+
+def _save_user_settings(username: str, data: dict):
+    _ensure_dirs()
+    _user_settings_file(username).write_text(json.dumps(data, ensure_ascii=False, indent=2))
+
+
+def _get_card_member_names(username: str) -> list:
+    """User's card member names (uppercased). Defaults to JONG/JONGHA KANG."""
+    if not username:
+        return list(DEFAULT_CARD_NAMES)
+    names = _load_user_settings(username).get("card_member_names")
+    if not names:
+        return list(DEFAULT_CARD_NAMES)
+    return [n.strip().upper() for n in names if str(n).strip()]
+
+
+# ── Uploaded CSV store (Convert page reuse) ────────────────────────────────────
+
+def _uploads_dir(username: str) -> Path:
+    return DATA_DIR / f"uploads_{username}"
+
+
+def _uploads_index_file(username: str) -> Path:
+    return DATA_DIR / f"uploads_{username}.json"
+
+
+def _load_uploads(username: str) -> list:
+    f = _uploads_index_file(username)
+    if f.exists():
+        try:
+            return json.loads(f.read_text())
+        except Exception:
+            pass
+    return []
+
+
+def _save_uploads(username: str, items: list):
+    _ensure_dirs()
+    _uploads_index_file(username).write_text(json.dumps(items, ensure_ascii=False, indent=2))
+
+
+def _save_uploaded_csv(username: str, csv_bytes: bytes, orig_name: str,
+                       rows: int, out_filename: str) -> dict:
+    """Persist the raw CSV under uploads_{user}/ and index it for reuse."""
+    d = _uploads_dir(username)
+    d.mkdir(parents=True, exist_ok=True)
+    uid = "csv_" + uuid.uuid4().hex[:8]
+    (d / f"{uid}.csv").write_bytes(csv_bytes)
+    entry = {
+        "id":           uid,
+        "filename":     orig_name,
+        "stored_name":  f"{uid}.csv",
+        "uploaded_at":  datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "rows":         rows,
+        "out_filename": out_filename,
+    }
+    items = _load_uploads(username)
+    items.insert(0, entry)
+    _save_uploads(username, items)
+    return entry
+
+
 # ── Drive OAuth helpers ───────────────────────────────────────────────────────
 
 def _get_creds(username: str):
@@ -576,8 +656,9 @@ def convert(csv_bytes: bytes, filename: str, username: str = None) -> tuple:
     else:
         raise FileNotFoundError("Template file not found. Please upload 'for upload.xlsx' to ~/.appdata/cardconv/template.xlsx")
 
+    target_names = set(_get_card_member_names(username))
     reader = csv.DictReader(io.TextIOWrapper(io.BytesIO(csv_bytes), encoding='utf-8-sig', newline=''))
-    rows   = [r for r in reader if r.get("Card Member Name","").strip().upper() in TARGET_NAMES]
+    rows   = [r for r in reader if r.get("Card Member Name","").strip().upper() in target_names]
 
     wb = openpyxl.load_workbook(template_path)
     ws = wb["sheetMst"]
@@ -849,7 +930,8 @@ def _apply_ledger_filters(entries: list, status: str, dfrom: str, dto: str) -> l
 
 def _handle_ledger_api(username: str, query: dict):
     """GET /cardconv/ledger/api — filtered JSON data."""
-    entries = _ledger_entries(username)
+    ledger  = _load_ledger(username)
+    entries = ledger["entries"]
     status  = (query.get("status", ["all"]) or ["all"])[0]
     dfrom   = (query.get("from", [""]) or [""])[0]
     dto     = (query.get("to", [""]) or [""])[0]
@@ -875,6 +957,7 @@ def _handle_ledger_api(username: str, query: dict):
         "pending_match": stats["pending_match"],
         "page":        page,
         "pages":       pages,
+        "last_synced": ledger.get("last_batch_at"),
         "entries":     filtered[start:start + limit],
     })
 
@@ -1203,6 +1286,33 @@ def handle(method, path, body, ctx=None):
     if method == "POST" and path == "/cardconv/upload":
         return _handle_upload(body, user)
 
+    # Uploaded CSV reuse (re-run / delete)
+    if method == "POST" and path == "/cardconv/upload/rerun":
+        uid = (body.get("id", [""])[0]).strip()
+        return _handle_upload_rerun(user, uid)
+    if method == "POST" and path == "/cardconv/upload/delete":
+        uid = (body.get("id", [""])[0]).strip()
+        return _handle_upload_delete(user, uid)
+
+    # Card member names (My Card Names)
+    if method == "POST" and path == "/cardconv/cardnames/add":
+        name = (body.get("name", [""])[0]).strip().upper()
+        if name:
+            s = _load_user_settings(user)
+            names = s.get("card_member_names") or list(DEFAULT_CARD_NAMES)
+            if name not in [n.strip().upper() for n in names]:
+                names.append(name)
+            s["card_member_names"] = names
+            _save_user_settings(user, s)
+        return ("redirect", "/cardconv/keywords")
+    if method == "POST" and path == "/cardconv/cardnames/delete":
+        name = (body.get("name", [""])[0]).strip().upper()
+        s = _load_user_settings(user)
+        names = s.get("card_member_names") or list(DEFAULT_CARD_NAMES)
+        s["card_member_names"] = [n for n in names if n.strip().upper() != name]
+        _save_user_settings(user, s)
+        return ("redirect", "/cardconv/keywords")
+
     # Keyword add
     if method == "POST" and path == "/cardconv/keyword/add":
         kw      = (body.get("kw",      [""])[0]).strip().upper()
@@ -1350,6 +1460,10 @@ def _handle_drive_sync(username: str):
                 existing.append(entry)
 
         _save_receipts(username, existing)
+        # Record sync time so the Ledger can show "Last synced ... (X min ago)"
+        ledger = _load_ledger(username)
+        ledger["last_batch_at"] = datetime.now().isoformat()
+        _save_ledger(username, ledger)
     except Exception as e:
         return ("html", f"<p style='padding:20px;color:var(--danger)'>Sync error: {e} "
                         f"<a href='/cardconv/ledger' style='color:var(--accent)'>Back</a></p>")
@@ -1443,10 +1557,55 @@ def _handle_upload(body, user=None):
             "unmatched": unmatched,
             "date":      datetime.now().strftime("%Y-%m-%d %H:%M"),
         })
+        if user:
+            _save_uploaded_csv(user, csv_bytes, csv_name, total, out_fn)
         # Conversion result is staged in review_{user}.json; review before download.
         return ("redirect", "/cardconv/review")
     except Exception as e:
         return ("html", f"<p style='color:red;padding:20px'>Error: {e}</p>")
+
+
+def _handle_upload_rerun(username: str, uid: str):
+    """Re-run conversion (re-match receipts) from a previously uploaded CSV."""
+    items = _load_uploads(username)
+    entry = next((i for i in items if i.get("id") == uid), None)
+    if not entry:
+        return ("redirect", "/cardconv/convert")
+    stored = _uploads_dir(username) / entry.get("stored_name", "")
+    if not stored.exists():
+        return ("redirect", "/cardconv/convert")
+    try:
+        csv_bytes = stored.read_bytes()
+        fn = entry.get("filename", "upload.csv")
+        xlsx_bytes, out_fn, total, unmatched = convert(csv_bytes, fn, username=username)
+        _add_hist({
+            "filename":  out_fn,
+            "source":    fn,
+            "rows":      total,
+            "unmatched": unmatched,
+            "date":      datetime.now().strftime("%Y-%m-%d %H:%M"),
+        })
+        entry["rows"] = total
+        entry["out_filename"] = out_fn
+        _save_uploads(username, items)
+        return ("redirect", "/cardconv/review")
+    except Exception as e:
+        return ("html", f"<p style='color:red;padding:20px'>Error: {e}</p>")
+
+
+def _handle_upload_delete(username: str, uid: str):
+    """Delete a stored CSV and its index entry."""
+    items = _load_uploads(username)
+    entry = next((i for i in items if i.get("id") == uid), None)
+    if entry:
+        stored = _uploads_dir(username) / entry.get("stored_name", "")
+        try:
+            if stored.exists():
+                stored.unlink()
+        except Exception:
+            pass
+        _save_uploads(username, [i for i in items if i.get("id") != uid])
+    return ("redirect", "/cardconv/convert")
 
 
 # ── Render helpers ─────────────────────────────────────────────────────────────
@@ -1540,6 +1699,7 @@ def _register_section(user: str) -> str:
     connected = _is_drive_connected(user)
     meta = _load_drive_meta(user)
     receipts_folder_id = meta.get('receipts_folder_id')
+    last_synced = _load_ledger(user).get("last_batch_at") or ""
     if connected:
         folder_link = ""
         if receipts_folder_id:
@@ -1550,7 +1710,8 @@ def _register_section(user: str) -> str:
       {folder_link}
       <form method="POST" action="/cardconv/drive/sync" style="display:inline;margin-left:4px">
         <button type="submit" class="btn btn-ghost btn-sm">🔄 Sync from Drive</button>
-      </form>'''
+      </form>
+      <span id="lastSynced" data-ts="{last_synced}" style="font-size:.78rem;color:var(--text-muted);margin-left:4px"></span>'''
         receipt_upload_html = '''
       <form id="rcptForm" method="POST" action="/cardconv/receipts/upload" enctype="multipart/form-data">
         <div class="upload-zone" id="rcptZone" onclick="document.getElementById('rcptFiles').click()">
@@ -1635,6 +1796,25 @@ def _render_convert(user: str) -> str:
     if not hist_rows:
         hist_rows = '<div style="color:var(--text-muted);font-size:.85rem;padding:16px 0">No conversions yet</div>'
 
+    uploads = _load_uploads(user)
+    up_rows = ""
+    for u in uploads:
+        up_rows += (
+            '<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)">'
+            f'<span style="font-size:.8rem;color:var(--text-muted);min-width:130px">{_esc(u.get("uploaded_at"))}</span>'
+            f'<span style="flex:1;font-size:.85rem;color:var(--text);font-weight:600">{_esc(u.get("filename"))}</span>'
+            f'<span style="font-size:.78rem;color:var(--success)">{u.get("rows", 0)} rows</span>'
+            f'<form method="POST" action="/cardconv/upload/rerun" style="display:inline">'
+            f'<input type="hidden" name="id" value="{_esc(u.get("id"))}">'
+            f'<button class="btn btn-secondary btn-sm">🔄 Re-run</button></form>'
+            f'<form method="POST" action="/cardconv/upload/delete" style="display:inline" '
+            f'onsubmit="return confirm(\'Delete this CSV?\')">'
+            f'<input type="hidden" name="id" value="{_esc(u.get("id"))}">'
+            f'<button class="btn btn-danger btn-sm">✕</button></form>'
+            '</div>')
+    if not up_rows:
+        up_rows = '<div style="color:var(--text-muted);font-size:.85rem;padding:16px 0">No uploaded CSVs yet</div>'
+
     return f'''<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -1670,6 +1850,15 @@ def _render_convert(user: str) -> str:
       <p style="font-size:.78rem;color:var(--text-muted);margin-top:14px">
         Conversion matches receipts from the Ledger and opens the <b>Review</b> page before download.
       </p>
+    </div>
+  </div>
+
+  <div class="notepad-card" style="margin-bottom:20px">
+    <div class="notepad-header">
+      <span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--accent)">Uploaded CSVs</span>
+    </div>
+    <div class="notepad-body" style="padding:8px 16px 12px">
+      {up_rows}
     </div>
   </div>
 
@@ -1718,6 +1907,18 @@ def _render_keywords(user: str) -> str:
       </form></td>
     </tr>'''
 
+    names = _get_card_member_names(user)
+    name_chips = ""
+    for n in names:
+        name_chips += (
+            '<form method="POST" action="/cardconv/cardnames/delete" '
+            'style="display:inline-flex;align-items:center;gap:6px;background:var(--surface-2);'
+            'border:1px solid var(--border);border-radius:999px;padding:4px 6px 4px 12px;margin:0">'
+            f'<span style="font-size:.82rem;font-weight:600;color:var(--accent)">{_esc(n)}</span>'
+            f'<input type="hidden" name="name" value="{_esc(n)}">'
+            '<button class="btn btn-danger btn-sm" style="padding:0 7px;line-height:1.5">✕</button>'
+            '</form>')
+
     return f'''<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -1735,6 +1936,20 @@ def _render_keywords(user: str) -> str:
 </nav>
 <div class="container" style="max-width:860px">
   {_tab_bar("keywords", user)}
+
+  <div class="notepad-card" style="margin-bottom:20px">
+    <div class="notepad-header">
+      <span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--accent)">My Card Names</span>
+    </div>
+    <div class="notepad-body" style="padding:12px 16px">
+      <p style="font-size:.78rem;color:var(--text-muted);margin-bottom:12px">CSV의 'Card Member Name'이 아래 이름과 일치하는 거래만 변환됩니다.</p>
+      <form method="POST" action="/cardconv/cardnames/add" style="display:flex;gap:8px;margin-bottom:14px">
+        <input name="name" placeholder="e.g. JOHN DOE" required style="flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);color:var(--text);font-size:.82rem">
+        <button type="submit" class="btn btn-primary btn-sm">+ Add</button>
+      </form>
+      <div style="display:flex;flex-wrap:wrap;gap:8px">{name_chips}</div>
+    </div>
+  </div>
 
   <div class="notepad-card" id="keywords">
     <div class="notepad-header" style="display:flex;align-items:center;justify-content:space-between">
@@ -2037,7 +2252,7 @@ __TABCSS__
     <div class="notepad-body" style="padding:8px 16px 4px">
       <table class="ledger-table">
         <thead><tr>
-          <th>Date</th><th>Printed</th><th>Handwritten</th><th>Final</th><th>Merchant</th><th>Receipt</th><th>Status</th><th>AI</th>
+          <th>Date</th><th>Printed</th><th>Handwritten</th><th>Final</th><th>Merchant</th><th>Receipt</th><th>Status</th><th>AI</th><th>Action</th>
         </tr></thead>
         <tbody id="ledgerBody"></tbody>
       </table>
@@ -2108,6 +2323,39 @@ function aiBadge(m){
   return '<span style="color:var(--text-muted);font-size:.72rem">–</span>';
 }
 
+function matchInfo(e){
+  const mt = e.matched_transaction;
+  if(!mt) return '';
+  const parts = [];
+  if(mt.vendor) parts.push(mt.vendor);
+  if(mt.amount!==null && mt.amount!==undefined) parts.push(fmtAmt(mt.amount));
+  if(mt.date) parts.push(mt.date);
+  if(!parts.length) return '';
+  return '<div style="font-size:.7rem;color:var(--text-muted);margin-top:3px">↳ ' + parts.join(' · ') + '</div>';
+}
+
+function fmtAgo(iso){
+  if(!iso) return '';
+  const t = new Date(iso); if(isNaN(t)) return '';
+  const sec = Math.floor((Date.now() - t) / 1000);
+  let rel;
+  if(sec < 60) rel = 'just now';
+  else if(sec < 3600) rel = Math.floor(sec/60) + ' min ago';
+  else if(sec < 86400) rel = Math.floor(sec/3600) + ' hr ago';
+  else rel = Math.floor(sec/86400) + ' days ago';
+  const pad = n => String(n).padStart(2,'0');
+  const stamp = t.getFullYear()+'-'+pad(t.getMonth()+1)+'-'+pad(t.getDate())+' '+pad(t.getHours())+':'+pad(t.getMinutes());
+  return 'Last synced: ' + stamp + ' (' + rel + ')';
+}
+
+function renderLastSynced(iso){
+  const el = $('lastSynced');
+  if(!el) return;
+  const ts = iso || el.dataset.ts;
+  if(ts){ el.dataset.ts = ts; }
+  el.textContent = fmtAgo(el.dataset.ts);
+}
+
 async function load(){
   const p = new URLSearchParams();
   if($('fFrom').value) p.set('from', $('fFrom').value);
@@ -2122,13 +2370,17 @@ async function load(){
   ENTRIES = d.entries;
   const body = $('ledgerBody');
   if(!d.entries.length){
-    body.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:30px">No receipts</td></tr>';
+    body.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--text-muted);padding:30px">No receipts</td></tr>';
   } else {
     body.innerHTML = d.entries.map((e,i) => {
       const h = e.ocr_handwritten_amount;
       const handCell = (h===null||h===undefined)
         ? '<td style="color:var(--text-muted)">–</td>'
         : '<td style="color:#f59e0b;font-weight:600">' + fmtAmt(h) + ' ✍️</td>';
+      const actionCell = (e.match_status==='matched')
+        ? '<td><button class="btn btn-ghost btn-sm act-undo" data-id="' + e.id +
+          '" style="color:#f59e0b;padding:2px 8px" title="Undo match — reset to pending">↩ Undo</button></td>'
+        : '<td></td>';
       return '<tr data-i="' + i + '">' +
         '<td>' + (e.ocr_date||'–') + '</td>' +
         '<td style="color:var(--text-muted)">' + fmtAmt(e.ocr_printed_amount) + '</td>' +
@@ -2137,13 +2389,17 @@ async function load(){
         '<td>' + (e.ocr_merchant||'–') + '</td>' +
         '<td>' + thumb(e) + '</td>' +
         '<td><span class="status-badge status-' + (e.match_status||'unmatched') + '">' +
-          (STATUS_LABEL[e.match_status]||e.match_status||'–') + '</span></td>' +
+          (STATUS_LABEL[e.match_status]||e.match_status||'–') + '</span>' + matchInfo(e) + '</td>' +
         '<td>' + aiBadge(e.ocr_model) + '</td>' +
+        actionCell +
       '</tr>';
     }).join('');
     body.querySelectorAll('tr[data-i]').forEach(tr =>
       tr.addEventListener('click', () => openPanel(ENTRIES[+tr.dataset.i])));
+    body.querySelectorAll('.act-undo').forEach(b =>
+      b.addEventListener('click', ev => { ev.stopPropagation(); unmatchRow(b.dataset.id); }));
   }
+  renderLastSynced(d.last_synced);
   $('pInfo').textContent = d.page + ' / ' + d.pages;
   $('pPrev').disabled = d.page <= 1;
   $('pNext').disabled = d.page >= d.pages;
@@ -2191,6 +2447,17 @@ async function setStatus(status){
     body: JSON.stringify({status: status})
   });
   closePanel();
+  load();
+}
+
+// Undo Match from the ledger table — reset row to pending_match.
+async function unmatchRow(id){
+  if(!id) return;
+  await fetch('/cardconv/ledger/' + id + '/status', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({status: 'pending_match'})
+  });
   load();
 }
 
