@@ -878,13 +878,24 @@ def convert(csv_bytes: bytes, filename: str, username: str = None) -> tuple:
         rcpt_info = None
         if receipt_match:
             receipt_matched += 1
+            mfid = receipt_match.get("file_id")
+            # Sibling receipts sharing the same source image (multi-receipt page).
+            # Used to draw every bbox in the lightbox and highlight the matched one.
+            siblings = [
+                {"id": s.get("id"), "ocr_bbox": s.get("ocr_bbox")}
+                for s in receipts
+                if mfid and s.get("file_id") == mfid and s.get("ocr_bbox")
+            ]
             rcpt_info = {
-                "file_id":      receipt_match.get("file_id"),
+                "file_id":      mfid,
+                "id":           receipt_match.get("id"),
                 "filename":     receipt_match.get("filename"),
                 "drive_url":    receipt_match.get("drive_url"),
                 "ocr_amount":   receipt_match.get("ocr_amount"),
                 "ocr_date":     receipt_match.get("ocr_date"),
                 "ocr_merchant": receipt_match.get("ocr_merchant"),
+                "ocr_bbox":     receipt_match.get("ocr_bbox"),
+                "siblings":     siblings if len(siblings) > 1 else [],
             }
         review_rows.append({
             "id":          "rv_" + uuid.uuid4().hex[:8],
@@ -1037,8 +1048,9 @@ def _mark_duplicates(entries: list):
     fails to read a date on one copy of the same receipt). Date is deliberately
     NOT part of the bucket key so a date-less entry still groups with its dated
     twin; multi-receipt sub-entries (different file_id, same OCR values) group
-    too since file_id is ignored. Within a group the dated/matched entry is the
-    keeper; the rest are flagged for easy bulk-deletion.
+    too since file_id is ignored. Within a group the keeper / head is chosen by
+    match_status priority (matched > unmatched > pending_match), then a present
+    date; the rest are flagged for easy bulk-deletion.
     Sets e['dup'] (bool), e['dup_keep'] (bool) and e['dup_group_id'] (str|None)
     on each entry. dup_group_id lets the UI collapse a group into one row.
     """
@@ -1081,9 +1093,16 @@ def _mark_duplicates(entries: list):
                 continue
             gid = f"dg_{gi}"
             gi += 1
-            # Keeper: prefer an entry that has a date and is matched.
-            group.sort(key=lambda e: (e.get("ocr_date") is None,
-                                      e.get("match_status") != "matched"))
+            # Keeper / group head: status priority first
+            # (matched > unmatched > pending_match), then a present date,
+            # then the earliest uploaded_at / id for a stable tiebreak.
+            status_rank = {"matched": 0, "unmatched": 1, "pending_match": 2}
+            group.sort(key=lambda e: (
+                status_rank.get(e.get("match_status"), 3),
+                e.get("ocr_date") is None,
+                str(e.get("uploaded_at") or ""),
+                str(e.get("id") or ""),
+            ))
             for k, e in enumerate(group):
                 e["dup"] = True
                 e["dup_keep"] = (k == 0)
@@ -2058,6 +2077,10 @@ def _render_convert(user: str) -> str:
           <button type="submit" class="btn btn-primary">Convert → Review</button>
         </div>
       </form>
+      <div id="nameSuggest" style="display:none;margin-top:14px;padding:10px 14px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md)">
+        <div style="font-size:.76rem;color:var(--text-muted);margin-bottom:8px">👤 Found in CSV — click to add to My Card Names:</div>
+        <div id="nameChips" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+      </div>
       <p style="font-size:.78rem;color:var(--text-muted);margin-top:14px">
         Conversion matches receipts from the Ledger and opens the <b>Review</b> page before download.
       </p>
@@ -2077,15 +2100,66 @@ def _render_convert(user: str) -> str:
 const csvZone = document.getElementById('dropZone');
 const csvInfo = document.getElementById('fileInfo');
 const csvName = document.getElementById('fileName');
-function handleCsvFile(input){{
-  if(input.files[0]){{ csvName.textContent = input.files[0].name; csvInfo.style.display='flex'; csvZone.style.display='none'; }}
+const existingNames = new Set({json.dumps(names)});
+
+function parseCsvSuggest(text) {{
+  const lines = text.split(/\r?\n/);
+  if (!lines.length) return;
+  const hdr = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g,''));
+  const col = hdr.findIndex(h => /cardmember/i.test(h) || /card.?member/i.test(h));
+  if (col < 0) return;
+  const counts = {{}};
+  lines.slice(1).forEach(line => {{
+    if (!line.trim()) return;
+    const cells = [];
+    let cur = '', inQ = false;
+    for (const ch of line + ',') {{
+      if (ch === '"') {{ inQ = !inQ; }}
+      else if (ch === ',' && !inQ) {{ cells.push(cur.trim()); cur = ''; }}
+      else cur += ch;
+    }}
+    const name = (cells[col] || '').trim().toUpperCase();
+    if (name && !existingNames.has(name)) counts[name] = (counts[name] || 0) + 1;
+  }});
+  const top = Object.entries(counts).sort((a,b) => b[1]-a[1]).slice(0,5).map(e => e[0]);
+  if (!top.length) return;
+  const chips = document.getElementById('nameChips');
+  chips.innerHTML = top.map(n =>
+    `<button type="button" class="preset-btn" style="font-size:.78rem" onclick="addSuggestedName(this,'${{n.replace(/'/g,"\\'")}}')">+ ${{n}}</button>`
+  ).join('');
+  document.getElementById('nameSuggest').style.display = 'block';
+}}
+
+function addSuggestedName(btn, name) {{
+  fetch('/cardconv/cardnames/add', {{
+    method:'POST', headers:{{'Content-Type':'application/x-www-form-urlencoded'}},
+    body:'name='+encodeURIComponent(name)
+  }}).then(r => {{ if(r.ok) {{ btn.disabled=true; btn.style.opacity='.4'; existingNames.add(name); }} }});
+}}
+
+function handleCsvFile(input) {{
+  if (!input.files[0]) return;
+  csvName.textContent = input.files[0].name;
+  csvInfo.style.display = 'flex';
+  csvZone.style.display = 'none';
+  const reader = new FileReader();
+  reader.onload = e => parseCsvSuggest(e.target.result);
+  reader.readAsText(input.files[0]);
 }}
 csvZone.addEventListener('dragover', e => {{ e.preventDefault(); csvZone.classList.add('drag-over'); }});
 csvZone.addEventListener('dragleave', () => csvZone.classList.remove('drag-over'));
 csvZone.addEventListener('drop', e => {{
   e.preventDefault(); csvZone.classList.remove('drag-over');
   const f = e.dataTransfer.files[0];
-  if(f){{ document.getElementById('csvFile').files = e.dataTransfer.files; csvName.textContent=f.name; csvInfo.style.display='flex'; csvZone.style.display='none'; }}
+  if (f) {{
+    document.getElementById('csvFile').files = e.dataTransfer.files;
+    csvName.textContent = f.name;
+    csvInfo.style.display = 'flex';
+    csvZone.style.display = 'none';
+    const reader = new FileReader();
+    reader.onload = e2 => parseCsvSuggest(e2.target.result);
+    reader.readAsText(f);
+  }}
 }});
 </script>
 </body></html>'''
@@ -2331,9 +2405,20 @@ def _render_review(user: str) -> str:
                 proxy = f'/cardconv/receipts/image/{fid}'
                 link  = (f'<a href="{_esc(rc.get("drive_url"))}" target="_blank" '
                          f'class="rv-drive-link">🔗 Drive</a>' if rc.get("drive_url") else '')
+                # Payload for the lightbox: full image proxy + bbox of this entry and
+                # its siblings (multi-receipt page) so the clicked one can be highlighted.
+                rv_data = _esc(json.dumps({
+                    "fid":      fid,
+                    "id":       rc.get("id"),
+                    "merchant": rc.get("ocr_merchant"),
+                    "bbox":     rc.get("ocr_bbox"),
+                    "siblings": rc.get("siblings") or [],
+                    "drive":    rc.get("drive_url"),
+                }, ensure_ascii=False))
                 receipt_block = (
                     '<div class="rv-receipt matched">'
                       f'<img class="rv-thumb" src="{tn}" loading="lazy" '
+                      f'data-rv="{rv_data}" title="Click to enlarge" '
                       f'onerror="this.onerror=null;this.src=\'{proxy}\'">'
                       '<div class="rv-card-info">'
                         f'<div class="rv-card-line">🗓 {_esc(rc.get("ocr_date")) or "–"}</div>'
@@ -2346,8 +2431,6 @@ def _render_review(user: str) -> str:
                 receipt_block = (
                     '<div class="rv-receipt unmatched">'
                       '<div class="rv-nomatch">❌ No receipt matched</div>'
-                      f'<textarea class="reason-input" data-id="{_esc(r.get("id"))}" rows="2" '
-                      f'placeholder="영수증 분실 사유 입력...">{_esc(r.get("loss_reason"))}</textarea>'
                     '</div>')
             item_cls = 'rv-item' + ('' if is_matched else ' unmatched')
             row_date = _esc(r.get("date")) or ""
@@ -2391,7 +2474,19 @@ def _render_review(user: str) -> str:
 .rv-gl{{font-size:.74rem;color:var(--text-muted)}}
 .rv-receipt{{flex:0 0 230px;border-left:1px solid var(--border);padding-left:14px}}
 .rv-receipt.matched{{display:flex;gap:12px;align-items:flex-start}}
-.rv-thumb{{width:120px;height:120px;border-radius:8px;object-fit:cover;border:1px solid var(--border);background:var(--surface-3);cursor:zoom-in}}
+.rv-thumb{{width:120px;height:120px;border-radius:8px;object-fit:cover;border:1px solid var(--border);background:var(--surface-3);cursor:zoom-in;transition:border-color .12s}}
+.rv-thumb:hover{{border-color:var(--accent)}}
+.rv-lb{{position:fixed;inset:0;background:rgba(2,6,23,.82);display:none;align-items:center;justify-content:center;z-index:1000;padding:24px}}
+.rv-lb.open{{display:flex}}
+.rv-lb-box{{position:relative;max-width:92vw;max-height:92vh;display:flex;flex-direction:column;gap:10px}}
+.rv-lb-img-wrap{{position:relative;display:inline-block;max-width:92vw;max-height:80vh}}
+.rv-lb-img{{max-width:92vw;max-height:80vh;border-radius:8px;display:block}}
+.rv-lb-svg{{position:absolute;top:0;left:0;pointer-events:none;display:none}}
+.rv-lb-bar{{display:flex;align-items:center;justify-content:space-between;gap:14px;color:#e2e8f0;font-size:.85rem}}
+.rv-lb-close{{position:absolute;top:-12px;right:-12px;width:34px;height:34px;border-radius:50%;border:none;
+  background:var(--surface);color:var(--text);font-size:1.1rem;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.4)}}
+.rv-lb-open{{color:var(--accent);text-decoration:none;font-size:.82rem}}
+.rv-lb-open:hover{{text-decoration:underline}}
 .rv-card-info{{display:flex;flex-direction:column;gap:4px;min-width:0}}
 .rv-card-line{{font-size:.8rem;color:var(--text-muted)}}
 .rv-card-merchant{{font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
@@ -2399,8 +2494,7 @@ def _render_review(user: str) -> str:
 .rv-drive-link{{font-size:.76rem;color:var(--accent);text-decoration:none;margin-top:2px}}
 .rv-drive-link:hover{{text-decoration:underline}}
 .rv-nomatch{{color:var(--danger);font-size:.84rem;font-weight:700;margin-bottom:6px}}
-.reason-input{{width:100%;min-width:160px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.78rem;padding:5px 8px;outline:none;resize:vertical;font-family:inherit}}
-.reason-input:focus{{border-color:var(--accent)}}
+
 @media(max-width:600px){{.rv-item{{flex-direction:column;gap:10px}}.rv-receipt{{flex:none;border-left:none;border-top:1px solid var(--border);padding-left:0;padding-top:10px}}}}
 .rv-foot{{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 4px;flex-wrap:wrap}}
 @media(max-width:600px){{.stat-grid{{grid-template-columns:1fr 1fr 1fr}}}}
@@ -2424,6 +2518,8 @@ def _render_review(user: str) -> str:
   <div class="filter-bar">
     📅 <input type="date" id="rvFrom"> ~ <input type="date" id="rvTo">
     <button class="btn btn-ghost btn-sm" id="rvReset">Reset</button>
+    <span style="flex:1"></span>
+    {download_btn}
   </div>
 
   <div class="filter-bar" style="gap:8px">
@@ -2442,23 +2538,24 @@ def _render_review(user: str) -> str:
   </div>
 
   <div class="rv-foot">
-    <span style="font-size:.78rem;color:var(--text-muted)">각 거래 옆에 매칭된 영수증이 바로 표시됩니다. 미매칭 거래는 빨간색으로 표시되며 분실 사유를 입력하면 자동 저장됩니다.</span>
-    {download_btn}
+    <span style="font-size:.78rem;color:var(--text-muted)">각 거래 옆에 매칭된 영수증이 표시됩니다. 미매칭 거래는 빨간색으로 표시됩니다.</span>
+  </div>
+</div>
+
+<div class="rv-lb" id="rvLb">
+  <div class="rv-lb-box">
+    <button class="rv-lb-close" id="rvLbClose" title="Close">×</button>
+    <div class="rv-lb-img-wrap">
+      <img class="rv-lb-img" id="rvLbImg" alt="receipt">
+      <svg class="rv-lb-svg" id="rvLbSvg"></svg>
+    </div>
+    <div class="rv-lb-bar">
+      <span id="rvLbCaption"></span>
+      <a id="rvLbDrive" class="rv-lb-open" target="_blank" rel="noopener">🔗 Open in Drive</a>
+    </div>
   </div>
 </div>
 <script>
-document.querySelectorAll('.reason-input').forEach(t => {{
-  let last = t.value;
-  t.addEventListener('blur', () => {{
-    if(t.value === last) return;
-    last = t.value;
-    fetch('/cardconv/review/reason', {{
-      method:'POST', headers:{{'Content-Type':'application/json'}},
-      body: JSON.stringify({{id: t.dataset.id, reason: t.value}})
-    }});
-  }});
-}});
-
 // ── Date filter + presets (mirrors the Ledger page) ──────────────────────────
 const $ = id => document.getElementById(id);
 function iso(d){{ return d.toISOString().slice(0,10); }}
@@ -2515,6 +2612,68 @@ if(rvDl){{
     window.location = '/cardconv/review/download?' + p.toString();
   }});
 }}
+
+// ── Receipt lightbox ─────────────────────────────────────────────────────────
+// Click a thumbnail → full image with bbox overlay (multi-receipt highlights the
+// matched entry). ocr_bbox is [ymin,xmin,ymax,xmax] in a 0-1000 coord system.
+const rvLb = $('rvLb'), rvLbImg = $('rvLbImg'), rvLbSvg = $('rvLbSvg');
+
+function rvEscSvg(s){{
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}}
+
+function rvPaintBoxes(boxes, curId){{
+  const img = rvLbImg, svg = rvLbSvg;
+  if(!boxes.length || !img.naturalWidth){{ svg.innerHTML=''; svg.style.display='none'; return; }}
+  const cW=img.clientWidth, cH=img.clientHeight, nW=img.naturalWidth, nH=img.naturalHeight;
+  const scale=Math.min(cW/nW, cH/nH), dW=nW*scale, dH=nH*scale;
+  svg.style.left=((cW-dW)/2)+'px'; svg.style.top=((cH-dH)/2)+'px';
+  svg.style.width=dW+'px'; svg.style.height=dH+'px';
+  svg.setAttribute('viewBox','0 0 '+dW+' '+dH);
+  svg.style.display='block';
+  svg.innerHTML = boxes.map(function(x,i){{
+    const b=x.ocr_bbox;
+    const x0=b[1]/1000*dW, y0=b[0]/1000*dH, x1=b[3]/1000*dW, y1=b[2]/1000*dH;
+    const isCur=(x.id===curId);
+    const col=isCur?'#38bdf8':'#64748b', sw=isCur?2.5:1.5;
+    const ty=Math.max(y0+13,13);
+    return '<rect x="'+x0.toFixed(1)+'" y="'+y0.toFixed(1)+'" width="'+(x1-x0).toFixed(1)+
+      '" height="'+(y1-y0).toFixed(1)+'" rx="4" fill="'+col+'" fill-opacity="'+(isCur?0.12:0.05)+
+      '" stroke="'+col+'" stroke-width="'+sw+'"/>'+
+      '<text x="'+(x0+4).toFixed(1)+'" y="'+ty.toFixed(1)+'" fill="'+col+'" font-size="11" '+
+      'font-weight="700" style="paint-order:stroke;stroke:rgba(2,6,23,.75);stroke-width:3px">'+
+      rvEscSvg(''+(i+1))+'</text>';
+  }}).join('');
+}}
+
+function rvOpenLightbox(data){{
+  // Build the list of boxes to draw: siblings if present, else this entry alone.
+  let boxes = (data.siblings && data.siblings.length)
+    ? data.siblings.filter(s => Array.isArray(s.ocr_bbox))
+    : (Array.isArray(data.bbox) ? [{{id: data.id, ocr_bbox: data.bbox}}] : []);
+  rvLbSvg.innerHTML=''; rvLbSvg.style.display='none';
+  rvLbImg.src = '/cardconv/receipts/image/' + data.fid;
+  $('rvLbCaption').textContent = data.merchant || '';
+  const drive = $('rvLbDrive');
+  if(data.drive){{ drive.href = data.drive; drive.style.display=''; }}
+  else drive.style.display='none';
+  const render = () => rvPaintBoxes(boxes, data.id);
+  rvLbImg.onload = render;
+  if(rvLbImg.complete && rvLbImg.naturalWidth) render();
+  rvLb.classList.add('open');
+}}
+
+function rvCloseLightbox(){{ rvLb.classList.remove('open'); rvLbImg.src=''; }}
+
+document.querySelectorAll('.rv-thumb[data-rv]').forEach(img => {{
+  img.addEventListener('click', () => {{
+    try {{ rvOpenLightbox(JSON.parse(img.dataset.rv)); }} catch(e) {{}}
+  }});
+}});
+$('rvLbClose').addEventListener('click', rvCloseLightbox);
+rvLb.addEventListener('click', e => {{ if(e.target === rvLb) rvCloseLightbox(); }});
+document.addEventListener('keydown', e => {{ if(e.key === 'Escape') rvCloseLightbox(); }});
+window.addEventListener('resize', () => {{ if(rvLb.classList.contains('open')) rvLbImg.onload && rvLbImg.onload(); }});
 </script>
 </body></html>'''
 
@@ -2838,6 +2997,26 @@ function renderBody(entries){
       if(!groups[gid]){ groups[gid] = []; order.push({type:'group', gid}); }
       groups[gid].push(i);
     } else { order.push({type:'single', i}); }
+  });
+  // Head index of a group = dup_keep (matched-preferred by backend) entry.
+  const headIdx = gid => groups[gid].slice().sort((a, b) =>
+    (entries[a].dup_keep ? 0 : 1) - (entries[b].dup_keep ? 0 : 1))[0];
+  // Sort all rows (group + single) by head's ocr_date, newest first.
+  // None/'unknown' dates sink to the bottom.
+  const dateVal = d => {
+    if(!d || d === 'unknown') return null;
+    const t = Date.parse(d);
+    return isNaN(t) ? null : t;
+  };
+  const headDate = o => dateVal(o.type === 'single'
+    ? entries[o.i].ocr_date
+    : entries[headIdx(o.gid)].ocr_date);
+  order.sort((a, b) => {
+    const da = headDate(a), db = headDate(b);
+    if(da === null && db === null) return 0;
+    if(da === null) return 1;
+    if(db === null) return -1;
+    return db - da;
   });
   let html = '';
   order.forEach(o => {
