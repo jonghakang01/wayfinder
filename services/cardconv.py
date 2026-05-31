@@ -2338,7 +2338,7 @@ const csvName = document.getElementById('fileName');
 const existingNames = new Set({json.dumps(names)});
 
 function parseCsvSuggest(text) {{
-  const lines = text.split(/\r?\n/);
+  const lines = text.split(/\\r?\\n/);
   if (!lines.length) return;
   const hdr = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g,''));
   const col = hdr.findIndex(h => /cardmember/i.test(h) || /card.?member/i.test(h));
