@@ -2749,9 +2749,11 @@ def _render_review(user: str) -> str:
                 receipt_block = (
                     '<div class="rv-receipt unmatched">'
                       '<div class="rv-nomatch">❌ No receipt matched</div>'
-                      f'<button class="btn btn-ghost btn-sm rv-manual-btn" '
+                      f'<button type="button" '
+                      f'onclick="rvOpenMatchPanel(this)" '
                       f'data-txn="{txn_json}" '
-                      f'style="margin-top:6px;font-size:.74rem;color:var(--accent)">'
+                      f'class="btn btn-ghost btn-sm" '
+                      f'style="margin-top:6px;font-size:.74rem;color:var(--accent);width:100%">'
                       f'🔗 Match manually</button>'
                     '</div>')
             item_cls = 'rv-item' + ('' if is_matched else ' unmatched')
@@ -2998,100 +3000,90 @@ document.addEventListener('keydown', e => {{ if(e.key === 'Escape') rvCloseLight
 window.addEventListener('resize', () => {{ if(rvLb.classList.contains('open')) rvLbImg.onload && rvLbImg.onload(); }});
 applyPreset('all');
 
-// ── Manual match modal ────────────────────────────────────────────────────────
-(function(){{
-  var modal = null;
-  var curTxn = null;
+// ── Manual match — right-side panel ──────────────────────────────────────────
+var _mmTxn = null;
 
-  function buildModal(){{
-    var el = document.createElement('div');
-    el.id = 'rvMatchModal';
-    el.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:300;align-items:flex-start;justify-content:center;overflow-y:auto;padding:30px 16px';
-    el.innerHTML = [
-      '<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-md);width:100%;max-width:600px;margin:auto">',
-        '<div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border)">',
-          '<div>',
-            '<div id="rvMmTitle" style="font-size:1rem;font-weight:700">Match Manually</div>',
-            '<div id="rvMmSub" style="font-size:.8rem;color:var(--text-muted);margin-top:2px"></div>',
-          '</div>',
-          '<button onclick="closeMatchModal()" style="background:none;border:none;color:var(--text-muted);font-size:1.4rem;cursor:pointer">&times;</button>',
-        '</div>',
-        '<div id="rvMmBody" style="padding:14px 20px;max-height:65vh;overflow-y:auto">',
-          '<div style="color:var(--text-muted);text-align:center;padding:20px">Loading receipts…</div>',
-        '</div>',
-      '</div>'
-    ].join('');
-    document.body.appendChild(el);
-    el.addEventListener('click', function(e){{ if(e.target===el) closeMatchModal(); }});
-    return el;
+function rvOpenMatchPanel(btn) {{
+  var txnRaw = btn ? btn.getAttribute('data-txn') : '{{}}';
+  try {{ _mmTxn = JSON.parse(txnRaw); }} catch(x) {{ _mmTxn = {{}}; }}
+  var panel = document.getElementById('rvMatchPanel');
+  var info  = document.getElementById('rvMatchInfo');
+  var list  = document.getElementById('rvMatchList');
+  info.textContent = (_mmTxn.merchant||'') + '  ' + (_mmTxn.date||'') +
+    (_mmTxn.amount != null ? '  $'+Number(_mmTxn.amount).toFixed(2) : '');
+  list.innerHTML = '<div style="color:var(--text-muted);padding:20px;text-align:center">Loading…</div>';
+  panel.style.transform = 'translateX(0)';
+  fetch('/cardconv/ledger/api?status=all')
+    .then(function(r) {{ return r.json(); }})
+    .then(function(d) {{ rvRenderMatchList(d.entries || []); }})
+    .catch(function() {{ list.innerHTML = '<div style="color:red;padding:16px">Load failed</div>'; }});
+}}
+
+function rvCloseMatchPanel() {{
+  document.getElementById('rvMatchPanel').style.transform = 'translateX(100%)';
+}}
+
+function rvRenderMatchList(entries) {{
+  var list = document.getElementById('rvMatchList');
+  var pending = entries.filter(function(e) {{ return e.match_status !== 'matched'; }});
+  if (!pending.length) {{
+    list.innerHTML = '<div style="color:var(--text-muted);padding:20px;text-align:center">No unmatched receipts</div>';
+    return;
   }}
+  list.innerHTML = pending.map(function(e) {{
+    var fid = e.file_id || '';
+    var tn  = fid ? 'https://drive.google.com/thumbnail?id=' + fid + '&sz=w100' : '';
+    var img = tn
+      ? '<img src="' + tn + '" style="width:52px;height:52px;object-fit:cover;border-radius:5px;border:1px solid var(--border);flex-shrink:0" onerror="this.style.display=\'none\'">'
+      : '<div style="width:52px;height:52px;border-radius:5px;border:1px dashed var(--border);flex-shrink:0"></div>';
+    var badge = e.match_status === 'pending_match' ? 'Pending' : 'Unmatched';
+    return '<div style="display:flex;gap:10px;align-items:center;padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .12s" '
+      + 'onmouseover="this.style.background=\'var(--surface-2)\'" onmouseout="this.style.background=\'\'" '
+      + 'onclick="rvDoMatch(\'' + e.id.replace(/'/g, '') + '\')">'
+      + img
+      + '<div style="flex:1;min-width:0">'
+      +   '<div style="font-size:.82rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + (e.ocr_merchant || '–') + '</div>'
+      +   '<div style="font-size:.74rem;color:var(--text-muted)">' + (e.ocr_date || '–') + '</div>'
+      + '</div>'
+      + '<div style="text-align:right;flex-shrink:0">'
+      +   '<div style="font-size:.84rem;font-weight:700;color:var(--accent)">' + (e.ocr_amount != null ? '$' + Number(e.ocr_amount).toFixed(2) : '–') + '</div>'
+      +   '<div style="font-size:.65rem;color:var(--text-muted)">' + badge + '</div>'
+      + '</div>'
+      + '</div>';
+  }}).join('');
+}}
 
-  window.closeMatchModal = function(){{
-    if(modal) modal.style.display = 'none';
-  }};
-
-  function openMatchModal(txn){{
-    curTxn = txn;
-    if(!modal) modal = buildModal();
-    modal.style.display = 'flex';
-    $('rvMmTitle').textContent = 'Match Manually — ' + (txn.merchant || '');
-    $('rvMmSub').textContent = (txn.date||'') + '  ' + (txn.amount != null ? '$'+Number(txn.amount).toFixed(2) : '');
-    $('rvMmBody').innerHTML = '<div style="color:var(--text-muted);text-align:center;padding:20px">Loading receipts…</div>';
-    fetch('/cardconv/ledger/api?status=all&page=1')
-      .then(function(r){{ return r.json(); }})
-      .then(function(d){{ renderReceipts(d.entries || []); }})
-      .catch(function(){{ $('rvMmBody').innerHTML = '<div style="color:var(--danger);text-align:center;padding:20px">Failed to load.</div>'; }});
-  }}
-
-  function renderReceipts(entries){{
-    var unmatched = entries.filter(function(e){{ return e.match_status !== 'matched'; }});
-    if(!unmatched.length){{
-      $('rvMmBody').innerHTML = '<div style="color:var(--text-muted);text-align:center;padding:20px">No unmatched receipts available.</div>';
-      return;
-    }}
-    $('rvMmBody').innerHTML = unmatched.map(function(e){{
-      var fid = e.file_id || '';
-      var tn  = fid ? 'https://drive.google.com/thumbnail?id='+fid+'&sz=w120' : '';
-      var img = tn ? '<img src="'+tn+'" style="width:60px;height:60px;object-fit:cover;border-radius:6px;border:1px solid var(--border);flex-shrink:0" onerror="this.style.display=\'none\'">' : '';
-      return '<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border);cursor:pointer" onclick="selectReceipt(\''+e.id+'\',this)">'
-        + img
-        + '<div style="flex:1;min-width:0">'
-        +   '<div style="font-size:.82rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+(e.ocr_merchant||'–')+'</div>'
-        +   '<div style="font-size:.75rem;color:var(--text-muted)">'+(e.ocr_date||'–')+'</div>'
-        + '</div>'
-        + '<div style="font-size:.85rem;font-weight:700;color:var(--accent);flex-shrink:0">'+(e.ocr_amount!=null?'$'+Number(e.ocr_amount).toFixed(2):'–')+'</div>'
-        + '<span style="color:var(--text-muted);font-size:.7rem;padding:2px 7px;border-radius:8px;background:var(--surface-2)">'+({{'pending_match':'Pending','unmatched':'Unmatched'}}[e.match_status]||e.match_status)+'</span>'
-        + '</div>';
-    }}).join('');
-  }}
-
-  window.selectReceipt = function(rcptId, row){{
-    if(!curTxn) return;
-    fetch('/cardconv/review/match', {{
-      method:'POST',
-      headers:{{'Content-Type':'application/x-www-form-urlencoded'}},
-      body:'row_id='+encodeURIComponent(curTxn.id||'')+'&receipt_id='+encodeURIComponent(rcptId)
-    }}).then(function(r){{ return r.json(); }}).then(function(d){{
-      if(d.ok){{
-        closeMatchModal();
-        // Reload page to reflect updated match state
-        location.reload();
-      }} else {{
-        alert('Match failed: '+(d.error||'unknown'));
-      }}
-    }});
-  }};
-
-  document.addEventListener('click', function(e){{
-    var btn = e.target.closest('.rv-manual-btn');
-    if(!btn) return;
-    e.stopPropagation();
-    var txn = {{}};
-    try {{ txn = JSON.parse(btn.dataset.txn||'{{}}'); }} catch(x){{}}
-    openMatchModal(txn);
+function rvDoMatch(rcptId) {{
+  if (!_mmTxn) return;
+  fetch('/cardconv/review/match', {{
+    method: 'POST',
+    headers: {{'Content-Type': 'application/x-www-form-urlencoded'}},
+    body: 'row_id=' + encodeURIComponent(_mmTxn.id || '') + '&receipt_id=' + encodeURIComponent(rcptId)
+  }}).then(function(r) {{ return r.json(); }}).then(function(d) {{
+    if (d.ok) {{ rvCloseMatchPanel(); location.reload(); }}
+    else {{ alert('Match failed: ' + (d.error || 'unknown')); }}
   }});
-}})();
+}}
+
+document.addEventListener('keydown', function(e) {{
+  if (e.key === 'Escape') rvCloseMatchPanel();
+}});
 </script>
+
+<!-- Manual match panel -->
+<div id="rvMatchPanel" style="position:fixed;top:0;right:0;width:340px;max-width:100vw;height:100vh;background:var(--surface);border-left:1px solid var(--border);z-index:400;transform:translateX(100%);transition:transform .25s cubic-bezier(.4,0,.2,1);display:flex;flex-direction:column;box-shadow:-4px 0 20px rgba(0,0,0,.2)">
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--border);flex-shrink:0">
+    <div>
+      <div style="font-size:.95rem;font-weight:700">Match Manually</div>
+      <div id="rvMatchInfo" style="font-size:.74rem;color:var(--text-muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:260px"></div>
+    </div>
+    <button onclick="rvCloseMatchPanel()" style="background:none;border:none;color:var(--text-muted);font-size:1.4rem;cursor:pointer;line-height:1;padding:4px">&times;</button>
+  </div>
+  <div style="padding:10px 14px;border-bottom:1px solid var(--border);font-size:.74rem;color:var(--text-muted);flex-shrink:0">
+    Select a receipt to link to this transaction
+  </div>
+  <div id="rvMatchList" style="flex:1;overflow-y:auto"></div>
+</div>
 </body></html>'''
 
 
