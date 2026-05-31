@@ -159,6 +159,8 @@ def _migrate_entry(e: dict) -> dict:
     e = dict(e)
     if not e.get("id"):
         e["id"] = "rcpt_" + (e.get("file_id") or uuid.uuid4().hex)[:8]
+    # Multi-receipt: legacy entries are the only receipt on their image → index 0.
+    e.setdefault("sub_index", 0)
     if "ocr_status" not in e:
         e["ocr_status"] = "done" if e.get("ocr_amount") is not None else "pending"
     # v2.1: handwritten-priority OCR. Legacy entries keep ocr_amount as printed total.
@@ -171,6 +173,13 @@ def _migrate_entry(e: dict) -> dict:
             # Initial state is always pending_match. unmatched is reserved for
             # receipts that were tried against a CSV but failed to match.
             e["match_status"] = "pending_match"
+    # Backfill OCR date from the matched CSV transaction for legacy entries that
+    # were matched while OCR failed to read a date.
+    if e.get("match_status") == "matched" and e.get("ocr_date") in (None, "", "unknown"):
+        mt_date = (e.get("matched_transaction") or {}).get("date")
+        if mt_date:
+            e["ocr_date_original"] = e.get("ocr_date")
+            e["ocr_date"] = mt_date
     return e
 
 
@@ -446,18 +455,21 @@ def _move_to_matched_folder(username: str, file_id: str) -> bool:
 # ── OCR ───────────────────────────────────────────────────────────────────────
 
 _OCR_PROMPT = (
-    'Look at this receipt CAREFULLY. There may be handwritten numbers '
-    '(e.g., tip amount, final total written by hand on top of the printed receipt). '
+    'This image may contain ONE OR MULTIPLE receipts (e.g. several small '
+    'receipts scanned together on a single page). Identify EACH distinct receipt. '
+    'For EACH receipt look CAREFULLY for handwritten numbers (e.g. tip amount, '
+    'final total written by hand on top of the printed receipt). '
     'Inspect tip line, total line, and any margin notes for handwriting. '
-    'Extract: '
+    'For each receipt extract: '
     '1) date (YYYY-MM-DD), '
     '2) merchant name, '
     '3) printed_amount: the PRINTED/typed total (number only), '
     '4) handwritten_amount: any HAND-WRITTEN final amount including tip (number only, '
     'null if none visible). '
     'Handwritten amount, when present, is the REAL final amount and overrides printed. '
-    'Return JSON only: '
-    '{"date":"YYYY-MM-DD","merchant":"name","printed_amount":0.00,"handwritten_amount":null}'
+    'Return a JSON ARRAY ONLY, one object per receipt: '
+    '[{"date":"YYYY-MM-DD","merchant":"name","printed_amount":0.00,"handwritten_amount":null}]. '
+    'If only one receipt is visible, return an array with a single element.'
 )
 
 
@@ -490,11 +502,42 @@ def _normalize_ocr(result: dict) -> dict:
     return result
 
 
-def _ocr_receipt(file_bytes: bytes, mime_type: str) -> dict:
-    """OCR receipt using Claude Vision. Returns {date, amount, merchant, ...} or {}."""
+def _extract_ocr_list(text: str) -> list:
+    """Parse a model OCR response into a list of normalized receipt dicts.
+
+    Accepts either a JSON ARRAY (multi-receipt, current prompt) or a single
+    JSON OBJECT (back-compat). Returns [] when nothing parseable is found.
+    """
+    if not text:
+        return []
+    text = text.strip()
+    parsed = None
+    # Prefer a top-level array (one image may hold multiple receipts).
+    m = re.search(r'\[.*\]', text, re.DOTALL)
+    if m:
+        try:
+            parsed = json.loads(m.group(0))
+        except Exception:
+            parsed = None
+    if parsed is None:  # fall back to a single object
+        m = re.search(r'\{.*\}', text, re.DOTALL)
+        if m:
+            try:
+                parsed = json.loads(m.group(0))
+            except Exception:
+                parsed = None
+    if parsed is None:
+        return []
+    if isinstance(parsed, dict):
+        parsed = [parsed]
+    return [_normalize_ocr(item) for item in parsed if isinstance(item, dict)]
+
+
+def _ocr_receipt(file_bytes: bytes, mime_type: str) -> list:
+    """OCR receipt(s) using Claude Vision. Returns a list of receipt dicts (may be empty)."""
     api_key = os.environ.get('ANTHROPIC_API_KEY')
     if not api_key:
-        return {}
+        return []
     try:
         import anthropic
         client = anthropic.Anthropic(api_key=api_key)
@@ -511,21 +554,19 @@ def _ocr_receipt(file_bytes: bytes, mime_type: str) -> dict:
             }
         resp = client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=256,
+            max_tokens=1024,  # room for multiple receipts in one image
             messages=[{"role": "user", "content": [
                 block,
                 {"type": "text", "text": _OCR_PROMPT}
             ]}]
         )
-        text = resp.content[0].text.strip()
-        m = re.search(r'\{[^{}]+\}', text, re.DOTALL)
-        if m:
-            result = _normalize_ocr(json.loads(m.group(0)))
-            result["_model"] = "Claude"
-            return result
+        results = _extract_ocr_list(resp.content[0].text)
+        for r in results:
+            r["_model"] = "Claude"
+        return results
     except Exception:
         pass
-    return {}
+    return []
 
 
 # Configurable via GEMINI_OCR_MODEL (.env). gemini-2.5-flash: fast/cheap, strong on
@@ -533,11 +574,11 @@ def _ocr_receipt(file_bytes: bytes, mime_type: str) -> dict:
 _DEFAULT_GEMINI_OCR_MODEL = "gemini-2.5-flash"
 
 
-def _ocr_receipt_gemini(file_bytes: bytes, mime_type: str) -> dict:
-    """OCR receipt using Gemini Vision. Returns {date, amount, merchant, _model} or {}."""
+def _ocr_receipt_gemini(file_bytes: bytes, mime_type: str) -> list:
+    """OCR receipt(s) using Gemini Vision. Returns a list of receipt dicts (may be empty)."""
     api_key = os.environ.get('GEMINI_API_KEY')
     if not api_key:
-        return {}
+        return []
     try:
         # New unified SDK (google-genai). Old google.generativeai is deprecated.
         from google import genai
@@ -552,23 +593,48 @@ def _ocr_receipt_gemini(file_bytes: bytes, mime_type: str) -> dict:
                 _OCR_PROMPT,
             ],
         )
-        text = (resp.text or "").strip()
-        m = re.search(r'\{[^{}]+\}', text, re.DOTALL)
-        if m:
-            result = _normalize_ocr(json.loads(m.group(0)))
-            result["_model"] = "Gemini"
-            return result
+        results = _extract_ocr_list(resp.text or "")
+        for r in results:
+            r["_model"] = "Gemini"
+        return results
     except Exception:
         pass
-    return {}
+    return []
 
 
-def _ocr_receipt_auto(file_bytes: bytes, mime_type: str) -> dict:
-    """Primary OCR: Gemini first, fallback to Claude on failure."""
-    result = _ocr_receipt_gemini(file_bytes, mime_type)
-    if result and result.get("amount") is not None:
-        return result
-    return _ocr_receipt(file_bytes, mime_type)
+def _ocr_receipt_auto(file_bytes: bytes, mime_type: str) -> list:
+    """Primary OCR: Gemini first, fall back to Claude. Returns a list of receipt dicts.
+
+    One image may contain multiple receipts, so callers must iterate the result.
+    """
+    results = _ocr_receipt_gemini(file_bytes, mime_type)
+    if results and any(r.get("amount") is not None for r in results):
+        return results
+    claude = _ocr_receipt(file_bytes, mime_type)
+    return claude or results
+
+
+def _sub_entry_id(file_id: str, sub_index: int) -> str:
+    """Stable ledger entry id for the Nth receipt found in one image."""
+    base = (file_id or uuid.uuid4().hex)[:8]
+    return f"rcpt_{base}_{sub_index}"
+
+
+def _ocr_entry_fields(ocr: dict) -> dict:
+    """Map a normalized OCR dict to the ledger entry's ocr_* fields."""
+    ocr_date = ocr.get("date")
+    if ocr_date == "YYYY-MM-DD":  # treat placeholder as missing
+        ocr_date = None
+    has_ocr = ocr.get("amount") is not None
+    return {
+        "ocr_status":             "done" if has_ocr else "failed",
+        "ocr_date":               ocr_date,
+        "ocr_amount":             ocr.get("amount"),
+        "ocr_printed_amount":     ocr.get("printed_amount"),
+        "ocr_handwritten_amount": ocr.get("handwritten_amount"),
+        "ocr_merchant":           ocr.get("merchant"),
+        "ocr_model":              ocr.get("_model"),
+    }
 
 
 # ── Multipart file parser ─────────────────────────────────────────────────────
@@ -772,6 +838,11 @@ def convert(csv_bytes: bytes, filename: str, username: str = None) -> tuple:
                         'amount': amt_rounded,
                         'vendor': vendor,
                     }
+                    # Backfill OCR date from the matched CSV transaction when OCR
+                    # failed to read it. Keep the original in ocr_date_original.
+                    if receipt_match.get('ocr_date') in (None, '', 'unknown') and inv_date_str:
+                        receipt_match['ocr_date_original'] = receipt_match.get('ocr_date')
+                        receipt_match['ocr_date'] = inv_date_str
                     receipts_dirty = True
                     # NOTE: Drive folder auto-move is deprecated. Drive is a plain
                     # store; the Wayfinder ledger is the single source of truth.
@@ -851,7 +922,12 @@ def _run_batch_ocr(username: str) -> dict:
 
         ledger  = _load_ledger(username)
         entries = ledger["entries"]
-        by_fid  = {e.get("file_id"): e for e in entries}
+        # File ids already OCR'd successfully (or matched) — leave untouched so a
+        # re-sync only processes brand-new files. Use Re-OCR to reprocess these.
+        done_fids = {e.get("file_id") for e in entries
+                     if (e.get("ocr_status") == "done"
+                         and e.get("ocr_amount") is not None)
+                     or e.get("matched")}
         processed = failed = 0
 
         for f in drive_files:
@@ -859,46 +935,35 @@ def _run_batch_ocr(username: str) -> dict:
             mime = f.get('mimeType', '')
             if mime not in _SUPPORTED_MIME:
                 continue
-            existing = by_fid.get(fid)
-            if existing and existing.get("ocr_status") == "done" \
-                    and existing.get("ocr_amount") is not None:
+            if fid in done_fids:
                 continue  # already OCR'd successfully
             content  = service.files().get_media(fileId=fid).execute()
-            ocr      = _ocr_receipt_auto(content, mime)
-            ocr_date = ocr.get("date")
-            if ocr_date == "YYYY-MM-DD":
-                ocr_date = None
-            has_ocr  = ocr.get("amount") is not None
+            ocr_list = _ocr_receipt_auto(content, mime) or [{}]
             url      = f.get('webViewLink') or f'https://drive.google.com/file/d/{fid}/view'
-            if has_ocr:
-                processed += 1
-            else:
-                failed += 1
-            update = {
-                "file_id":      fid,
-                "filename":     f.get('name', ''),
-                "drive_url":    url,
-                "mime_type":    mime,
-                "ocr_status":   "done" if has_ocr else "failed",
-                "ocr_date":     ocr_date,
-                "ocr_amount":   ocr.get("amount"),
-                "ocr_printed_amount":     ocr.get("printed_amount"),
-                "ocr_handwritten_amount": ocr.get("handwritten_amount"),
-                "ocr_merchant": ocr.get("merchant"),
-                "ocr_model":    ocr.get("_model"),
-            }
-            if existing:
-                existing.update(update)
-                # Initial state is always pending_match (CSV-dependent).
-                # Only Convert can set matched/unmatched.
-                existing.setdefault("match_status", "pending_match")
-            else:
-                update["id"] = "rcpt_" + (fid or uuid.uuid4().hex)[:8]
-                update["match_status"] = "pending_match"
-                update["uploaded_at"] = datetime.now().strftime("%Y-%m-%d %H:%M")
-                update["synced_at"] = datetime.now().isoformat()
-                entries.append(update)
-                by_fid[fid] = update
+            # Drop prior failed/pending rows for this file so single→multi upgrades
+            # don't leave stale entries behind.
+            entries[:] = [e for e in entries if e.get("file_id") != fid]
+            now_disp = datetime.now().strftime("%Y-%m-%d %H:%M")
+            now_iso  = datetime.now().isoformat()
+            for sub_index, ocr in enumerate(ocr_list):
+                fields = _ocr_entry_fields(ocr)
+                if fields["ocr_status"] == "done":
+                    processed += 1
+                else:
+                    failed += 1
+                entry = {
+                    "id":           _sub_entry_id(fid, sub_index),
+                    "file_id":      fid,
+                    "sub_index":    sub_index,
+                    "filename":     f.get('name', ''),
+                    "drive_url":    url,
+                    "mime_type":    mime,
+                    "match_status": "pending_match",
+                    "uploaded_at":  now_disp,
+                    "synced_at":    now_iso,
+                }
+                entry.update(fields)
+                entries.append(entry)
 
         ledger["last_batch_at"] = datetime.now().isoformat()
         _save_ledger(username, ledger)
@@ -1495,10 +1560,10 @@ def _handle_drive_sync(username: str):
         drive_files = results.get('files', [])
 
         existing     = _load_receipts(username)
-        # IDs where OCR already succeeded — skip those only
+        # file_ids where OCR already succeeded (or matched) — skip those only.
+        # Re-OCR handles reprocessing; new files start fresh as multi-receipt.
         ocr_done_ids = {r.get('file_id') for r in existing
                         if r.get('ocr_amount') is not None or r.get('matched')}
-        existing_map = {r.get('file_id'): r for r in existing}
         supported    = {'image/jpeg', 'image/png', 'application/pdf', 'image/gif', 'image/webp'}
 
         for f in drive_files:
@@ -1508,34 +1573,26 @@ def _handle_drive_sync(username: str):
             mime = f.get('mimeType', '')
             if mime not in supported:
                 continue
-            content = service.files().get_media(fileId=fid).execute()
-            ocr     = _ocr_receipt_auto(content, mime)
-            url     = f.get('webViewLink') or f'https://drive.google.com/file/d/{fid}/view'
-            # Fix: treat "YYYY-MM-DD" placeholder as None
-            ocr_date = ocr.get("date")
-            if ocr_date == "YYYY-MM-DD":
-                ocr_date = None
-            has_ocr = ocr.get("amount") is not None
-            entry = {
-                "file_id":      fid,
-                "filename":     f.get('name', ''),
-                "drive_url":    url,
-                "mime_type":    mime,
-                "uploaded_at":  datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "ocr_status":   "done" if has_ocr else "failed",
-                "ocr_date":     ocr_date,
-                "ocr_amount":   ocr.get("amount"),
-                "ocr_printed_amount":     ocr.get("printed_amount"),
-                "ocr_handwritten_amount": ocr.get("handwritten_amount"),
-                "ocr_merchant": ocr.get("merchant"),
-                "ocr_model":    ocr.get("_model"),
-            }
-            if fid in existing_map:
-                existing_map[fid].update(entry)
-            else:
-                entry["id"] = "rcpt_" + (fid or uuid.uuid4().hex)[:8]
-                entry["match_status"] = "pending_match"
-                entry["synced_at"] = datetime.now().isoformat()
+            content  = service.files().get_media(fileId=fid).execute()
+            ocr_list = _ocr_receipt_auto(content, mime) or [{}]
+            url      = f.get('webViewLink') or f'https://drive.google.com/file/d/{fid}/view'
+            # Drop prior failed/pending rows for this file (single→multi upgrade).
+            existing = [r for r in existing if r.get("file_id") != fid]
+            now_disp = datetime.now().strftime("%Y-%m-%d %H:%M")
+            now_iso  = datetime.now().isoformat()
+            for sub_index, ocr in enumerate(ocr_list):
+                entry = {
+                    "id":           _sub_entry_id(fid, sub_index),
+                    "file_id":      fid,
+                    "sub_index":    sub_index,
+                    "filename":     f.get('name', ''),
+                    "drive_url":    url,
+                    "mime_type":    mime,
+                    "match_status": "pending_match",
+                    "uploaded_at":  now_disp,
+                    "synced_at":    now_iso,
+                }
+                entry.update(_ocr_entry_fields(ocr))
                 existing.append(entry)
 
         _save_receipts(username, existing)
