@@ -917,11 +917,23 @@ def convert(csv_bytes: bytes, filename: str, username: str = None) -> tuple:
             receipt_match = receipts_map.get((inv_date_str, amt_rounded))
             if not receipt_match:
                 for (rdate, ramt), r in receipts_map.items():
-                    amt_match  = abs(ramt - amt_rounded) <= 0.01
-                    # Date must match (None OCR date = unknown, still acceptable).
-                    # Merchant similarity alone is NOT enough to override a date mismatch.
-                    date_match = (rdate is None or rdate == inv_date_str)
-                    if amt_match and date_match:
+                    amt_match = abs(ramt - amt_rounded) <= 0.01
+                    if not amt_match:
+                        continue
+                    if rdate is None:
+                        date_match = True
+                    elif rdate == inv_date_str:
+                        date_match = True
+                    else:
+                        # Allow ±1 day for card posting date vs transaction date skew
+                        try:
+                            from datetime import timedelta
+                            rd = date.fromisoformat(rdate)
+                            id_ = date.fromisoformat(inv_date_str) if inv_date_str else None
+                            date_match = id_ is not None and abs((rd - id_).days) <= 1
+                        except Exception:
+                            date_match = False
+                    if date_match:
                         receipt_match = r
                         break
             if receipt_match:
@@ -1641,6 +1653,8 @@ def handle(method, path, body, ctx=None):
         return ("html", _render_keywords(user))
     if method == "POST" and path == "/cardconv/review/reason":
         return _handle_review_reason(user, body)
+    if method == "POST" and path == "/cardconv/review/match":
+        return _handle_review_manual_match(user, body)
     if method == "GET" and path == "/cardconv/review/download":
         return _handle_review_download(user, body)  # GET passes query dict as body
 
@@ -1656,6 +1670,9 @@ def handle(method, path, body, ctx=None):
     if method == "POST" and path.startswith("/cardconv/ledger/") and path.endswith("/status"):
         entry_id = path[len("/cardconv/ledger/"):-len("/status")]
         return _handle_status_change(user, entry_id, body)
+    if method == "POST" and path.startswith("/cardconv/ledger/") and path.endswith("/update"):
+        entry_id = path[len("/cardconv/ledger/"):-len("/update")]
+        return _handle_ledger_update(user, entry_id, body)
     if method == "POST" and path.startswith("/cardconv/ledger/") and path.endswith("/reocr"):
         entry_id = path[len("/cardconv/ledger/"):-len("/reocr")]
         return _handle_reocr(user, entry_id)
@@ -2532,6 +2549,88 @@ def _render_keywords(user: str) -> str:
 
 # ── Review page ──────────────────────────────────────────────────────────────
 
+def _handle_ledger_update(username: str, entry_id: str, body: dict):
+    """POST /cardconv/ledger/<id>/update — manually edit OCR fields of an entry."""
+    ledger = _load_ledger(username)
+    updated = False
+    for e in ledger["entries"]:
+        if e.get("id") != entry_id:
+            continue
+        for field in ("ocr_date", "ocr_merchant"):
+            raw = body.get(field)
+            if raw is not None:
+                val = (raw[0] if isinstance(raw, list) else str(raw)).strip()
+                e[field] = val or None
+        for field in ("ocr_amount", "ocr_handwritten_amount"):
+            raw = body.get(field)
+            if raw is not None:
+                val = (raw[0] if isinstance(raw, list) else str(raw)).strip()
+                try:
+                    e[field] = float(val) if val else None
+                except ValueError:
+                    pass
+        # Recompute final amount
+        hw = e.get("ocr_handwritten_amount")
+        pr = e.get("ocr_amount")
+        e["ocr_final_amount"] = hw if hw is not None else pr
+        updated = True
+        break
+    if not updated:
+        return ("json", {"error": "not found"}, 404)
+    _save_ledger(username, ledger)
+    return ("json", {"ok": True})
+
+
+def _handle_review_manual_match(username: str, body: dict):
+    """POST /cardconv/review/match — manually link an unmatched review row to a receipt."""
+    def val(k):
+        v = body.get(k, "")
+        return (v[0] if isinstance(v, list) else str(v)).strip()
+    row_id   = val("row_id")
+    rcpt_id  = val("receipt_id")
+    if not row_id or not rcpt_id:
+        return ("json", {"error": "missing params"}, 400)
+
+    # Find the receipt in the ledger
+    receipts = _load_receipts(username)
+    receipt  = next((r for r in receipts if r.get("id") == rcpt_id), None)
+    if not receipt:
+        return ("json", {"error": "receipt not found"}, 404)
+
+    # Update review row
+    review = _load_review(username)
+    matched_row = None
+    for r in review.get("rows", []):
+        if r.get("id") == row_id:
+            r["matched"] = True
+            r["receipt"] = {
+                "id":           receipt.get("id"),
+                "file_id":      receipt.get("file_id"),
+                "drive_url":    receipt.get("drive_url"),
+                "ocr_date":     receipt.get("ocr_date"),
+                "ocr_merchant": receipt.get("ocr_merchant"),
+                "ocr_amount":   receipt.get("ocr_amount"),
+                "filename":     receipt.get("filename"),
+            }
+            matched_row = r
+            break
+    if not matched_row:
+        return ("json", {"error": "row not found"}, 404)
+
+    # Mark receipt as matched in ledger
+    receipt["matched"] = True
+    receipt["match_status"] = "matched"
+    receipt["matched_at"] = datetime.now().isoformat()
+    receipt["matched_transaction"] = {
+        "date":   matched_row.get("date"),
+        "amount": matched_row.get("amount"),
+        "vendor": matched_row.get("merchant"),
+    }
+    _save_receipts(username, receipts)
+    _save_review(username, review)
+    return ("json", {"ok": True, "receipt": matched_row["receipt"]})
+
+
 def _handle_review_reason(username: str, body: dict):
     """POST /cardconv/review/reason — save a loss reason for an unmatched row."""
     def _val(k):
@@ -2667,9 +2766,18 @@ def _render_review(user: str) -> str:
                       '</div>'
                     '</div>')
             else:
+                row_id_esc = _esc(r.get("id", ""))
+                txn_json   = _esc(json.dumps({
+                    "id": r.get("id",""), "date": r.get("date",""),
+                    "merchant": r.get("merchant",""), "amount": r.get("amount"),
+                }, ensure_ascii=False))
                 receipt_block = (
                     '<div class="rv-receipt unmatched">'
                       '<div class="rv-nomatch">❌ No receipt matched</div>'
+                      f'<button class="btn btn-ghost btn-sm rv-manual-btn" '
+                      f'data-txn="{txn_json}" '
+                      f'style="margin-top:6px;font-size:.74rem;color:var(--accent)">'
+                      f'🔗 Match manually</button>'
                     '</div>')
             item_cls = 'rv-item' + ('' if is_matched else ' unmatched')
             row_date = _esc(r.get("date")) or ""
@@ -2914,6 +3022,100 @@ rvLb.addEventListener('click', e => {{ if(e.target === rvLb) rvCloseLightbox(); 
 document.addEventListener('keydown', e => {{ if(e.key === 'Escape') rvCloseLightbox(); }});
 window.addEventListener('resize', () => {{ if(rvLb.classList.contains('open')) rvLbImg.onload && rvLbImg.onload(); }});
 applyPreset('all');
+
+// ── Manual match modal ────────────────────────────────────────────────────────
+(function(){{
+  var modal = null;
+  var curTxn = null;
+
+  function buildModal(){{
+    var el = document.createElement('div');
+    el.id = 'rvMatchModal';
+    el.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:300;align-items:flex-start;justify-content:center;overflow-y:auto;padding:30px 16px';
+    el.innerHTML = [
+      '<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-md);width:100%;max-width:600px;margin:auto">',
+        '<div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border)">',
+          '<div>',
+            '<div id="rvMmTitle" style="font-size:1rem;font-weight:700">Match Manually</div>',
+            '<div id="rvMmSub" style="font-size:.8rem;color:var(--text-muted);margin-top:2px"></div>',
+          '</div>',
+          '<button onclick="closeMatchModal()" style="background:none;border:none;color:var(--text-muted);font-size:1.4rem;cursor:pointer">&times;</button>',
+        '</div>',
+        '<div id="rvMmBody" style="padding:14px 20px;max-height:65vh;overflow-y:auto">',
+          '<div style="color:var(--text-muted);text-align:center;padding:20px">Loading receipts…</div>',
+        '</div>',
+      '</div>'
+    ].join('');
+    document.body.appendChild(el);
+    el.addEventListener('click', function(e){{ if(e.target===el) closeMatchModal(); }});
+    return el;
+  }}
+
+  window.closeMatchModal = function(){{
+    if(modal) modal.style.display = 'none';
+  }};
+
+  function openMatchModal(txn){{
+    curTxn = txn;
+    if(!modal) modal = buildModal();
+    modal.style.display = 'flex';
+    $('rvMmTitle').textContent = 'Match Manually — ' + (txn.merchant || '');
+    $('rvMmSub').textContent = (txn.date||'') + '  ' + (txn.amount != null ? '$'+Number(txn.amount).toFixed(2) : '');
+    $('rvMmBody').innerHTML = '<div style="color:var(--text-muted);text-align:center;padding:20px">Loading receipts…</div>';
+    fetch('/cardconv/ledger/api?status=all&page=1')
+      .then(function(r){{ return r.json(); }})
+      .then(function(d){{ renderReceipts(d.entries || []); }})
+      .catch(function(){{ $('rvMmBody').innerHTML = '<div style="color:var(--danger);text-align:center;padding:20px">Failed to load.</div>'; }});
+  }}
+
+  function renderReceipts(entries){{
+    var unmatched = entries.filter(function(e){{ return e.match_status !== 'matched'; }});
+    if(!unmatched.length){{
+      $('rvMmBody').innerHTML = '<div style="color:var(--text-muted);text-align:center;padding:20px">No unmatched receipts available.</div>';
+      return;
+    }}
+    $('rvMmBody').innerHTML = unmatched.map(function(e){{
+      var fid = e.file_id || '';
+      var tn  = fid ? 'https://drive.google.com/thumbnail?id='+fid+'&sz=w120' : '';
+      var img = tn ? '<img src="'+tn+'" style="width:60px;height:60px;object-fit:cover;border-radius:6px;border:1px solid var(--border);flex-shrink:0" onerror="this.style.display=\'none\'">' : '';
+      return '<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border);cursor:pointer" onclick="selectReceipt(\''+e.id+'\',this)">'
+        + img
+        + '<div style="flex:1;min-width:0">'
+        +   '<div style="font-size:.82rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+(e.ocr_merchant||'–')+'</div>'
+        +   '<div style="font-size:.75rem;color:var(--text-muted)">'+(e.ocr_date||'–')+'</div>'
+        + '</div>'
+        + '<div style="font-size:.85rem;font-weight:700;color:var(--accent);flex-shrink:0">'+(e.ocr_amount!=null?'$'+Number(e.ocr_amount).toFixed(2):'–')+'</div>'
+        + '<span style="color:var(--text-muted);font-size:.7rem;padding:2px 7px;border-radius:8px;background:var(--surface-2)">'+({{'pending_match':'Pending','unmatched':'Unmatched'}}[e.match_status]||e.match_status)+'</span>'
+        + '</div>';
+    }}).join('');
+  }}
+
+  window.selectReceipt = function(rcptId, row){{
+    if(!curTxn) return;
+    fetch('/cardconv/review/match', {{
+      method:'POST',
+      headers:{{'Content-Type':'application/x-www-form-urlencoded'}},
+      body:'row_id='+encodeURIComponent(curTxn.id||'')+'&receipt_id='+encodeURIComponent(rcptId)
+    }}).then(function(r){{ return r.json(); }}).then(function(d){{
+      if(d.ok){{
+        closeMatchModal();
+        // Reload page to reflect updated match state
+        location.reload();
+      }} else {{
+        alert('Match failed: '+(d.error||'unknown'));
+      }}
+    }});
+  }};
+
+  document.addEventListener('click', function(e){{
+    var btn = e.target.closest('.rv-manual-btn');
+    if(!btn) return;
+    e.stopPropagation();
+    var txn = {{}};
+    try {{ txn = JSON.parse(btn.dataset.txn||'{{}}'); }} catch(x){{}}
+    openMatchModal(txn);
+  }});
+}})();
 </script>
 </body></html>'''
 
@@ -3214,13 +3416,31 @@ __TABCSS__
     </div>
   </div>
   <div class="detail-section">
-    <div class="detail-section-title">OCR Result</div>
-    <div class="detail-row"><span class="key">Date</span><span class="val" id="dDate">–</span></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+      <div class="detail-section-title" style="margin-bottom:0">OCR Result</div>
+      <button id="dEditBtn" class="btn btn-ghost btn-sm" onclick="togglePanelEdit()" style="font-size:.74rem;padding:3px 10px">✏️ Edit</button>
+    </div>
+    <div class="detail-row"><span class="key">Date</span>
+      <span class="val" id="dDate">–</span>
+      <input id="eDate" type="date" style="display:none;width:130px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:.82rem;padding:2px 6px">
+    </div>
+    <div class="detail-row"><span class="key">Merchant</span>
+      <span class="val" id="dMerchant">–</span>
+      <input id="eMerchant" type="text" style="display:none;width:100%;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:.82rem;padding:2px 6px">
+    </div>
+    <div class="detail-row"><span class="key">Printed $</span>
+      <span class="val" id="dPrinted">–</span>
+      <input id="ePrinted" type="number" step="0.01" style="display:none;width:100px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:.82rem;padding:2px 6px">
+    </div>
+    <div class="detail-row"><span class="key">Handwritten $</span>
+      <span class="val" id="dHand">–</span>
+      <input id="eHand" type="number" step="0.01" style="display:none;width:100px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:.82rem;padding:2px 6px">
+    </div>
     <div class="detail-row"><span class="key">Amount (final)</span><span class="val" id="dAmount">–</span></div>
-    <div class="detail-row"><span class="key">Printed</span><span class="val" id="dPrinted">–</span></div>
-    <div class="detail-row"><span class="key">Handwritten</span><span class="val" id="dHand">–</span></div>
-    <div class="detail-row"><span class="key">Merchant</span><span class="val" id="dMerchant">–</span></div>
     <div class="detail-row"><span class="key">AI Model</span><span class="val" id="dModel">–</span></div>
+    <div id="dSaveRow" style="display:none;margin-top:8px;display:none">
+      <button class="btn btn-primary btn-sm" style="width:100%;font-size:.82rem" onclick="savePanelEdit()">💾 Save Changes</button>
+    </div>
   </div>
   <div class="detail-section" id="dMatchSection">
     <div class="detail-section-title">Matched CSV Transaction</div>
@@ -3495,6 +3715,14 @@ function openPanel(e){
   $('dHand').style.color = hand ? '' : '#f59e0b';
   $('dMerchant').textContent = e.ocr_merchant || '–';
   $('dModel').textContent = e.ocr_model || '–';
+  // Pre-fill edit inputs
+  $('eDate').value = e.ocr_date || '';
+  $('eMerchant').value = e.ocr_merchant || '';
+  $('ePrinted').value = (e.ocr_printed_amount != null) ? e.ocr_printed_amount : (e.ocr_amount || '');
+  $('eHand').value = (e.ocr_handwritten_amount != null) ? e.ocr_handwritten_amount : '';
+  // Reset edit mode
+  exitPanelEdit();
+
   const img = $('dImage');
   if(e.file_id){
     let url = '/cardconv/receipts/image/' + e.file_id;
@@ -3524,6 +3752,43 @@ function closePanel(){
   $('panel').classList.remove('open');
   CUR_ID = null;
   CUR_FILE_ID = null;
+  exitPanelEdit();
+}
+
+function exitPanelEdit(){
+  ['dDate','dMerchant','dPrinted','dHand'].forEach(function(id){
+    var s = $(id); var e = $(id.replace('d','e')); if(!s||!e) return;
+    s.style.display = ''; e.style.display = 'none';
+  });
+  var sr = $('dSaveRow'); if(sr) sr.style.display = 'none';
+  var eb = $('dEditBtn'); if(eb) eb.textContent = '✏️ Edit';
+}
+
+function togglePanelEdit(){
+  var editing = $('eDate').style.display !== 'none';
+  if(editing){ exitPanelEdit(); return; }
+  ['dDate','dMerchant','dPrinted','dHand'].forEach(function(id){
+    var s = $(id); var e = $(id.replace('d','e')); if(!s||!e) return;
+    s.style.display = 'none'; e.style.display = '';
+  });
+  var sr = $('dSaveRow'); if(sr) sr.style.display = 'block';
+  var eb = $('dEditBtn'); if(eb) eb.textContent = '✕ Cancel';
+}
+
+async function savePanelEdit(){
+  if(!CUR_ID) return;
+  var body = new URLSearchParams({
+    ocr_date:                 $('eDate').value,
+    ocr_merchant:             $('eMerchant').value,
+    ocr_amount:               $('ePrinted').value,
+    ocr_handwritten_amount:   $('eHand').value,
+  });
+  var r = await fetch('/cardconv/ledger/' + CUR_ID + '/update', {method:'POST', body});
+  var d = await r.json();
+  if(!d.ok){ alert('Save failed: '+(d.error||r.status)); return; }
+  exitPanelEdit();
+  load();
+  closePanel();
 }
 
 async function setStatus(status){
