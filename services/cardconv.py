@@ -2356,7 +2356,11 @@ function parseCsvSuggest(text) {{
     const name = (cells[col] || '').trim().toUpperCase();
     if (name && !existingNames.has(name)) counts[name] = (counts[name] || 0) + 1;
   }});
-  const top = Object.entries(counts).sort((a,b) => b[1]-a[1]).slice(0,5).map(e => e[0]);
+  const PRIORITY = ['EUISUN', 'DAE KIM', 'CHRIS CHO'];
+  const sorted = Object.entries(counts).sort((a,b) => b[1]-a[1]).map(e => e[0]);
+  const priority = sorted.filter(n => PRIORITY.some(p => n.includes(p)));
+  const rest = sorted.filter(n => !PRIORITY.some(p => n.includes(p)));
+  const top = [...priority, ...rest].slice(0, 10);
   if (!top.length) return;
   const chips = document.getElementById('nameChips');
   chips.innerHTML = top.map(n =>
