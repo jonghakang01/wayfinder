@@ -33,6 +33,8 @@ check "Ledger API (auth required)" "$BASE/cardconv/ledger/api" "302"
 check "Ledger PDF (auth required)" "$BASE/cardconv/ledger/download.pdf" "302"
 check "Convert (auth required)"   "$BASE/cardconv/convert" "302"
 check "Review (auth required)"    "$BASE/cardconv/review"  "302"
+check "Review DL (auth required)" "$BASE/cardconv/review/download" "302"
+check "History (auth required)"   "$BASE/cardconv/history" "302"
 check "Keywords (auth required)"  "$BASE/cardconv/keywords" "302"
 
 echo ""

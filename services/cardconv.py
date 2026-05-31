@@ -1378,10 +1378,14 @@ def handle(method, path, body, ctx=None):
         return ("html", _render_convert(user))
     if method == "GET" and path == "/cardconv/review":
         return ("html", _render_review(user))
+    if method == "GET" and path == "/cardconv/history":
+        return ("html", _render_history(user))
     if method == "GET" and path == "/cardconv/keywords":
         return ("html", _render_keywords(user))
     if method == "POST" and path == "/cardconv/review/reason":
         return _handle_review_reason(user, body)
+    if method == "GET" and path == "/cardconv/review/download":
+        return _handle_review_download(user, body)  # GET passes query dict as body
 
     # Ledger
     if method == "GET" and path == "/cardconv/ledger":
@@ -1858,13 +1862,14 @@ _CC_TAB_CSS = (
 
 
 def _tab_bar(active: str, user: str) -> str:
-    """Shared Card Converter tab bar. active ∈ ledger|convert|review|keywords."""
+    """Shared Card Converter tab bar. active ∈ ledger|convert|review|history|keywords."""
     unmatched_n = _ledger_stats(_ledger_entries(user))["unmatched"]
     badge = f'<span class="tab-badge">{unmatched_n}</span>' if unmatched_n else ''
     tabs = [
         ("ledger",   "/cardconv/ledger",   "Receipt Ledger" + badge),
         ("convert",  "/cardconv/convert",  "Convert"),
         ("review",   "/cardconv/review",   "Review"),
+        ("history",  "/cardconv/history",  "History"),
         ("keywords", "/cardconv/keywords", "Keywords"),
     ]
     out = ['<div class="cc-tabs">']
@@ -1972,22 +1977,6 @@ if(rcptZone){
 
 def _render_convert(user: str) -> str:
     from server import CSS_VER
-    hist = _load_hist()
-    hist_rows = ""
-    for h in hist:
-        unm = (f'<span style="font-size:.72rem;color:var(--warn)">{h["unmatched"]} unmatched</span>'
-               if h.get("unmatched") else "")
-        hist_rows += (
-            f'<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)">'
-            f'<span style="font-size:.8rem;color:var(--text-muted);min-width:130px">{h["date"]}</span>'
-            f'<span style="flex:1;font-size:.85rem;color:var(--text);font-weight:600">{h["filename"]}</span>'
-            f'<span style="font-size:.78rem;color:var(--success)">{h["rows"]} rows</span>'
-            f'{unm}'
-            f'<a href="/cardconv/download/{h["filename"]}" class="btn btn-ghost btn-sm">⬇ Download</a>'
-            f'</div>')
-    if not hist_rows:
-        hist_rows = '<div style="color:var(--text-muted);font-size:.85rem;padding:16px 0">No conversions yet</div>'
-
     uploads = _load_uploads(user)
     up_rows = ""
     for u in uploads:
@@ -2080,15 +2069,6 @@ def _render_convert(user: str) -> str:
       {up_rows}
     </div>
   </div>
-
-  <div class="notepad-card" style="margin-bottom:20px">
-    <div class="notepad-header">
-      <span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--slate-400)">Recent Conversions</span>
-    </div>
-    <div class="notepad-body" style="padding:8px 16px 12px">
-      {hist_rows}
-    </div>
-  </div>
 </div>
 <script>
 const csvZone = document.getElementById('dropZone');
@@ -2105,6 +2085,52 @@ csvZone.addEventListener('drop', e => {{
   if(f){{ document.getElementById('csvFile').files = e.dataTransfer.files; csvName.textContent=f.name; csvInfo.style.display='flex'; csvZone.style.display='none'; }}
 }});
 </script>
+</body></html>'''
+
+
+# ── History page (Recent Conversions, moved off Convert) ─────────────────────────
+
+def _render_history(user: str) -> str:
+    from server import CSS_VER
+    hist = _load_hist()
+    hist_rows = ""
+    for h in hist:
+        unm = (f'<span style="font-size:.72rem;color:var(--warn)">{h["unmatched"]} unmatched</span>'
+               if h.get("unmatched") else "")
+        hist_rows += (
+            f'<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)">'
+            f'<span style="font-size:.8rem;color:var(--text-muted);min-width:130px">{h["date"]}</span>'
+            f'<span style="flex:1;font-size:.85rem;color:var(--text);font-weight:600">{h["filename"]}</span>'
+            f'<span style="font-size:.78rem;color:var(--success)">{h["rows"]} rows</span>'
+            f'{unm}'
+            f'<a href="/cardconv/download/{h["filename"]}" class="btn btn-ghost btn-sm">⬇ Download</a>'
+            f'</div>')
+    if not hist_rows:
+        hist_rows = '<div style="color:var(--text-muted);font-size:.85rem;padding:16px 0">No conversions yet</div>'
+
+    return f'''<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>🕘 History · Wayfinder</title>
+<link rel="stylesheet" href="/static/style.css?v={CSS_VER}">
+<style>{_CC_TAB_CSS}</style>
+</head><body>
+<nav>
+  <span class="nav-brand">💳 Card Converter</span>
+  <span class="nav-user">👤 {user} &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
+</nav>
+<div class="container" style="max-width:860px">
+  {_tab_bar("history", user)}
+
+  <div class="notepad-card" style="margin-bottom:20px">
+    <div class="notepad-header">
+      <span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--slate-400)">Recent Conversions</span>
+    </div>
+    <div class="notepad-body" style="padding:8px 16px 12px">
+      {hist_rows}
+    </div>
+  </div>
+</div>
 </body></html>'''
 
 
@@ -2208,6 +2234,53 @@ def _handle_review_reason(username: str, body: dict):
     return ("json", {"error": "not found"}, 404)
 
 
+def _handle_review_download(username: str, query: dict):
+    """GET /cardconv/review/download — staged xlsx filtered to a date range.
+
+    from/to are 'YYYY-MM-DD' query params. Rows are filtered by their invoice
+    date (column 5). Rows without an invoice date are always kept, matching the
+    Ledger/Review filter convention. No range → full file.
+    """
+    review = _load_review(username)
+    out_fn = review.get("out_filename") or ""
+    src    = OUT_DIR / out_fn
+    if not out_fn or not src.exists():
+        return ("html", "<h2 style='padding:40px'>No staged conversion to download.</h2>", 404)
+
+    dfrom = (query.get("from", [""]) or [""])[0]
+    dto   = (query.get("to", [""]) or [""])[0]
+    if not dfrom and not dto:
+        # Unfiltered — serve the original file untouched.
+        return ("file", str(src),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", out_fn)
+
+    wb = openpyxl.load_workbook(src)
+    ws = wb["sheetMst"]
+
+    def _row_date_str(v):
+        if isinstance(v, datetime):
+            return v.strftime("%Y-%m-%d")
+        if isinstance(v, date):
+            return v.strftime("%Y-%m-%d")
+        return str(v)[:10] if v else ""
+
+    drop = []
+    r = 2
+    while ws.cell(r, 1).value is not None:
+        d = _row_date_str(ws.cell(r, 5).value)
+        keep = (not d) or ((not dfrom or d >= dfrom) and (not dto or d <= dto))
+        if not keep:
+            drop.append(r)
+        r += 1
+    for idx in reversed(drop):
+        ws.delete_rows(idx, 1)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return ("file_inline", buf.getvalue(),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", out_fn)
+
+
 def _esc(s) -> str:
     return (str(s).replace("&", "&amp;").replace("<", "&lt;")
             .replace(">", "&gt;").replace('"', "&quot;")) if s is not None else ""
@@ -2274,10 +2347,13 @@ def _render_review(user: str) -> str:
                       f'placeholder="영수증 분실 사유 입력...">{_esc(r.get("loss_reason"))}</textarea>'
                     '</div>')
             item_cls = 'rv-item' + ('' if is_matched else ' unmatched')
-            items.append(f'<div class="{item_cls}">{txn}{receipt_block}</div>')
+            row_date = _esc(r.get("date")) or ""
+            items.append(
+                f'<div class="{item_cls}" data-date="{row_date}" '
+                f'data-matched="{"1" if is_matched else "0"}">{txn}{receipt_block}</div>')
         body_html = "".join(items)
 
-    download_btn = (f'<a href="/cardconv/download/{out_fn}" class="btn btn-primary">⬇ Download xlsx</a>'
+    download_btn = ('<button id="rvDownload" class="btn btn-primary">⬇ Download xlsx</button>'
                     if out_fn else '')
     meta_line = f'{_esc(source)} &nbsp;·&nbsp; {gen_at}' if source else 'No conversion staged'
 
@@ -2291,6 +2367,15 @@ def _render_review(user: str) -> str:
 .stat-card{{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md);padding:16px 20px;text-align:center}}
 .stat-value{{font-size:1.6rem;font-weight:700;color:var(--text);line-height:1.2}}
 .stat-label{{font-size:.73rem;color:var(--text-muted);margin-top:4px;text-transform:uppercase;letter-spacing:.06em}}
+.filter-bar{{display:flex;align-items:center;gap:10px;padding:10px 16px;background:var(--surface-2);
+  border:1px solid var(--border);border-radius:var(--radius-md);margin-bottom:14px;flex-wrap:wrap}}
+.filter-bar input[type=date]{{background:var(--surface);border:1px solid var(--border);
+  border-radius:6px;color:var(--text);font-size:.82rem;padding:5px 8px;outline:none}}
+.filter-bar input[type=date]:focus{{border-color:var(--accent)}}
+.preset-btn{{background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);
+  font-size:.76rem;padding:4px 9px;cursor:pointer}}
+.preset-btn:hover{{border-color:var(--accent)}}
+.preset-btn.active{{background:rgba(250,204,21,.18);border-color:#facc15;color:#b45309;font-weight:700}}
 .rv-list{{display:flex;flex-direction:column;gap:10px}}
 .rv-item{{display:flex;gap:14px;align-items:stretch;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md);padding:12px 14px}}
 .rv-item.unmatched{{border-color:rgba(239,68,68,.35);background:rgba(239,68,68,.06)}}
@@ -2328,9 +2413,23 @@ def _render_review(user: str) -> str:
   <div style="font-size:.8rem;color:var(--text-muted);margin-bottom:12px">{meta_line}</div>
 
   <div class="stat-grid">
-    <div class="stat-card"><div class="stat-value">{total}</div><div class="stat-label">Total</div></div>
-    <div class="stat-card"><div class="stat-value" style="color:#22c55e">{matched}</div><div class="stat-label">Matched</div></div>
-    <div class="stat-card"><div class="stat-value" style="color:#ef4444">{unmatched}</div><div class="stat-label">Unmatched</div></div>
+    <div class="stat-card"><div class="stat-value" id="rvTotal">{total}</div><div class="stat-label">Total</div></div>
+    <div class="stat-card"><div class="stat-value" id="rvMatched" style="color:#22c55e">{matched}</div><div class="stat-label">Matched</div></div>
+    <div class="stat-card"><div class="stat-value" id="rvUnmatched" style="color:#ef4444">{unmatched}</div><div class="stat-label">Unmatched</div></div>
+  </div>
+
+  <div class="filter-bar">
+    📅 <input type="date" id="rvFrom"> ~ <input type="date" id="rvTo">
+    <button class="btn btn-ghost btn-sm" id="rvReset">Reset</button>
+  </div>
+
+  <div class="filter-bar" style="gap:8px">
+    <span style="font-size:.76rem;color:var(--text-muted)">Quick range:</span>
+    <button class="preset-btn" data-preset="month">This month</button>
+    <button class="preset-btn" data-preset="30d">Last 30 days</button>
+    <button class="preset-btn" data-preset="3m">Last 3 months</button>
+    <button class="preset-btn" data-preset="ytd">YTD</button>
+    <button class="preset-btn" data-preset="all">All time</button>
   </div>
 
   <div class="notepad-card">
@@ -2356,6 +2455,63 @@ document.querySelectorAll('.reason-input').forEach(t => {{
     }});
   }});
 }});
+
+// ── Date filter + presets (mirrors the Ledger page) ──────────────────────────
+const $ = id => document.getElementById(id);
+function iso(d){{ return d.toISOString().slice(0,10); }}
+
+// Date filters keep rows without an invoice date always visible, matching Ledger.
+function applyFilter(){{
+  const from = $('rvFrom').value, to = $('rvTo').value;
+  let total=0, matched=0, unmatched=0;
+  document.querySelectorAll('.rv-item').forEach(it => {{
+    const d = it.dataset.date || '';
+    const show = (!from || !d || d >= from) && (!to || !d || d <= to);
+    it.style.display = show ? '' : 'none';
+    if(show){{
+      total++;
+      if(it.dataset.matched === '1') matched++; else unmatched++;
+    }}
+  }});
+  $('rvTotal').textContent = total;
+  $('rvMatched').textContent = matched;
+  $('rvUnmatched').textContent = unmatched;
+}}
+
+function applyPreset(p){{
+  const now = new Date();
+  let from = '', to = iso(now);
+  if(p==='month')    from = iso(new Date(now.getFullYear(), now.getMonth(), 1));
+  else if(p==='30d') from = iso(new Date(now.getTime() - 29*86400000));
+  else if(p==='3m')  from = iso(new Date(now.getFullYear(), now.getMonth()-3, now.getDate()));
+  else if(p==='ytd') from = iso(new Date(now.getFullYear(), 0, 1));
+  else if(p==='all'){{ from = ''; to = ''; }}
+  $('rvFrom').value = from;
+  $('rvTo').value = to;
+  document.querySelectorAll('.preset-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.preset === p));
+  applyFilter();
+}}
+
+$('rvFrom').addEventListener('change', () => {{ clearPresetActive(); applyFilter(); }});
+$('rvTo').addEventListener('change', () => {{ clearPresetActive(); applyFilter(); }});
+$('rvReset').addEventListener('click', () => {{
+  $('rvFrom').value = ''; $('rvTo').value = ''; clearPresetActive(); applyFilter();
+}});
+function clearPresetActive(){{ document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active')); }}
+document.querySelectorAll('.preset-btn').forEach(b =>
+  b.addEventListener('click', () => applyPreset(b.dataset.preset)));
+
+// Filtered xlsx download — only the currently filtered transactions are included.
+const rvDl = $('rvDownload');
+if(rvDl){{
+  rvDl.addEventListener('click', () => {{
+    const p = new URLSearchParams();
+    if($('rvFrom').value) p.set('from', $('rvFrom').value);
+    if($('rvTo').value)   p.set('to', $('rvTo').value);
+    window.location = '/cardconv/review/download?' + p.toString();
+  }});
+}}
 </script>
 </body></html>'''
 
