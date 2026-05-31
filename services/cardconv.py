@@ -2298,12 +2298,14 @@ def _render_convert(user: str) -> str:
     </div>
     <div class="notepad-body" style="padding:20px">
       <form id="upForm" method="POST" action="/cardconv/upload" enctype="multipart/form-data">
-        <div class="upload-zone" id="dropZone" onclick="document.getElementById('csvFile').click()">
-          <div style="font-size:2rem;margin-bottom:8px">📎</div>
-          <div style="font-weight:700;color:var(--text);margin-bottom:4px">Drop Posted_*.csv here</div>
-          <div style="font-size:.8rem;color:var(--text-muted)">or click to browse</div>
-          <input type="file" id="csvFile" name="file" accept=".csv" onchange="handleCsvFile(this)">
-        </div>
+        <label for="csvFile" style="display:block;cursor:pointer">
+          <div class="upload-zone" id="dropZone">
+            <div style="font-size:2rem;margin-bottom:8px">📎</div>
+            <div style="font-weight:700;color:var(--text);margin-bottom:4px">Drop Posted_*.csv here</div>
+            <div style="font-size:.8rem;color:var(--text-muted)">or click to browse</div>
+          </div>
+        </label>
+        <input type="file" id="csvFile" name="file" accept=".csv" onchange="handleCsvFile(this)" style="display:none">
         <div id="fileInfo" style="display:none;margin-top:12px;padding:12px 16px;background:var(--surface-2);border-radius:var(--radius-md);align-items:center;gap:12px">
           <span style="font-size:1.2rem">📄</span>
           <span id="fileName" style="flex:1;font-size:.85rem;font-weight:600;color:var(--text)"></span>
@@ -2374,7 +2376,7 @@ function handleCsvFile(input) {{
   if (!input.files[0]) return;
   csvName.textContent = input.files[0].name;
   csvInfo.style.display = 'flex';
-  csvZone.style.display = 'none';
+  csvZone.closest('label').style.display = 'none';
   const reader = new FileReader();
   reader.onload = e => parseCsvSuggest(e.target.result);
   reader.readAsText(input.files[0]);
@@ -2388,7 +2390,7 @@ csvZone.addEventListener('drop', e => {{
     document.getElementById('csvFile').files = e.dataTransfer.files;
     csvName.textContent = f.name;
     csvInfo.style.display = 'flex';
-    csvZone.style.display = 'none';
+    csvZone.closest('label').style.display = 'none';
     const reader = new FileReader();
     reader.onload = e2 => parseCsvSuggest(e2.target.result);
     reader.readAsText(f);
