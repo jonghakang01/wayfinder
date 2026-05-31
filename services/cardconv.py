@@ -1486,16 +1486,42 @@ def _handle_ledger_pdf(username: str, query: dict):
     def cell_inner_w(span: int) -> float:
         return CELL_W * span + GAP * (span - 1)
 
+    def _best_orientation(jpeg: bytes, dim: tuple, cell_w: float, cell_h: float):
+        """Return (jpeg, dim) rotated 90° if that gives significantly better cell coverage."""
+        from PIL import Image as _PILImg
+        def coverage(iw, ih, cw, ch):
+            dw = cw
+            dh = dw * ih / iw
+            if dh > ch:
+                dh, dw = ch, ch * iw / ih
+            return dw * dh
+        normal  = coverage(dim[0], dim[1], cell_w, cell_h)
+        rotated = coverage(dim[1], dim[0], cell_w, cell_h)
+        if rotated > normal * 1.15:          # rotate if ≥15% better fill
+            img = _PILImg.open(io.BytesIO(jpeg)).rotate(90, expand=True)
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=82, optimize=True)
+            return buf.getvalue(), img.size
+        return jpeg, dim
+
     # ── Pre-fetch + compress images ──
     img_cache: dict = {}
     for fid, elist in groups:
         if not fid:
             img_cache[fid] = None
             continue
-        span    = min(len(elist), N_COLS)
-        max_px  = max(500, int(cell_inner_w(span) * 5))   # ~280px per col at 5px/mm
-        raw     = _fetch_drive_image(service, fid) or b""
-        img_cache[fid] = _compress_receipt_image(raw, max_w=max_px, quality=82)
+        span   = min(len(elist), N_COLS)
+        cw     = cell_inner_w(span) - 2 * PAD
+        ch     = ROW_H_CONT - 2 * PAD
+        max_px = max(500, int(cell_inner_w(span) * 5))
+        raw    = _fetch_drive_image(service, fid) or b""
+        comp   = _compress_receipt_image(raw, max_w=max_px, quality=82)
+        if comp:
+            jpeg, dim = comp
+            jpeg, dim = _best_orientation(jpeg, dim, cw, ch)
+            img_cache[fid] = (jpeg, dim)
+        else:
+            img_cache[fid] = None
 
     # ── Pack groups into grid rows ──
     grid_rows: list = []
@@ -1539,8 +1565,9 @@ def _handle_ledger_pdf(username: str, query: dict):
     first_page  = True
     row_in_page = 0   # which row on the current page (0 or 1)
     y           = 0.0
+    n_rows      = len(grid_rows)
 
-    for row in grid_rows:
+    for row_idx, row in enumerate(grid_rows):
         # Start a new page when both rows are filled
         if row_in_page == 0:
             pdf.add_page()
@@ -1548,7 +1575,15 @@ def _handle_ledger_pdf(username: str, query: dict):
             y = MRG + (HDR_H if first_page else 0)
             first_page = False
 
-        cur_row_h = ROW_H if (row_in_page == 0 and pdf.page == 1) else ROW_H_CONT
+        # Determine row height: if this is the only row on this page (last item or
+        # next item would start a new page), expand to full usable height.
+        is_only_row_on_page = (row_in_page == 0 and (row_idx == n_rows - 1))
+        if is_only_row_on_page:
+            cur_row_h = PAGE_H - (HDR_H if pdf.page == 1 else 0) - 2 * MRG
+        elif row_in_page == 0 and pdf.page == 1:
+            cur_row_h = ROW_H
+        else:
+            cur_row_h = ROW_H_CONT
 
         x = MRG
         for fid, elist, span in row:
@@ -3504,7 +3539,8 @@ function rowHtml(e, i, opts){
   const actionCell = (e.match_status==='matched')
     ? '<td><button class="btn btn-ghost btn-sm act-undo" data-id="' + e.id +
       '" style="color:#f59e0b;padding:2px 8px" title="Undo match — reset to pending">↩ Undo</button></td>'
-    : '<td></td>';
+    : '<td><button class="btn btn-ghost btn-sm act-rerun" data-id="' + e.id +
+      '" style="color:#818cf8;padding:2px 8px" title="Re-run OCR for this entry">🔄 Re-run</button></td>';
   // Duplicate group: non-keeper rows are pre-checked for quick cleanup.
   const preCheck = (e.dup && !e.dup_keep) ? ' checked' : '';
   const checkCell = '<td><input type="checkbox" class="row-check sel" data-id="' +
@@ -3591,6 +3627,8 @@ function rerender(){
       tr.addEventListener('click', () => openPanel(ENTRIES[+tr.dataset.i])));
     body.querySelectorAll('.act-undo').forEach(b =>
       b.addEventListener('click', ev => { ev.stopPropagation(); unmatchRow(b.dataset.id); }));
+    body.querySelectorAll('.act-rerun').forEach(b =>
+      b.addEventListener('click', ev => { ev.stopPropagation(); quickReOCR(b.dataset.id, b); }));
     body.querySelectorAll('.sel').forEach(c =>
       c.addEventListener('click', ev => ev.stopPropagation()));
     body.querySelectorAll('.sel').forEach(c =>
@@ -3800,6 +3838,21 @@ async function reOCR(){
     btn.disabled = false;
     btn.textContent = '🔄 Re-OCR';
   }
+}
+
+// Quick Re-OCR from table row button (no panel needed).
+async function quickReOCR(id, btn){
+  if(!id) return;
+  btn.disabled = true; btn.textContent = '⏳';
+  try {
+    const r = await fetch('/cardconv/ledger/' + id + '/reocr', {method:'POST'});
+    const d = await r.json();
+    if(!r.ok || d.error){ btn.textContent = '❌'; setTimeout(()=>{ btn.disabled=false; btn.textContent='🔄 Re-run'; }, 2000); return; }
+    if(Array.isArray(d.updated)){
+      d.updated.forEach(u => { const idx = ENTRIES.findIndex(e => e.id===u.id); if(idx>=0) ENTRIES[idx]=u; else ENTRIES.push(u); });
+    }
+    load();
+  } catch(e) { btn.disabled=false; btn.textContent='🔄 Re-run'; }
 }
 
 // Undo Match from the ledger table — reset row to pending_match.
