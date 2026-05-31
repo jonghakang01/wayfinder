@@ -166,6 +166,8 @@ def _migrate_entry(e: dict) -> dict:
     # v2.1: handwritten-priority OCR. Legacy entries keep ocr_amount as printed total.
     e.setdefault("ocr_printed_amount", e.get("ocr_amount"))
     e.setdefault("ocr_handwritten_amount", None)
+    # v2.2: multi-receipt bounding box overlay. Legacy entries have no bbox.
+    e.setdefault("ocr_bbox", None)
     if "match_status" not in e:
         if e.get("matched"):
             e["match_status"] = "matched"
@@ -467,8 +469,12 @@ _OCR_PROMPT = (
     '4) handwritten_amount: any HAND-WRITTEN final amount including tip (number only, '
     'null if none visible). '
     'Handwritten amount, when present, is the REAL final amount and overrides printed. '
+    'For each receipt, ALSO return its bounding box in the image as bbox: '
+    '[ymin, xmin, ymax, xmax] using a 0-1000 normalized coordinate system '
+    '(0=top/left, 1000=bottom/right). '
     'Return a JSON ARRAY ONLY, one object per receipt: '
-    '[{"date":"YYYY-MM-DD","merchant":"name","printed_amount":0.00,"handwritten_amount":null}]. '
+    '[{"date":"YYYY-MM-DD","merchant":"name","printed_amount":0.00,"handwritten_amount":null,'
+    '"bbox":[100,50,800,950]}]. '
     'If only one receipt is visible, return an array with a single element.'
 )
 
@@ -499,7 +505,25 @@ def _normalize_ocr(result: dict) -> dict:
     result["handwritten_amount"] = handwritten
     # Handwritten (tip-inclusive) total wins; fall back to printed.
     result["amount"] = handwritten if handwritten is not None else printed
+    # bbox: [ymin, xmin, ymax, xmax] in 0-1000 normalized coords (None if absent/invalid).
+    result["bbox"] = _coerce_bbox(result.get("bbox"))
     return result
+
+
+def _coerce_bbox(v):
+    """Validate a model bbox into [ymin, xmin, ymax, xmax] ints, or None."""
+    if not isinstance(v, (list, tuple)) or len(v) != 4:
+        return None
+    try:
+        box = [int(round(float(x))) for x in v]
+    except (ValueError, TypeError):
+        return None
+    # Clamp to the 0-1000 normalized range and require a positive area.
+    box = [max(0, min(1000, c)) for c in box]
+    ymin, xmin, ymax, xmax = box
+    if ymax <= ymin or xmax <= xmin:
+        return None
+    return box
 
 
 def _extract_ocr_list(text: str) -> list:
@@ -634,6 +658,7 @@ def _ocr_entry_fields(ocr: dict) -> dict:
         "ocr_handwritten_amount": ocr.get("handwritten_amount"),
         "ocr_merchant":           ocr.get("merchant"),
         "ocr_model":              ocr.get("_model"),
+        "ocr_bbox":               ocr.get("bbox"),
     }
 
 
@@ -2585,6 +2610,9 @@ __TABCSS__
 .detail-row .val{font-weight:600;color:var(--text)}
 .receipt-image-full{width:100%;border-radius:var(--radius-md);border:1px solid var(--border);
   object-fit:contain;max-height:320px;background:var(--surface-2)}
+.receipt-image-wrap{position:relative;line-height:0}
+/* SVG is sized/positioned in JS to overlap the rendered (object-fit:contain) image rect. */
+.receipt-bbox-overlay{position:absolute;top:0;left:0;pointer-events:none;display:none}
 .detail-actions{padding:16px 20px;display:flex;flex-direction:column;gap:8px;margin-top:auto}
 .pagination{display:flex;align-items:center;justify-content:center;gap:12px;padding:14px;font-size:.82rem;color:var(--text-muted)}
 .pagination button{background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);
@@ -2662,7 +2690,10 @@ __TABCSS__
   </div>
   <div class="detail-section">
     <div class="detail-section-title">Receipt Image</div>
-    <img class="receipt-image-full" id="dImage" alt="receipt">
+    <div class="receipt-image-wrap" id="dImageWrap">
+      <img class="receipt-image-full" id="dImage" alt="receipt">
+      <svg class="receipt-bbox-overlay" id="dBboxOverlay"></svg>
+    </div>
   </div>
   <div class="detail-section">
     <div class="detail-section-title">OCR Result</div>
@@ -2869,6 +2900,51 @@ async function load(){
   window._pages = d.pages;
 }
 
+function escSvg(s){
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// Draw bbox rectangles for every receipt sharing this entry's source image.
+// ocr_bbox is [ymin,xmin,ymax,xmax] in a 0-1000 normalized coord system.
+function drawBoxes(cur){
+  const svg = $('dBboxOverlay'), img = $('dImage');
+  if(!svg || !img) return;
+  const sibs = (typeof ENTRIES!=='undefined'?ENTRIES:[]).filter(
+    x => x.file_id && cur.file_id && x.file_id===cur.file_id && Array.isArray(x.ocr_bbox));
+  const render = () => paintBoxes(svg, img, sibs, cur);
+  if(img.complete && img.naturalWidth) render();
+  // First paint may run before the image has dimensions; redraw on load.
+  img.onload = render;
+}
+
+function paintBoxes(svg, img, sibs, cur){
+  if(!sibs.length || !img.naturalWidth){ svg.innerHTML=''; svg.style.display='none'; return; }
+  // object-fit:contain → find the rendered image rect inside the <img> box.
+  const cW=img.clientWidth, cH=img.clientHeight, nW=img.naturalWidth, nH=img.naturalHeight;
+  const scale=Math.min(cW/nW, cH/nH);
+  const dW=nW*scale, dH=nH*scale;
+  svg.style.left=(img.offsetLeft+(cW-dW)/2)+'px';
+  svg.style.top =(img.offsetTop +(cH-dH)/2)+'px';
+  svg.style.width=dW+'px'; svg.style.height=dH+'px';
+  svg.setAttribute('viewBox','0 0 '+dW+' '+dH);
+  svg.style.display='block';
+  svg.innerHTML = sibs.map(function(x,i){
+    const b=x.ocr_bbox;                       // [ymin,xmin,ymax,xmax] 0-1000
+    const x0=b[1]/1000*dW, y0=b[0]/1000*dH, x1=b[3]/1000*dW, y1=b[2]/1000*dH;
+    const isCur=(x.id===cur.id);
+    const col=isCur?'#38bdf8':'#64748b';      // selected = bright, others = muted
+    const sw=isCur?2.5:1.5;
+    const n=(x.sub_index!=null?x.sub_index:i)+1;
+    const label=escSvg((x.ocr_merchant ? (n+'. '+x.ocr_merchant) : (''+n)).slice(0,22));
+    const ty=Math.max(y0+13, 13);
+    return '<rect x="'+x0.toFixed(1)+'" y="'+y0.toFixed(1)+'" width="'+(x1-x0).toFixed(1)+
+      '" height="'+(y1-y0).toFixed(1)+'" rx="4" fill="'+col+'" fill-opacity="'+(isCur?0.12:0.05)+
+      '" stroke="'+col+'" stroke-width="'+sw+'"/>'+
+      '<text x="'+(x0+4).toFixed(1)+'" y="'+ty.toFixed(1)+'" fill="'+col+'" font-size="11" '+
+      'font-weight="700" style="paint-order:stroke;stroke:rgba(2,6,23,.75);stroke-width:3px">'+
+      label+'</text>';
+  }).join('');
+}
 function openPanel(e){
   CUR_ID = e.id;
   CUR_FILE_ID = e.file_id || null;
@@ -2883,6 +2959,7 @@ function openPanel(e){
   const img = $('dImage');
   if(e.file_id){ img.src = '/cardconv/receipts/image/' + e.file_id; img.style.display='block'; }
   else { img.style.display='none'; }
+  drawBoxes(e);
   const mt = e.matched_transaction;
   $('dMatchSection').style.display = mt ? 'block' : 'none';
   if(mt){
