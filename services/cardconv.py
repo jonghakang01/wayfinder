@@ -3069,12 +3069,11 @@ function rvRenderMatchList(entries) {{
     var fid = e.file_id || '';
     var tn  = fid ? 'https://drive.google.com/thumbnail?id=' + fid + '&sz=w100' : '';
     var img = tn
-      ? '<img src="' + tn + '" style="width:52px;height:52px;object-fit:cover;border-radius:5px;border:1px solid var(--border);flex-shrink:0" onerror="this.style.display=\'none\'">'
+      ? '<img src="' + tn + '" style="width:52px;height:52px;object-fit:cover;border-radius:5px;border:1px solid var(--border);flex-shrink:0" onerror="this.style.visibility=\\x27hidden\\x27">'
       : '<div style="width:52px;height:52px;border-radius:5px;border:1px dashed var(--border);flex-shrink:0"></div>';
     var badge = e.match_status === 'pending_match' ? 'Pending' : 'Unmatched';
-    return '<div style="display:flex;gap:10px;align-items:center;padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .12s" '
-      + 'onmouseover="this.style.background=\'var(--surface-2)\'" onmouseout="this.style.background=\'\'" '
-      + 'onclick="rvDoMatch(\'' + e.id.replace(/'/g, '') + '\')">'
+    return '<div style="display:flex;gap:10px;align-items:center;padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer" '
+      + 'onclick="rvDoMatch(this)" data-rcpt="' + e.id.replace(/"/g, '') + '">'
       + img
       + '<div style="flex:1;min-width:0">'
       +   '<div style="font-size:.82rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + (e.ocr_merchant || '–') + '</div>'
@@ -3088,8 +3087,9 @@ function rvRenderMatchList(entries) {{
   }}).join('');
 }}
 
-function rvDoMatch(rcptId) {{
+function rvDoMatch(el) {{
   if (!_mmTxn) return;
+  var rcptId = el.dataset.rcpt;
   fetch('/cardconv/review/match', {{
     method: 'POST',
     headers: {{'Content-Type': 'application/x-www-form-urlencoded'}},
