@@ -1430,12 +1430,9 @@ def _fetch_drive_image(service, file_id: str):
 
 
 def _handle_ledger_pdf(username: str, query: dict):
-    """GET /cardconv/ledger/download.pdf — landscape grid PDF.
-
-    Layout: A4 landscape (297×210mm), 5 columns × 3 rows = 15 receipts/page.
-    Each cell: image fills most of the cell height; one compact info line below.
-    Multi-receipt source images span extra columns proportional to receipt count.
-    EXIF auto-rotation is applied by _compress_receipt_image.
+    """GET /cardconv/ledger/download.pdf — landscape A4, 5 cols × 2 rows = 10 per page.
+    Images only (no text), EXIF auto-rotated, maximally sized with minimal gaps.
+    Multi-receipt source images span extra columns.
     """
     from fpdf import FPDF
 
@@ -1446,9 +1443,11 @@ def _handle_ledger_pdf(username: str, query: dict):
     stats   = _ledger_stats(entries)
     service = _get_drive_service(username)
 
-    pdf = FPDF(orientation="L", unit="mm", format="A4")   # Landscape
+    pdf = FPDF(orientation="L", unit="mm", format="A4")
     pdf.set_auto_page_break(auto=False)
-    MRG = 8
+    MRG  = 5          # tight margins to maximise image area
+    GAP  = 1.0        # gap between cells
+    PAD  = 0.5        # inner padding within each cell
     pdf.set_margins(MRG, MRG, MRG)
 
     FONT, unicode_ok = "Helvetica", False
@@ -1463,20 +1462,9 @@ def _handle_ledger_pdf(username: str, query: dict):
         t = "" if t is None else str(t)
         return t if unicode_ok else t.encode("latin-1", "replace").decode("latin-1")
 
-    def money(a):
-        return "–" if a is None else "$%.2f" % a
-
-    def trunc(text, max_w_mm):
-        text = S(text or "")
-        if pdf.get_string_width(text) <= max_w_mm:
-            return text
-        while text and pdf.get_string_width(text + "…") > max_w_mm:
-            text = text[:-1]
-        return text + S("…")
-
-    # ── Group entries by file_id (multi-receipt images stay together) ──
-    seen: dict = {}
-    groups: list = []   # [(file_id, [entry, ...])]
+    # ── Group entries by file_id ──
+    seen: dict  = {}
+    groups: list = []
     for e in entries:
         fid = e.get("file_id") or ""
         if fid and fid in seen:
@@ -1485,55 +1473,33 @@ def _handle_ledger_pdf(username: str, query: dict):
             seen[fid] = len(groups)
             groups.append((fid, [e]))
 
-    # ── Grid constants (landscape A4: 297×210mm) ──
-    N_COLS   = 5
-    HDR_H    = 13.0   # header block at top of each page
-    GAP      = 2.0    # gap between cells
-    INFO_H   = 10.0   # text area below image (date+merchant+amount, 2 lines)
-    PAGE_W   = 297 - 2 * MRG   # 281mm usable width
-    PAGE_H   = 210 - 2 * MRG   # 194mm usable height
-    CELL_W   = (PAGE_W - GAP * (N_COLS - 1)) / N_COLS   # ≈54.6mm
-    # Rows: fit as many as possible, leaving space for header on first page.
-    # Row height = image area + INFO_H; aim for 3 rows comfortably.
-    N_ROWS_FIRST = 3
-    AVAIL_FIRST  = PAGE_H - HDR_H - GAP   # height after header
-    ROW_H        = (AVAIL_FIRST - GAP * (N_ROWS_FIRST - 1)) / N_ROWS_FIRST   # ≈57mm
-    IMG_H        = ROW_H - INFO_H         # ≈47mm image area
-    PAD          = 1.5
+    # ── Grid: 5 cols × 2 rows, images only ──
+    N_COLS = 5
+    N_ROWS = 2
+    HDR_H  = 9.0      # one-line header (first page only)
+    PAGE_W = 297 - 2 * MRG   # 287mm
+    PAGE_H = 210 - 2 * MRG   # 200mm
+    CELL_W = (PAGE_W - GAP * (N_COLS - 1)) / N_COLS    # ≈56.6mm
+    ROW_H  = (PAGE_H - HDR_H - GAP * (N_ROWS - 1)) / N_ROWS  # ≈94mm (first page)
+    ROW_H_CONT = (PAGE_H - GAP * (N_ROWS - 1)) / N_ROWS      # ≈99.5mm (no header)
 
-    def cell_inner_w(span):
+    def cell_inner_w(span: int) -> float:
         return CELL_W * span + GAP * (span - 1)
 
-    def draw_page_header():
-        pdf.set_font(FONT, "B", 11)
-        pdf.set_xy(MRG, MRG)
-        pdf.cell(0, 6, S("Receipt Ledger"), new_x="LMARGIN", new_y="NEXT")
-        pdf.set_font(FONT, "", 6.5)
-        pdf.set_text_color(110, 110, 110)
-        flabel = {"all": "All"}.get(status) or _PDF_STATUS_LABEL.get(status, status)
-        rng = f"{dfrom or '…'} ~ {dto or '…'}"
-        pdf.cell(0, 4, S(
-            f"User: {username}  ·  Filter: {flabel}  ·  {rng}  ·  "
-            f"Total {stats['total']}  Matched {stats['matched']}  "
-            f"Unmatched {stats['unmatched']}  Pending {stats['pending_match']}"
-        ), new_x="LMARGIN", new_y="NEXT")
-        pdf.set_text_color(0, 0, 0)
-        pdf.ln(1)
-
-    # ── Pre-fetch + cache images (one per file_id) ──
+    # ── Pre-fetch + compress images ──
     img_cache: dict = {}
     for fid, elist in groups:
         if not fid:
             img_cache[fid] = None
             continue
-        span = min(len(elist), N_COLS)
-        max_px = max(400, int(cell_inner_w(span) * 3.78 * 1.5))
-        raw = _fetch_drive_image(service, fid) or b""
-        img_cache[fid] = _compress_receipt_image(raw, max_w=max_px, quality=75)
+        span    = min(len(elist), N_COLS)
+        max_px  = max(500, int(cell_inner_w(span) * 5))   # ~280px per col at 5px/mm
+        raw     = _fetch_drive_image(service, fid) or b""
+        img_cache[fid] = _compress_receipt_image(raw, max_w=max_px, quality=82)
 
     # ── Pack groups into grid rows ──
     grid_rows: list = []
-    cur_row: list   = []
+    cur_row:   list = []
     col = 0
     for fid, elist in groups:
         span = min(len(elist), N_COLS)
@@ -1547,40 +1513,58 @@ def _handle_ledger_pdf(username: str, query: dict):
 
     if not grid_rows:
         pdf.add_page()
-        draw_page_header()
         pdf.set_font(FONT, "", 10)
-        pdf.cell(0, 10, S("No receipts for the selected filter."), new_x="LMARGIN", new_y="NEXT")
+        pdf.set_xy(MRG, MRG)
+        pdf.cell(0, 10, S("No receipts for the selected filter."))
         out = pdf.output()
-        fname = f"receipts_{username}_{date.today().isoformat()}.pdf"
-        return ("binary", bytes(out), "application/pdf", fname)
+        return ("binary", bytes(out), "application/pdf",
+                f"receipts_{username}_{date.today().isoformat()}.pdf")
 
-    # ── Draw pages ──
-    pdf.add_page()
-    draw_page_header()
-    y = MRG + HDR_H
+    # ── Draw ──
+    def draw_header(first: bool):
+        if not first:
+            return
+        pdf.set_font(FONT, "", 7)
+        pdf.set_text_color(130, 130, 130)
+        pdf.set_xy(MRG, MRG)
+        flabel = {"all": "All"}.get(status) or _PDF_STATUS_LABEL.get(status, status)
+        rng = f"{dfrom or '…'} ~ {dto or '…'}"
+        pdf.cell(0, HDR_H - 1, S(
+            f"Receipt Ledger  ·  {username}  ·  {flabel}  ·  {rng}  ·  "
+            f"Total {stats['total']}  Matched {stats['matched']}  "
+            f"Unmatched {stats['unmatched']}  Pending {stats['pending_match']}"
+        ))
+        pdf.set_text_color(0, 0, 0)
 
-    for row_idx, row in enumerate(grid_rows):
-        # Page break: check if row fits
-        if y + ROW_H > MRG + PAGE_H - 1:
+    first_page  = True
+    row_in_page = 0   # which row on the current page (0 or 1)
+    y           = 0.0
+
+    for row in grid_rows:
+        # Start a new page when both rows are filled
+        if row_in_page == 0:
             pdf.add_page()
-            y = MRG   # no header repeat on continuation pages to maximise space
+            draw_header(first_page)
+            y = MRG + (HDR_H if first_page else 0)
+            first_page = False
+
+        cur_row_h = ROW_H if (row_in_page == 0 and pdf.page == 1) else ROW_H_CONT
 
         x = MRG
         for fid, elist, span in row:
             iw = cell_inner_w(span)
 
-            # Cell border + subtle bg
-            pdf.set_fill_color(252, 252, 253)
-            pdf.set_draw_color(210, 210, 210)
-            pdf.set_line_width(0.18)
-            pdf.rect(x, y, iw, ROW_H, style="FD")
+            # Thin border
+            pdf.set_draw_color(200, 200, 200)
+            pdf.set_line_width(0.15)
+            pdf.rect(x, y, iw, cur_row_h)
 
-            # Image
+            # Image — fill the cell as fully as possible
             comp = img_cache.get(fid)
             if comp:
                 jpeg, dim = comp
                 avail_w = iw - 2 * PAD
-                avail_h = IMG_H - PAD
+                avail_h = cur_row_h - 2 * PAD
                 dw = avail_w
                 dh = dw * dim[1] / dim[0]
                 if dh > avail_h:
@@ -1588,49 +1572,25 @@ def _handle_ledger_pdf(username: str, query: dict):
                 try:
                     pdf.image(io.BytesIO(jpeg),
                               x=x + (iw - dw) / 2,
-                              y=y + PAD + (avail_h - dh) / 2,
+                              y=y + (cur_row_h - dh) / 2,
                               w=dw, h=dh)
                 except Exception:
                     pass
             else:
                 pdf.set_xy(x, y)
-                pdf.set_font(FONT, "", 5.5)
+                pdf.set_font(FONT, "", 6)
                 pdf.set_text_color(180, 180, 180)
-                pdf.cell(iw, IMG_H, S("no image"), align="C")
+                pdf.cell(iw, cur_row_h, S("no image"), align="C")
+                pdf.set_text_color(0, 0, 0)
 
-            # Separator
-            sep_y = y + IMG_H + PAD * 0.5
-            pdf.set_draw_color(225, 225, 225)
-            pdf.line(x + PAD, sep_y, x + iw - PAD, sep_y)
-
-            # Info lines (up to 2: one per receipt, merged if single)
-            ty = sep_y + 1.5
-            for i, e in enumerate(elist):
-                if ty + 4.5 > y + ROW_H - 0.5:
-                    break
-                prefix  = f"#{i+1} " if len(elist) > 1 else ""
-                dt      = e.get("ocr_date") or "–"
-                merch   = e.get("ocr_merchant") or "–"
-                final   = e.get("ocr_final_amount") or e.get("ocr_amount")
-                amt     = money(final)
-                st      = e.get("match_status", "")
-                st_c    = _PDF_STATUS_COLOR.get(st, (60, 60, 60))
-                pdf.set_font(FONT, "", 6.5)
-                max_merch = iw - 2 * PAD - 28
-                line = S(f"{prefix}{dt}  {trunc(merch, max_merch)}  {amt}")
-                pdf.set_xy(x + PAD, ty)
-                pdf.set_text_color(*st_c)
-                pdf.cell(iw - 2 * PAD, 4.5, line)
-                ty += 4.8
-
-            pdf.set_text_color(0, 0, 0)
             x += iw + GAP
 
-        y += ROW_H + GAP
+        y += cur_row_h + GAP
+        row_in_page = (row_in_page + 1) % N_ROWS
 
     out = pdf.output()
-    fname = f"receipts_{username}_{date.today().isoformat()}.pdf"
-    return ("binary", bytes(out), "application/pdf", fname)
+    return ("binary", bytes(out), "application/pdf",
+            f"receipts_{username}_{date.today().isoformat()}.pdf")
 
 
 # ── HTTP handler ──────────────────────────────────────────────────────────────
@@ -2305,7 +2265,7 @@ def _render_convert(user: str) -> str:
         <input name="name" placeholder="e.g. JOHN DOE" required style="flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);color:var(--text);font-size:.82rem">
         <button type="submit" class="btn btn-primary btn-sm">+ Add</button>
       </form>
-      <div style="display:flex;flex-wrap:wrap;gap:8px">{name_chips}</div>
+      <div id="cardNamesWrap" style="display:flex;flex-wrap:wrap;gap:8px">{name_chips}</div>
     </div>
   </div>
 
@@ -2390,7 +2350,22 @@ function addSuggestedName(btn, name) {{
   fetch('/cardconv/cardnames/add', {{
     method:'POST', headers:{{'Content-Type':'application/x-www-form-urlencoded'}},
     body:'name='+encodeURIComponent(name)
-  }}).then(r => {{ if(r.ok) {{ btn.disabled=true; btn.style.opacity='.4'; existingNames.add(name); }} }});
+  }}).then(r => {{
+    if(r.ok) {{
+      btn.disabled=true; btn.style.opacity='.4'; existingNames.add(name);
+      // Immediately add to the My Card Names section above
+      var wrap = document.getElementById('cardNamesWrap');
+      if(wrap) {{
+        var chip = document.createElement('form');
+        chip.method = 'POST'; chip.action = '/cardconv/cardnames/delete';
+        chip.style.cssText = 'display:inline-flex;align-items:center;gap:6px;background:var(--surface-2);border:1px solid var(--border);border-radius:999px;padding:4px 6px 4px 12px;margin:0';
+        chip.innerHTML = '<span style="font-size:.82rem;font-weight:600;color:var(--accent)">'+name+'</span>'
+          + '<input type="hidden" name="name" value="'+name.replace(/"/g,'&quot;')+'">'
+          + '<button class="btn btn-danger btn-sm" style="padding:0 7px;line-height:1.5">✕</button>';
+        wrap.appendChild(chip);
+      }}
+    }}
+  }});
 }}
 
 function handleCsvFile(input) {{
