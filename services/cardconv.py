@@ -2811,7 +2811,13 @@ function renderBody(entries){
   let html = '';
   order.forEach(o => {
     if(o.type==='single'){ html += rowHtml(entries[o.i], o.i); return; }
-    const idxs = groups[o.gid], head = idxs[0];
+    // Reorder: dup_keep (matched-preferred by backend) entry becomes head.
+    const idxs = groups[o.gid].slice().sort((a, b) => {
+      const ka = entries[a].dup_keep ? 0 : 1;
+      const kb = entries[b].dup_keep ? 0 : 1;
+      return ka - kb;
+    });
+    const head = idxs[0];
     html += rowHtml(entries[head], head, {groupHead:o.gid, extra:idxs.length-1});
     idxs.slice(1).forEach(ci => { html += rowHtml(entries[ci], ci, {groupChild:o.gid}); });
   });
