@@ -2913,6 +2913,7 @@ $('rvLbClose').addEventListener('click', rvCloseLightbox);
 rvLb.addEventListener('click', e => {{ if(e.target === rvLb) rvCloseLightbox(); }});
 document.addEventListener('keydown', e => {{ if(e.key === 'Escape') rvCloseLightbox(); }});
 window.addEventListener('resize', () => {{ if(rvLb.classList.contains('open')) rvLbImg.onload && rvLbImg.onload(); }});
+applyPreset('all');
 </script>
 </body></html>'''
 
@@ -3635,10 +3636,9 @@ function applyPreset(p){
 }
 
 function setDefaultDates(){
-  const now = new Date();
-  const first = new Date(now.getFullYear(), now.getMonth(), 1);
-  $('fFrom').value = iso(first);
-  $('fTo').value = iso(now);
+  // Default: All Time (no date filter)
+  $('fFrom').value = '';
+  $('fTo').value = '';
 }
 
 document.querySelectorAll('.detail-actions button[data-set]').forEach(b =>
