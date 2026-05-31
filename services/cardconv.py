@@ -272,6 +272,84 @@ def _save_review(username: str, review: dict):
     _review_file(username).write_text(json.dumps(review, ensure_ascii=False, indent=2))
 
 
+# ── OCR Staging (pre-ledger visual review) ────────────────────────────────────
+
+def _ocr_staging_file(username: str) -> Path:
+    return DATA_DIR / f"ocr_staging_{username}.json"
+
+def _load_ocr_staging(username: str) -> dict:
+    f = _ocr_staging_file(username)
+    if f.exists():
+        try:
+            return json.loads(f.read_text())
+        except Exception:
+            pass
+    return {"entries": []}
+
+def _save_ocr_staging(username: str, data: dict):
+    _ensure_dirs()
+    _ocr_staging_file(username).write_text(json.dumps(data, ensure_ascii=False, indent=2))
+
+def _clear_ocr_staging(username: str):
+    f = _ocr_staging_file(username)
+    if f.exists():
+        f.unlink()
+
+def _handle_ocr_staging_confirm(username: str, body: dict):
+    """POST /cardconv/receipts/review/confirm (JSON) — apply manual edits and add to ledger.
+
+    Expects JSON body: {"confirmed": [{"id":..., "ocr_date":..., "ocr_merchant":...,
+                                       "ocr_amount":..., "ocr_handwritten_amount":...}, ...]}
+    Also accepts legacy FormData with just confirmed[] IDs (no edits).
+    """
+    staging = _load_ocr_staging(username)
+    all_entries = staging.get("entries", [])
+
+    # Build a correction map from the JSON payload.
+    confirmed_list = body.get("confirmed", [])
+    if isinstance(confirmed_list, list) and confirmed_list and isinstance(confirmed_list[0], dict):
+        # JSON path: each item has id + corrected fields
+        corrections = {item["id"]: item for item in confirmed_list if "id" in item}
+        confirmed_ids = set(corrections.keys())
+    else:
+        # Legacy FormData path: just a list of IDs, no corrections
+        if isinstance(confirmed_list, str):
+            confirmed_list = [confirmed_list]
+        confirmed_ids = set(confirmed_list)
+        corrections = {}
+
+    confirmed = []
+    for e in all_entries:
+        if e.get("id") not in confirmed_ids:
+            continue
+        entry = dict(e)
+        fix = corrections.get(e["id"], {})
+        if fix.get("ocr_date") is not None:
+            entry["ocr_date"] = fix["ocr_date"] or None
+        if fix.get("ocr_merchant") is not None:
+            entry["ocr_merchant"] = fix["ocr_merchant"] or None
+        for amt_key in ("ocr_amount", "ocr_handwritten_amount"):
+            raw = fix.get(amt_key)
+            if raw is not None:
+                try:
+                    entry[amt_key] = float(raw) if str(raw).strip() else None
+                except (ValueError, TypeError):
+                    pass
+        # Recompute final amount after manual correction.
+        hw = entry.get("ocr_handwritten_amount")
+        pr = entry.get("ocr_amount")
+        entry["ocr_final_amount"] = hw if hw is not None else pr
+        confirmed.append(entry)
+
+    if confirmed:
+        receipts = _load_receipts(username)
+        receipts.extend(confirmed)
+        _save_receipts(username, receipts)
+
+    _clear_ocr_staging(username)
+    return ("json", {"ok": True, "added": len(confirmed)})
+
+
 # ── User settings: card member names ──────────────────────────────────────────
 
 DEFAULT_CARD_NAMES = ["JONG KANG", "JONGHA KANG"]
@@ -1407,7 +1485,7 @@ def _handle_ledger_pdf(username: str, query: dict):
     # Wide thumbnail column + tall rows so receipts are legible by eye
     # (~5-7 rows per A4 page instead of 13-15).
     COLS = [
-        ("",            "thumb",  44),
+        ("",            "thumb",  60),
         ("Date",        "date",   20),
         ("Merchant",    "merch",  44),
         ("Printed",     "print",  20),
@@ -1421,7 +1499,7 @@ def _handle_ledger_pdf(username: str, query: dict):
     for w in widths:
         cx.append(cx[-1] + w)
     x0    = pdf.l_margin
-    ROW_H = 33.0
+    ROW_H = 66.0
     PAD   = 1.5
     HDR_H = 8.0
 
@@ -1590,6 +1668,18 @@ def handle(method, path, body, ctx=None):
     if method == "POST" and path == "/cardconv/receipts/upload":
         return _handle_receipt_upload(user, body)
 
+    # OCR staging review
+    if method == "GET" and path == "/cardconv/receipts/review":
+        return ("html", _render_ocr_staging_review(user))
+    if method == "GET" and path == "/cardconv/receipts/review/api":
+        staging = _load_ocr_staging(user)
+        return ("json", {"entries": staging.get("entries", [])})
+    if method == "POST" and path == "/cardconv/receipts/review/confirm":
+        return _handle_ocr_staging_confirm(user, body)
+    if method == "POST" and path == "/cardconv/receipts/review/discard":
+        _clear_ocr_staging(user)
+        return ("redirect", "/cardconv/ledger")
+
     # File download
     if method == "GET" and path.startswith("/cardconv/download/"):
         fname = path[len("/cardconv/download/"):]
@@ -1744,6 +1834,10 @@ def _handle_drive_sync(username: str):
                         or r.get('matched')}
         supported    = {'image/jpeg', 'image/png', 'application/pdf', 'image/gif', 'image/webp'}
 
+        staged_entries = []
+        now_disp = datetime.now().strftime("%Y-%m-%d %H:%M")
+        now_iso  = datetime.now().isoformat()
+
         for f in drive_files:
             fid = f.get('id')
             if fid in ocr_done_ids:
@@ -1754,10 +1848,8 @@ def _handle_drive_sync(username: str):
             content  = service.files().get_media(fileId=fid).execute()
             ocr_list = _ocr_receipt_auto(content, mime) or [{}]
             url      = f.get('webViewLink') or f'https://drive.google.com/file/d/{fid}/view'
-            # Drop prior failed/pending rows for this file (single→multi upgrade).
+            # Remove any prior failed/pending rows for this file before staging.
             existing = [r for r in existing if r.get("file_id") != fid]
-            now_disp = datetime.now().strftime("%Y-%m-%d %H:%M")
-            now_iso  = datetime.now().isoformat()
             for sub_index, ocr in enumerate(ocr_list):
                 entry = {
                     "id":           _sub_entry_id(fid, sub_index),
@@ -1772,13 +1864,21 @@ def _handle_drive_sync(username: str):
                     "synced_at":    now_iso,
                 }
                 entry.update(_ocr_entry_fields(ocr))
-                existing.append(entry)
+                staged_entries.append(entry)
 
+        # Save unchanged (already-processed) entries back, then stage new ones for review.
         _save_receipts(username, existing)
-        # Record sync time so the Ledger can show "Last synced ... (X min ago)"
         ledger = _load_ledger(username)
-        ledger["last_batch_at"] = datetime.now().isoformat()
+        ledger["last_batch_at"] = now_iso
         _save_ledger(username, ledger)
+
+        if staged_entries:
+            stg = _load_ocr_staging(username)
+            stg.setdefault("entries", []).extend(staged_entries)
+            stg["staged_at"] = now_iso
+            _save_ocr_staging(username, stg)
+            return ("redirect", "/cardconv/ledger?ocr_review=1")
+
     except Exception as e:
         return ("html", f"<p style='padding:20px;color:var(--danger)'>Sync error: {e} "
                         f"<a href='/cardconv/ledger' style='color:var(--accent)'>Back</a></p>")
@@ -1800,14 +1900,15 @@ def _handle_receipt_upload(username: str, body):
     receipts  = _load_receipts(username)
     supported = {'image/jpeg', 'image/png', 'application/pdf', 'image/gif', 'image/webp'}
 
+    staged_entries = []
+    now_disp = datetime.now().strftime("%Y-%m-%d %H:%M")
+    now_iso  = datetime.now().isoformat()
+
     for filename, content, mime_type in files:
         if mime_type not in supported:
             continue
         file_id, drive_url = _upload_file_to_drive(username, content, filename, mime_type)
-        # One image may hold multiple receipts → one ledger entry per receipt.
         ocr_list = _ocr_receipt_auto(content, mime_type) or [{}]
-        now_disp = datetime.now().strftime("%Y-%m-%d %H:%M")
-        now_iso  = datetime.now().isoformat()
         for sub_index, ocr in enumerate(ocr_list):
             entry = {
                 "id":           _sub_entry_id(file_id, sub_index),
@@ -1822,10 +1923,14 @@ def _handle_receipt_upload(username: str, body):
                 "multi_ocr":    True,
             }
             entry.update(_ocr_entry_fields(ocr))
-            receipts.append(entry)
+            staged_entries.append(entry)
 
-    _save_receipts(username, receipts)
-    return ("redirect", "/cardconv/ledger")
+    # Stage for visual review; only confirmed entries go to the ledger.
+    existing = _load_ocr_staging(username)
+    existing.setdefault("entries", []).extend(staged_entries)
+    existing["staged_at"] = now_iso
+    _save_ocr_staging(username, existing)
+    return ("redirect", "/cardconv/receipts/review")
 
 
 def _handle_upload(body, user=None):
@@ -1978,15 +2083,18 @@ _CC_TAB_CSS = (
 
 
 def _tab_bar(active: str, user: str) -> str:
-    """Shared Card Converter tab bar. active ∈ ledger|convert|review|history|keywords."""
+    """Shared Card Converter tab bar. active ∈ ledger|convert|review|history|keywords|ocr_review."""
     unmatched_n = _ledger_stats(_ledger_entries(user))["unmatched"]
-    badge = f'<span class="tab-badge">{unmatched_n}</span>' if unmatched_n else ''
+    ledger_badge = f'<span class="tab-badge">{unmatched_n}</span>' if unmatched_n else ''
+    staged_n = len(_load_ocr_staging(user).get("entries", []))
+    ocr_badge = f'<span class="tab-badge" style="background:#f59e0b">{staged_n}</span>' if staged_n else ''
     tabs = [
-        ("ledger",   "/cardconv/ledger",   "Receipt Ledger" + badge),
-        ("convert",  "/cardconv/convert",  "Convert"),
-        ("review",   "/cardconv/review",   "Review"),
-        ("history",  "/cardconv/history",  "History"),
-        ("keywords", "/cardconv/keywords", "Keywords"),
+        ("ledger",     "/cardconv/ledger",          "Receipt Ledger" + ledger_badge),
+        ("ocr_review", "/cardconv/receipts/review", "OCR Review" + ocr_badge),
+        ("convert",    "/cardconv/convert",          "Convert"),
+        ("review",     "/cardconv/review",           "Review"),
+        ("history",    "/cardconv/history",          "History"),
+        ("keywords",   "/cardconv/keywords",         "Keywords"),
     ]
     out = ['<div class="cc-tabs">']
     for key, href, label in tabs:
@@ -2772,6 +2880,125 @@ window.addEventListener('resize', () => {{ if(rvLb.classList.contains('open')) r
 </body></html>'''
 
 
+def _render_ocr_staging_review(user: str) -> str:
+    from server import CSS_VER
+    staging  = _load_ocr_staging(user)
+    entries  = staging.get("entries", [])
+
+    def money(a):
+        return f'${a:,.2f}' if isinstance(a, (int, float)) else (_esc(str(a)) if a else '–')
+
+    cards = []
+    for e in entries:
+        eid     = _esc(e.get("id", ""))
+        fid     = e.get("file_id", "")
+        proxy   = f'/cardconv/receipts/image/{_esc(fid)}' if fid else ''
+        fn      = _esc(e.get("filename", ""))
+        date_v  = _esc(e.get("ocr_date") or '–')
+        merch_v = _esc(e.get("ocr_merchant") or '–')
+        amt_v   = money(e.get("ocr_amount"))
+        hw_v    = money(e.get("ocr_handwritten_amount"))
+        status  = _esc(e.get("ocr_status", ""))
+
+        img_html = (f'<img src="{proxy}" class="stg-thumb" loading="lazy" '
+                    f'onerror="this.style.display=\'none\'">'
+                    if proxy else '<div class="stg-nophoto">No image</div>')
+
+        ocr_ok = e.get("ocr_status") == "done" and e.get("ocr_merchant")
+        badge  = ('<span class="stg-badge ok">OCR OK</span>' if ocr_ok
+                  else '<span class="stg-badge warn">OCR partial</span>')
+
+        cards.append(f'''
+<div class="stg-card" id="card-{eid}">
+  <label class="stg-check-wrap">
+    <input type="checkbox" name="confirmed" value="{eid}" {"checked" if ocr_ok else ""}>
+    <span class="stg-check-lbl">Include</span>
+  </label>
+  <div class="stg-img-wrap">{img_html}</div>
+  <div class="stg-info">
+    <div class="stg-filename">{fn} {badge}</div>
+    <div class="stg-row"><span class="stg-lbl">Date</span><span class="stg-val">{date_v}</span></div>
+    <div class="stg-row"><span class="stg-lbl">Merchant</span><span class="stg-val">{merch_v}</span></div>
+    <div class="stg-row"><span class="stg-lbl">Printed</span><span class="stg-val">{amt_v}</span></div>
+    <div class="stg-row"><span class="stg-lbl">Handwritten</span><span class="stg-val">{hw_v}</span></div>
+  </div>
+</div>''')
+
+    body_html = ''.join(cards) if cards else (
+        '<div class="stg-empty">No pending OCR entries. '
+        '<a href="/cardconv/ledger">Go to Ledger</a></div>')
+
+    count = len(entries)
+    return f'''<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OCR Review · Wayfinder</title>
+<link rel="stylesheet" href="/static/style.css?v={CSS_VER}">
+<style>
+{_CC_TAB_CSS}
+.stg-header{{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;flex-wrap:wrap;gap:10px}}
+.stg-title{{font-size:1.2rem;font-weight:700}}
+.stg-count{{font-size:.85rem;color:var(--text-muted)}}
+.stg-actions{{display:flex;gap:10px;align-items:center;flex-wrap:wrap}}
+.stg-grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px}}
+.stg-card{{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md);
+  overflow:hidden;display:flex;flex-direction:column}}
+.stg-card:has(input:not(:checked)){{opacity:.55;border-style:dashed}}
+.stg-check-wrap{{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--border);
+  cursor:pointer;background:var(--surface)}}
+.stg-check-wrap input{{width:16px;height:16px;accent-color:var(--accent);cursor:pointer}}
+.stg-check-lbl{{font-size:.82rem;font-weight:600;color:var(--text)}}
+.stg-img-wrap{{background:#000;display:flex;align-items:center;justify-content:center;min-height:160px;max-height:260px;overflow:hidden}}
+.stg-thumb{{max-width:100%;max-height:260px;object-fit:contain;display:block}}
+.stg-nophoto{{color:var(--text-muted);font-size:.8rem;padding:20px}}
+.stg-info{{padding:12px}}
+.stg-filename{{font-size:.78rem;color:var(--text-muted);margin-bottom:8px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}}
+.stg-row{{display:flex;justify-content:space-between;font-size:.83rem;padding:3px 0;border-bottom:1px solid var(--border-faint,var(--border))}}
+.stg-row:last-child{{border-bottom:none}}
+.stg-lbl{{color:var(--text-muted);font-size:.76rem}}
+.stg-val{{font-weight:600}}
+.stg-badge{{font-size:.65rem;font-weight:700;padding:2px 7px;border-radius:10px}}
+.stg-badge.ok{{background:rgba(34,197,94,.15);color:#22c55e}}
+.stg-badge.warn{{background:rgba(245,158,11,.15);color:#f59e0b}}
+.stg-empty{{text-align:center;color:var(--text-muted);padding:60px 20px}}
+</style>
+</head><body>
+{_tab_bar("ocr_review", user)}
+<div style="max-width:1100px;margin:0 auto;padding:20px 16px">
+  <div class="stg-header">
+    <div>
+      <div class="stg-title">OCR Review</div>
+      <div class="stg-count">{count} receipt(s) pending — check what to add to the ledger</div>
+    </div>
+    <div class="stg-actions">
+      <button type="button" onclick="toggleAll(true)" class="btn btn-secondary" style="font-size:.82rem;padding:6px 14px">Check All</button>
+      <button type="button" onclick="toggleAll(false)" class="btn btn-secondary" style="font-size:.82rem;padding:6px 14px">Uncheck All</button>
+    </div>
+  </div>
+  <form method="POST" action="/cardconv/receipts/review/confirm" id="stgForm">
+    <div class="stg-grid">
+      {body_html}
+    </div>
+    <div style="display:flex;gap:12px;margin-top:24px;justify-content:flex-end;flex-wrap:wrap">
+      <form method="POST" action="/cardconv/receipts/review/discard" style="margin:0">
+        <button type="submit" class="btn btn-danger" onclick="return confirm('Discard all staged entries?')"
+          style="font-size:.85rem">Discard All</button>
+      </form>
+      <button type="submit" form="stgForm" class="btn btn-primary" style="font-size:.85rem">
+        ✓ Confirm Selected → Add to Ledger
+      </button>
+    </div>
+  </form>
+</div>
+<script>
+function toggleAll(on) {{
+  document.querySelectorAll('#stgForm input[type=checkbox]').forEach(cb => cb.checked = on);
+}}
+</script>
+</body></html>'''
+
+
 def _render_ledger(user: str) -> str:
     from server import CSS_VER
     return (_LEDGER_HTML
@@ -3421,4 +3648,144 @@ setDefaultDates();
 load();
 </script>
 <script>__RCPTJS__</script>
+
+<!-- OCR Review Modal -->
+<div id="ocrReviewOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:200;align-items:flex-start;justify-content:center;overflow-y:auto;padding:30px 16px">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-md);width:100%;max-width:860px;margin:auto;display:flex;flex-direction:column">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:18px 20px;border-bottom:1px solid var(--border)">
+      <div>
+        <div style="font-size:1.1rem;font-weight:700">OCR Review</div>
+        <div id="ocrReviewCount" style="font-size:.82rem;color:var(--text-muted);margin-top:2px"></div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button onclick="ocrToggleAll(true)" class="btn btn-secondary" style="font-size:.78rem;padding:5px 12px">Check All</button>
+        <button onclick="ocrToggleAll(false)" class="btn btn-secondary" style="font-size:.78rem;padding:5px 12px">Uncheck All</button>
+        <button onclick="closeOcrModal()" style="background:none;border:none;color:var(--text-muted);font-size:1.4rem;cursor:pointer;line-height:1">&#x2715;</button>
+      </div>
+    </div>
+    <div id="ocrReviewBody" style="padding:16px;display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px;max-height:70vh;overflow-y:auto">
+      <div style="grid-column:1/-1;text-align:center;color:var(--text-muted);padding:40px">Loading...</div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:10px;padding:14px 20px;border-top:1px solid var(--border);flex-wrap:wrap">
+      <button onclick="ocrDiscardAll()" class="btn btn-danger" style="font-size:.84rem">Discard All</button>
+      <button onclick="ocrConfirmSelected()" class="btn btn-primary" style="font-size:.84rem">&#10003; Confirm Selected &rarr; Add to Ledger</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  var overlay = document.getElementById('ocrReviewOverlay');
+  var body    = document.getElementById('ocrReviewBody');
+  var countEl = document.getElementById('ocrReviewCount');
+  var _entries = [];
+
+  function money(v) {
+    return (v == null) ? '–' : ('$' + parseFloat(v).toFixed(2));
+  }
+
+  var INPUT_STYLE = 'width:100%;box-sizing:border-box;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:.8rem;padding:3px 6px;outline:none';
+  var LABEL_STYLE = 'font-size:.72rem;color:var(--text-muted);display:block;margin-bottom:2px';
+
+  function renderEntries(entries) {
+    _entries = entries;
+    countEl.textContent = entries.length + ' receipt(s) — verify and edit before adding to ledger';
+    if (!entries.length) {
+      body.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:var(--text-muted);padding:40px">No pending entries.</div>';
+      return;
+    }
+    body.innerHTML = entries.map(function(e) {
+      var proxy = e.file_id ? '/cardconv/receipts/image/' + encodeURIComponent(e.file_id) : '';
+      var imgHtml = proxy
+        ? '<img src="' + proxy + '" style="width:100%;max-height:200px;object-fit:contain;display:block;background:#000" loading="lazy">'
+        : '<div style="height:120px;display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:.8rem">No image</div>';
+      var ocrOk = e.ocr_status === 'done' && e.ocr_merchant;
+      var badge = ocrOk
+        ? '<span style="font-size:.62rem;font-weight:700;padding:2px 6px;border-radius:8px;background:rgba(34,197,94,.15);color:#22c55e">OCR OK</span>'
+        : '<span style="font-size:.62rem;font-weight:700;padding:2px 6px;border-radius:8px;background:rgba(245,158,11,.15);color:#f59e0b">Partial</span>';
+      var eid = e.id;
+      var amtVal = (e.ocr_amount != null) ? e.ocr_amount : '';
+      var hwVal  = (e.ocr_handwritten_amount != null) ? e.ocr_handwritten_amount : '';
+      return '<div class="ocr-card" data-id="' + eid + '" style="border:1px solid var(--border);border-radius:var(--radius-md);overflow:hidden;background:var(--surface-2)">'
+        + '<label style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--border);cursor:pointer;background:var(--surface)">'
+        + '<input type="checkbox" class="ocr-cb" data-id="' + eid + '" ' + (ocrOk ? 'checked' : '') + ' style="width:15px;height:15px;accent-color:var(--accent);cursor:pointer">'
+        + '<span style="font-size:.8rem;font-weight:600">Include</span>' + badge
+        + '</label>'
+        + '<div style="background:#000;display:flex;align-items:center;justify-content:center;min-height:120px">' + imgHtml + '</div>'
+        + '<div style="padding:10px;display:flex;flex-direction:column;gap:7px">'
+        + '<div style="color:var(--text-muted);font-size:.7rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + (e.filename || '') + '</div>'
+        + '<div><label style="' + LABEL_STYLE + '">Date</label>'
+        +   '<input class="ocr-field" data-field="ocr_date" data-id="' + eid + '" type="date" value="' + (e.ocr_date || '') + '" style="' + INPUT_STYLE + '"></div>'
+        + '<div><label style="' + LABEL_STYLE + '">Merchant</label>'
+        +   '<input class="ocr-field" data-field="ocr_merchant" data-id="' + eid + '" type="text" value="' + ((e.ocr_merchant || '')).replace(/"/g,'&quot;') + '" placeholder="–" style="' + INPUT_STYLE + '"></div>'
+        + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">'
+        +   '<div><label style="' + LABEL_STYLE + '">Printed $</label>'
+        +     '<input class="ocr-field" data-field="ocr_amount" data-id="' + eid + '" type="number" step="0.01" value="' + amtVal + '" placeholder="–" style="' + INPUT_STYLE + '"></div>'
+        +   '<div><label style="' + LABEL_STYLE + '">Handwritten $</label>'
+        +     '<input class="ocr-field" data-field="ocr_handwritten_amount" data-id="' + eid + '" type="number" step="0.01" value="' + hwVal + '" placeholder="–" style="' + INPUT_STYLE + '"></div>'
+        + '</div>'
+        + '</div></div>';
+    }).join('');
+  }
+
+  function openOcrModal() {
+    overlay.style.display = 'flex';
+    fetch('/cardconv/receipts/review/api')
+      .then(function(r) { return r.json(); })
+      .then(function(d) { renderEntries(d.entries || []); })
+      .catch(function() { body.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:var(--danger);padding:40px">Failed to load.</div>'; });
+  }
+
+  window.closeOcrModal = function() { overlay.style.display = 'none'; };
+
+  window.ocrToggleAll = function(on) {
+    document.querySelectorAll('.ocr-cb').forEach(function(cb) { cb.checked = on; });
+  };
+
+  window.ocrDiscardAll = function() {
+    if (!confirm('Discard all staged entries?')) return;
+    fetch('/cardconv/receipts/review/discard', {method:'POST'})
+      .then(function() { closeOcrModal(); });
+  };
+
+  window.ocrConfirmSelected = function() {
+    var checkedIds = new Set(
+      Array.from(document.querySelectorAll('.ocr-cb:checked')).map(function(cb) { return cb.dataset.id; })
+    );
+    // Collect per-card field values for checked cards only.
+    var confirmed = Array.from(document.querySelectorAll('.ocr-card')).reduce(function(acc, card) {
+      var id = card.dataset.id;
+      if (!checkedIds.has(id)) return acc;
+      var item = {id: id};
+      card.querySelectorAll('.ocr-field').forEach(function(inp) {
+        item[inp.dataset.field] = inp.value;
+      });
+      acc.push(item);
+      return acc;
+    }, []);
+    fetch('/cardconv/receipts/review/confirm', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({confirmed: confirmed})
+    }).then(function() { closeOcrModal(); load(); });
+  };
+
+  overlay.addEventListener('click', function(e) { if (e.target === overlay) closeOcrModal(); });
+
+  // Auto-open if redirected with ?ocr_review=1
+  if (new URLSearchParams(location.search).get('ocr_review') === '1') {
+    history.replaceState({}, '', location.pathname);
+    openOcrModal();
+  }
+
+  // Also open if tab badge is clicked via OCR Review tab
+  var ocrTabLink = document.querySelector('a[href="/cardconv/receipts/review"]');
+  if (ocrTabLink) {
+    ocrTabLink.addEventListener('click', function(e) {
+      e.preventDefault();
+      openOcrModal();
+    });
+  }
+})();
+</script>
 </body></html>'''
