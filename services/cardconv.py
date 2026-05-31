@@ -1891,10 +1891,7 @@ def _do_drive_sync_work(username: str, job_id: str):
         _save_ledger(username, ledger)
 
         if staged_entries:
-            stg = _load_ocr_staging(username)
-            stg.setdefault("entries", []).extend(staged_entries)
-            stg["staged_at"] = now_iso
-            _save_ocr_staging(username, stg)
+            _save_ocr_staging(username, {"entries": staged_entries, "staged_at": now_iso})
 
         _sync_jobs[job_id] = {"status": "done", "staged": len(staged_entries)}
 
