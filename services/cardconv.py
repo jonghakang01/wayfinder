@@ -3041,48 +3041,61 @@ var _mmTxn = null;
 function rvOpenMatchPanel(btn) {{
   var txnRaw = btn ? btn.getAttribute('data-txn') : '{{}}';
   try {{ _mmTxn = JSON.parse(txnRaw); }} catch(x) {{ _mmTxn = {{}}; }}
-  var panel = document.getElementById('rvMatchPanel');
-  var info  = document.getElementById('rvMatchInfo');
-  var list  = document.getElementById('rvMatchList');
-  info.textContent = (_mmTxn.merchant||'') + '  ' + (_mmTxn.date||'') +
-    (_mmTxn.amount != null ? '  $'+Number(_mmTxn.amount).toFixed(2) : '');
-  list.innerHTML = '<div style="color:var(--text-muted);padding:20px;text-align:center">Loading…</div>';
-  panel.style.display = 'flex';
+
+  var pop = document.getElementById('rvMatchPop');
+  var list = document.getElementById('rvMatchList');
+
+  // Position popover near the button
+  var rect = btn.getBoundingClientRect();
+  var popW = 320;
+  var left = rect.right + 8;
+  if (left + popW > window.innerWidth - 8) left = rect.left - popW - 8;
+  if (left < 8) left = 8;
+  var top = rect.top;
+  var maxH = window.innerHeight - top - 16;
+  if (maxH < 200) {{ top = Math.max(8, rect.bottom - 300); maxH = Math.min(300, window.innerHeight - top - 8); }}
+
+  pop.style.left  = left + 'px';
+  pop.style.top   = top + 'px';
+  pop.style.maxHeight = Math.max(200, maxH) + 'px';
+  pop.style.display = 'flex';
+
+  document.getElementById('rvPopTitle').textContent =
+    (_mmTxn.merchant || '') + (_mmTxn.date ? '  ' + _mmTxn.date : '') +
+    (_mmTxn.amount != null ? '  $' + Number(_mmTxn.amount).toFixed(2) : '');
+
+  list.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:.8rem">Loading…</div>';
+
   fetch('/cardconv/ledger/api?status=all')
     .then(function(r) {{ return r.json(); }})
     .then(function(d) {{ rvRenderMatchList(d.entries || []); }})
-    .catch(function() {{ list.innerHTML = '<div style="color:red;padding:16px">Load failed</div>'; }});
+    .catch(function() {{ list.innerHTML = '<div style="padding:12px;color:red;font-size:.8rem">Load failed</div>'; }});
 }}
 
 function rvCloseMatchPanel() {{
-  document.getElementById('rvMatchPanel').style.display = 'none';
+  document.getElementById('rvMatchPop').style.display = 'none';
 }}
 
 function rvRenderMatchList(entries) {{
   var list = document.getElementById('rvMatchList');
   var pending = entries.filter(function(e) {{ return e.match_status !== 'matched'; }});
   if (!pending.length) {{
-    list.innerHTML = '<div style="color:var(--text-muted);padding:20px;text-align:center">No unmatched receipts</div>';
+    list.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:.8rem">No unmatched receipts</div>';
     return;
   }}
   list.innerHTML = pending.map(function(e) {{
     var fid = e.file_id || '';
-    var tn  = fid ? 'https://drive.google.com/thumbnail?id=' + fid + '&sz=w100' : '';
-    var img = tn
-      ? '<img src="' + tn + '" style="width:52px;height:52px;object-fit:cover;border-radius:5px;border:1px solid var(--border);flex-shrink:0" onerror="this.style.visibility=\\x27hidden\\x27">'
-      : '<div style="width:52px;height:52px;border-radius:5px;border:1px dashed var(--border);flex-shrink:0"></div>';
+    var tn  = fid ? 'https://drive.google.com/thumbnail?id=' + fid + '&sz=w80' : '';
+    var img = tn ? '<img src="' + tn + '" width="44" height="44" style="object-fit:cover;border-radius:4px;flex-shrink:0">' : '';
     var badge = e.match_status === 'pending_match' ? 'Pending' : 'Unmatched';
-    return '<div style="display:flex;gap:10px;align-items:center;padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer" '
+    return '<div style="display:flex;gap:8px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--border);cursor:pointer;font-size:.8rem" '
       + 'onclick="rvDoMatch(this)" data-rcpt="' + e.id.replace(/"/g, '') + '">'
       + img
       + '<div style="flex:1;min-width:0">'
-      +   '<div style="font-size:.82rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + (e.ocr_merchant || '–') + '</div>'
-      +   '<div style="font-size:.74rem;color:var(--text-muted)">' + (e.ocr_date || '–') + '</div>'
+      +   '<div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + (e.ocr_merchant || '–') + '</div>'
+      +   '<div style="color:var(--text-muted);font-size:.72rem">' + (e.ocr_date || '–') + '  ' + badge + '</div>'
       + '</div>'
-      + '<div style="text-align:right;flex-shrink:0">'
-      +   '<div style="font-size:.84rem;font-weight:700;color:var(--accent)">' + (e.ocr_amount != null ? '$' + Number(e.ocr_amount).toFixed(2) : '–') + '</div>'
-      +   '<div style="font-size:.65rem;color:var(--text-muted)">' + badge + '</div>'
-      + '</div>'
+      + '<div style="font-weight:700;color:var(--accent);flex-shrink:0">' + (e.ocr_amount != null ? '$' + Number(e.ocr_amount).toFixed(2) : '–') + '</div>'
       + '</div>';
   }}).join('');
 }}
@@ -3103,21 +3116,20 @@ function rvDoMatch(el) {{
 document.addEventListener('keydown', function(e) {{
   if (e.key === 'Escape') rvCloseMatchPanel();
 }});
+document.addEventListener('click', function(e) {{
+  var pop = document.getElementById('rvMatchPop');
+  if (pop && pop.style.display !== 'none' && !pop.contains(e.target) && !e.target.closest('[onclick*="rvOpenMatchPanel"]'))
+    rvCloseMatchPanel();
+}});
 </script>
 
-<!-- Manual match panel -->
-<div id="rvMatchPanel" style="display:none;position:fixed;top:0;right:0;width:360px;max-width:100vw;height:100vh;background:var(--surface);border-left:2px solid var(--border);z-index:9999;flex-direction:column;box-shadow:-6px 0 24px rgba(0,0,0,.35)">
-  <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--border);flex-shrink:0">
-    <div>
-      <div style="font-size:.95rem;font-weight:700">Match Manually</div>
-      <div id="rvMatchInfo" style="font-size:.74rem;color:var(--text-muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:260px"></div>
-    </div>
-    <button onclick="rvCloseMatchPanel()" style="background:none;border:none;color:var(--text-muted);font-size:1.4rem;cursor:pointer;line-height:1;padding:4px">&times;</button>
+<!-- Manual match popover -->
+<div id="rvMatchPop" style="display:none;position:fixed;width:320px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-md);z-index:9999;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,.35);overflow:hidden">
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid var(--border);flex-shrink:0">
+    <div id="rvPopTitle" style="font-size:.78rem;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:250px"></div>
+    <button onclick="rvCloseMatchPanel()" style="background:none;border:none;color:var(--text-muted);font-size:1.2rem;cursor:pointer;line-height:1;padding:0 2px;flex-shrink:0">&times;</button>
   </div>
-  <div style="padding:10px 14px;border-bottom:1px solid var(--border);font-size:.74rem;color:var(--text-muted);flex-shrink:0">
-    Select a receipt to link to this transaction
-  </div>
-  <div id="rvMatchList" style="flex:1;overflow-y:auto"></div>
+  <div id="rvMatchList" style="overflow-y:auto;max-height:inherit"></div>
 </div>
 </body></html>'''
 
