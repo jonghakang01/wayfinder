@@ -1337,36 +1337,34 @@ def _handle_reocr(username: str, entry_id: str):
 
 
 def _handle_image_proxy(username: str, file_id: str, bbox: list = None):
-    """GET /cardconv/receipts/image/<file_id>[?bbox=ymin,xmin,ymax,xmax] — Drive proxy with optional crop."""
+    """GET /cardconv/receipts/image/<file_id>[?bbox=ymin,xmin,ymax,xmax] — Drive proxy with optional crop.
+    Always auto-rotates via EXIF so receipts display upright.
+    """
     service = _get_drive_service(username)
     if not service:
         return ("html", "<p>Drive not connected</p>", 401)
     try:
-        meta    = service.files().get(fileId=file_id, fields="mimeType").execute()
-        mime    = meta.get("mimeType", "image/jpeg")
+        from PIL import Image as _Img, ImageOps as _IOP
         content = service.files().get_media(fileId=file_id).execute()
+        img = _Img.open(io.BytesIO(content))
+        img = _IOP.exif_transpose(img)   # auto-rotate
+        img = img.convert("RGB")
+
         if bbox and len(bbox) == 4:
-            try:
-                from PIL import Image as _Img
-                img = _Img.open(io.BytesIO(content)).convert("RGB")
-                w, h = img.size
-                ymin, xmin, ymax, xmax = [max(0, min(1000, v)) for v in bbox]
-                left   = int(xmin / 1000 * w)
-                upper  = int(ymin / 1000 * h)
-                right  = int(xmax / 1000 * w)
-                lower  = int(ymax / 1000 * h)
-                # add small padding
-                pad = max(6, min(w, h) // 40)
-                left, upper = max(0, left - pad), max(0, upper - pad)
-                right, lower = min(w, right + pad), min(h, lower + pad)
-                cropped = img.crop((left, upper, right, lower))
-                buf = io.BytesIO()
-                cropped.save(buf, format="JPEG", quality=88, optimize=True)
-                content = buf.getvalue()
-                mime = "image/jpeg"
-            except Exception:
-                pass  # fallback to original
-        return ("binary", content, mime, None)
+            w, h = img.size
+            ymin, xmin, ymax, xmax = [max(0, min(1000, v)) for v in bbox]
+            left   = int(xmin / 1000 * w)
+            upper  = int(ymin / 1000 * h)
+            right  = int(xmax / 1000 * w)
+            lower  = int(ymax / 1000 * h)
+            pad = max(6, min(w, h) // 40)
+            left, upper = max(0, left - pad), max(0, upper - pad)
+            right, lower = min(w, right + pad), min(h, lower + pad)
+            img = img.crop((left, upper, right, lower))
+
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=88, optimize=True)
+        return ("binary", buf.getvalue(), "image/jpeg", None)
     except Exception as e:
         return ("html", f"<p>Image load error: {e}</p>", 404)
 
@@ -1394,13 +1392,14 @@ _PDF_STATUS_COLOR = {"matched": (22, 163, 74), "unmatched": (220, 38, 38),
 def _compress_receipt_image(raw: bytes, max_w: int = 700, quality: int = 72):
     """Resize + recompress a receipt image into a small JPEG.
 
-    Returns (jpeg_bytes, (w, h)) or None on failure. Caps width at max_w px and
-    re-encodes as JPEG to keep the embedded PDF small (~quality 70-75).
+    Returns (jpeg_bytes, (w, h)) or None on failure. Auto-rotates via EXIF,
+    caps width at max_w px, and re-encodes as JPEG to keep the PDF small.
     """
-    from PIL import Image
+    from PIL import Image, ImageOps
     try:
         img = Image.open(io.BytesIO(raw))
-        img = img.convert("RGB")  # flatten alpha/CMYK/palette for JPEG
+        img = ImageOps.exif_transpose(img)   # honour EXIF orientation tag
+        img = img.convert("RGB")             # flatten alpha/CMYK/palette for JPEG
         if img.width > max_w:
             h = max(1, round(img.height * max_w / img.width))
             img = img.resize((max_w, h), Image.LANCZOS)
@@ -1422,26 +1421,27 @@ def _fetch_drive_image(service, file_id: str):
 
 
 def _handle_ledger_pdf(username: str, query: dict):
-    """GET /cardconv/ledger/download.pdf — filtered receipts as a compact PDF.
+    """GET /cardconv/ledger/download.pdf — landscape grid PDF.
 
-    Honors the same status/date filters as the ledger view. Receipts are laid out
-    as a compact table (one row each: thumbnail, date, merchant, printed,
-    handwritten, final, status) fitting ~13-15 rows per A4 page.
+    Layout: A4 landscape (297×210mm), 5 columns × 3 rows = 15 receipts/page.
+    Each cell: image fills most of the cell height; one compact info line below.
+    Multi-receipt source images span extra columns proportional to receipt count.
+    EXIF auto-rotation is applied by _compress_receipt_image.
     """
     from fpdf import FPDF
 
-    status = (query.get("status", ["all"]) or ["all"])[0]
-    dfrom  = (query.get("from", [""]) or [""])[0]
-    dto    = (query.get("to", [""]) or [""])[0]
+    status  = (query.get("status", ["all"]) or ["all"])[0]
+    dfrom   = (query.get("from", [""]) or [""])[0]
+    dto     = (query.get("to", [""]) or [""])[0]
     entries = _apply_ledger_filters(_ledger_entries(username), status, dfrom, dto)
     stats   = _ledger_stats(entries)
     service = _get_drive_service(username)
 
-    pdf = FPDF(orientation="P", unit="mm", format="A4")
-    pdf.set_auto_page_break(auto=True, margin=15)
-    pdf.set_margins(15, 15, 15)
+    pdf = FPDF(orientation="L", unit="mm", format="A4")   # Landscape
+    pdf.set_auto_page_break(auto=False)
+    MRG = 8
+    pdf.set_margins(MRG, MRG, MRG)
 
-    # Prefer a Unicode TTF so non-Latin-1 merchant names don't crash rendering.
     FONT, unicode_ok = "Helvetica", False
     for fam, reg, bold in _PDF_FONT_CANDIDATES:
         if os.path.exists(reg) and os.path.exists(bold):
@@ -1450,157 +1450,178 @@ def _handle_ledger_pdf(username: str, query: dict):
             FONT, unicode_ok = fam, True
             break
 
-    def S(t):  # sanitize for core (Latin-1) font fallback
+    def S(t):
         t = "" if t is None else str(t)
         return t if unicode_ok else t.encode("latin-1", "replace").decode("latin-1")
 
     def money(a):
-        return "-" if a is None else "$%.2f" % a
+        return "–" if a is None else "$%.2f" % a
 
-    pdf.add_page()
-
-    # Header
-    pdf.set_font(FONT, "B", 16)
-    pdf.cell(0, 9, S("Receipt Ledger"), new_x="LMARGIN", new_y="NEXT")
-    pdf.set_font(FONT, "", 9)
-    pdf.set_text_color(110, 110, 110)
-    flabel = {"all": "All"}.get(status) or _PDF_STATUS_LABEL.get(status, status)
-    rng = f"{dfrom or '...'} ~ {dto or '...'}"
-    pdf.cell(0, 5.5, S(f"User: {username}    Filter: {flabel}    Date: {rng}"),
-             new_x="LMARGIN", new_y="NEXT")
-    pdf.cell(0, 5.5, S(f"Total {stats['total']}   Matched {stats['matched']}   "
-                       f"Unmatched {stats['unmatched']}   Pending {stats['pending_match']}"),
-             new_x="LMARGIN", new_y="NEXT")
-    pdf.set_text_color(0, 0, 0)
-    pdf.ln(3)
-
-    if not entries:
-        pdf.set_font(FONT, "", 11)
-        pdf.cell(0, 12, S("No receipts for the selected filter."),
-                 new_x="LMARGIN", new_y="NEXT")
-
-    # ── Table layout: one receipt per row, ~13-15 rows per A4 page ──
-    # Column widths (mm) sum to the effective page width (180mm @ A4/15mm margins).
-    epw = pdf.epw
-    # Wide thumbnail column + tall rows so receipts are legible by eye
-    # (~5-7 rows per A4 page instead of 13-15).
-    COLS = [
-        ("",            "thumb",  60),
-        ("Date",        "date",   20),
-        ("Merchant",    "merch",  44),
-        ("Printed",     "print",  20),
-        ("Handwritten", "hand",   22),
-        ("Final",       "final",  20),
-        ("Status",      "status", 18),
-    ]
-    scale  = epw / sum(c[2] for c in COLS)
-    widths = [c[2] * scale for c in COLS]
-    cx     = [pdf.l_margin]
-    for w in widths:
-        cx.append(cx[-1] + w)
-    x0    = pdf.l_margin
-    ROW_H = 66.0
-    PAD   = 1.5
-    HDR_H = 8.0
-
-    def fit(text, max_w, size):
-        # Truncate to fit a cell width at the given font size (handles CJK widths).
-        pdf.set_font(FONT, "", size)
-        text = S(text)
-        if pdf.get_string_width(text) <= max_w:
+    def trunc(text, max_w_mm):
+        text = S(text or "")
+        if pdf.get_string_width(text) <= max_w_mm:
             return text
-        ell = S("…")
-        while text and pdf.get_string_width(text + ell) > max_w:
+        while text and pdf.get_string_width(text + "…") > max_w_mm:
             text = text[:-1]
-        return text + ell
+        return text + S("…")
 
-    def draw_header_row():
-        y = pdf.get_y()
-        pdf.set_fill_color(243, 244, 246)
-        pdf.set_draw_color(200, 200, 200)
-        pdf.set_line_width(0.2)
-        pdf.set_font(FONT, "B", 8)
-        pdf.set_text_color(80, 80, 80)
-        for i, (label, key, _w) in enumerate(COLS):
-            align = "L" if key in ("thumb", "date", "merch") else \
-                    ("C" if key == "status" else "R")
-            pdf.set_xy(cx[i], y)
-            pdf.cell(widths[i], HDR_H, S(label), border=1, align=align, fill=True)
+    # ── Group entries by file_id (multi-receipt images stay together) ──
+    seen: dict = {}
+    groups: list = []   # [(file_id, [entry, ...])]
+    for e in entries:
+        fid = e.get("file_id") or ""
+        if fid and fid in seen:
+            groups[seen[fid]][1].append(e)
+        else:
+            seen[fid] = len(groups)
+            groups.append((fid, [e]))
+
+    # ── Grid constants (landscape A4: 297×210mm) ──
+    N_COLS   = 5
+    HDR_H    = 13.0   # header block at top of each page
+    GAP      = 2.0    # gap between cells
+    INFO_H   = 10.0   # text area below image (date+merchant+amount, 2 lines)
+    PAGE_W   = 297 - 2 * MRG   # 281mm usable width
+    PAGE_H   = 210 - 2 * MRG   # 194mm usable height
+    CELL_W   = (PAGE_W - GAP * (N_COLS - 1)) / N_COLS   # ≈54.6mm
+    # Rows: fit as many as possible, leaving space for header on first page.
+    # Row height = image area + INFO_H; aim for 3 rows comfortably.
+    N_ROWS_FIRST = 3
+    AVAIL_FIRST  = PAGE_H - HDR_H - GAP   # height after header
+    ROW_H        = (AVAIL_FIRST - GAP * (N_ROWS_FIRST - 1)) / N_ROWS_FIRST   # ≈57mm
+    IMG_H        = ROW_H - INFO_H         # ≈47mm image area
+    PAD          = 1.5
+
+    def cell_inner_w(span):
+        return CELL_W * span + GAP * (span - 1)
+
+    def draw_page_header():
+        pdf.set_font(FONT, "B", 11)
+        pdf.set_xy(MRG, MRG)
+        pdf.cell(0, 6, S("Receipt Ledger"), new_x="LMARGIN", new_y="NEXT")
+        pdf.set_font(FONT, "", 6.5)
+        pdf.set_text_color(110, 110, 110)
+        flabel = {"all": "All"}.get(status) or _PDF_STATUS_LABEL.get(status, status)
+        rng = f"{dfrom or '…'} ~ {dto or '…'}"
+        pdf.cell(0, 4, S(
+            f"User: {username}  ·  Filter: {flabel}  ·  {rng}  ·  "
+            f"Total {stats['total']}  Matched {stats['matched']}  "
+            f"Unmatched {stats['unmatched']}  Pending {stats['pending_match']}"
+        ), new_x="LMARGIN", new_y="NEXT")
         pdf.set_text_color(0, 0, 0)
-        pdf.set_y(y + HDR_H)
+        pdf.ln(1)
 
-    if entries:
-        draw_header_row()
+    # ── Pre-fetch + cache images (one per file_id) ──
+    img_cache: dict = {}
+    for fid, elist in groups:
+        if not fid:
+            img_cache[fid] = None
+            continue
+        span = min(len(elist), N_COLS)
+        max_px = max(400, int(cell_inner_w(span) * 3.78 * 1.5))
+        raw = _fetch_drive_image(service, fid) or b""
+        img_cache[fid] = _compress_receipt_image(raw, max_w=max_px, quality=75)
 
-    for idx, e in enumerate(entries, 1):
-        # Larger thumbnail — rows are ~33mm tall for eyeball verification.
-        jpeg = dim = None
-        if e.get("file_id"):
-            comp = _compress_receipt_image(
-                _fetch_drive_image(service, e.get("file_id")) or b"",
-                max_w=460, quality=72)
+    # ── Pack groups into grid rows ──
+    grid_rows: list = []
+    cur_row: list   = []
+    col = 0
+    for fid, elist in groups:
+        span = min(len(elist), N_COLS)
+        if col + span > N_COLS:
+            grid_rows.append(cur_row)
+            cur_row, col = [], 0
+        cur_row.append((fid, elist, span))
+        col += span
+    if cur_row:
+        grid_rows.append(cur_row)
+
+    if not grid_rows:
+        pdf.add_page()
+        draw_page_header()
+        pdf.set_font(FONT, "", 10)
+        pdf.cell(0, 10, S("No receipts for the selected filter."), new_x="LMARGIN", new_y="NEXT")
+        out = pdf.output()
+        fname = f"receipts_{username}_{date.today().isoformat()}.pdf"
+        return ("binary", bytes(out), "application/pdf", fname)
+
+    # ── Draw pages ──
+    pdf.add_page()
+    draw_page_header()
+    y = MRG + HDR_H
+
+    for row_idx, row in enumerate(grid_rows):
+        # Page break: check if row fits
+        if y + ROW_H > MRG + PAGE_H - 1:
+            pdf.add_page()
+            y = MRG   # no header repeat on continuation pages to maximise space
+
+        x = MRG
+        for fid, elist, span in row:
+            iw = cell_inner_w(span)
+
+            # Cell border + subtle bg
+            pdf.set_fill_color(252, 252, 253)
+            pdf.set_draw_color(210, 210, 210)
+            pdf.set_line_width(0.18)
+            pdf.rect(x, y, iw, ROW_H, style="FD")
+
+            # Image
+            comp = img_cache.get(fid)
             if comp:
                 jpeg, dim = comp
+                avail_w = iw - 2 * PAD
+                avail_h = IMG_H - PAD
+                dw = avail_w
+                dh = dw * dim[1] / dim[0]
+                if dh > avail_h:
+                    dh, dw = avail_h, avail_h * dim[0] / dim[1]
+                try:
+                    pdf.image(io.BytesIO(jpeg),
+                              x=x + (iw - dw) / 2,
+                              y=y + PAD + (avail_h - dh) / 2,
+                              w=dw, h=dh)
+                except Exception:
+                    pass
+            else:
+                pdf.set_xy(x, y)
+                pdf.set_font(FONT, "", 5.5)
+                pdf.set_text_color(180, 180, 180)
+                pdf.cell(iw, IMG_H, S("no image"), align="C")
 
-        # Page break (repeat the header on the new page).
-        if pdf.get_y() + ROW_H > pdf.page_break_trigger:
-            pdf.add_page()
-            draw_header_row()
+            # Separator
+            sep_y = y + IMG_H + PAD * 0.5
+            pdf.set_draw_color(225, 225, 225)
+            pdf.line(x + PAD, sep_y, x + iw - PAD, sep_y)
 
-        y0 = pdf.get_y()
-        if idx % 2 == 0:  # zebra striping for readability
-            pdf.set_fill_color(249, 250, 251)
-            pdf.rect(x0, y0, epw, ROW_H, style="F")
+            # Info lines (up to 2: one per receipt, merged if single)
+            ty = sep_y + 1.5
+            for i, e in enumerate(elist):
+                if ty + 4.5 > y + ROW_H - 0.5:
+                    break
+                prefix  = f"#{i+1} " if len(elist) > 1 else ""
+                dt      = e.get("ocr_date") or "–"
+                merch   = e.get("ocr_merchant") or "–"
+                final   = e.get("ocr_final_amount") or e.get("ocr_amount")
+                amt     = money(final)
+                st      = e.get("match_status", "")
+                st_c    = _PDF_STATUS_COLOR.get(st, (60, 60, 60))
+                pdf.set_font(FONT, "", 6.5)
+                max_merch = iw - 2 * PAD - 28
+                line = S(f"{prefix}{dt}  {trunc(merch, max_merch)}  {amt}")
+                pdf.set_xy(x + PAD, ty)
+                pdf.set_text_color(*st_c)
+                pdf.cell(iw - 2 * PAD, 4.5, line)
+                ty += 4.8
 
-        # Light cell grid
-        pdf.set_draw_color(228, 228, 228)
-        pdf.set_line_width(0.15)
-        for i in range(len(COLS)):
-            pdf.rect(cx[i], y0, widths[i], ROW_H)
+            pdf.set_text_color(0, 0, 0)
+            x += iw + GAP
 
-        # Thumbnail (centered) or placeholder
-        if jpeg and dim:
-            cw, ch = widths[0] - 2 * PAD, ROW_H - 2 * PAD
-            dw = cw
-            dh = dw * dim[1] / dim[0]
-            if dh > ch:
-                dh, dw = ch, ch * dim[0] / dim[1]
-            try:
-                pdf.image(io.BytesIO(jpeg),
-                          x=cx[0] + (widths[0] - dw) / 2,
-                          y=y0 + (ROW_H - dh) / 2, w=dw, h=dh)
-            except Exception:
-                pass
-        else:
-            pdf.set_xy(cx[0], y0)
-            pdf.set_font(FONT, "", 6)
-            pdf.set_text_color(180, 180, 180)
-            pdf.cell(widths[0], ROW_H, S("no img"), align="C")
-
-        def txt(i, text, align="R", bold=False, color=(0, 0, 0), size=8):
-            # fpdf2 vertically centers text within the cell height.
-            pdf.set_xy(cx[i] + 1, y0)
-            pdf.set_font(FONT, "B" if bold else "", size)
-            pdf.set_text_color(*color)
-            pdf.cell(widths[i] - 2, ROW_H, text, align=align)
-
-        txt(1, S(e.get("ocr_date") or "-"), align="L")
-        txt(2, fit(e.get("ocr_merchant") or "-", widths[2] - 2, 8), align="L")
-        txt(3, S(money(e.get("ocr_printed_amount"))), color=(130, 130, 130))
-        hw = e.get("ocr_handwritten_amount")
-        txt(4, S(money(hw)), color=(217, 119, 6) if hw is not None else (130, 130, 130))
-        txt(5, S(money(e.get("ocr_amount"))), bold=True)
-        st = e.get("match_status")
-        txt(6, S(_PDF_STATUS_LABEL.get(st, st or "-")), align="C", size=7,
-            color=_PDF_STATUS_COLOR.get(st, (0, 0, 0)))
-
-        pdf.set_text_color(0, 0, 0)
-        pdf.set_y(y0 + ROW_H)
+        y += ROW_H + GAP
 
     out = pdf.output()
-    data = bytes(out)
     fname = f"receipts_{username}_{date.today().isoformat()}.pdf"
-    return ("binary", data, "application/pdf", fname)
+    return ("binary", bytes(out), "application/pdf", fname)
 
 
 # ── HTTP handler ──────────────────────────────────────────────────────────────
@@ -3169,8 +3190,8 @@ __TABCSS__
     <button class="btn btn-ghost btn-sm" id="panelClose">× Close</button>
   </div>
   <div class="detail-section">
-    <div class="detail-section-title">Receipt Image</div>
-    <div class="receipt-image-wrap" id="dImageWrap">
+    <div class="detail-section-title">Receipt Image <span style="font-size:.7rem;color:var(--text-muted);font-weight:400">(click to enlarge)</span></div>
+    <div class="receipt-image-wrap" id="dImageWrap" style="cursor:zoom-in" onclick="openImgLb()">
       <img class="receipt-image-full" id="dImage" alt="receipt">
       <svg class="receipt-bbox-overlay" id="dBboxOverlay"></svg>
     </div>
@@ -3648,6 +3669,32 @@ setDefaultDates();
 load();
 </script>
 <script>__RCPTJS__</script>
+
+<!-- Image Lightbox -->
+<div id="imgLb" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:300;align-items:center;justify-content:center;cursor:zoom-out" onclick="closeImgLb()">
+  <img id="imgLbImg" style="max-width:95vw;max-height:95vh;object-fit:contain;border-radius:4px;box-shadow:0 0 40px rgba(0,0,0,.8)" alt="receipt">
+  <button onclick="closeImgLb()" style="position:fixed;top:16px;right:20px;background:rgba(255,255,255,.15);border:none;color:#fff;font-size:1.6rem;line-height:1;width:36px;height:36px;border-radius:50%;cursor:pointer">&times;</button>
+</div>
+<script>
+var _imgLbUrl = '';
+function openImgLb(){
+  var fid = CUR_FILE_ID;
+  if(!fid) return;
+  var url = '/cardconv/receipts/image/' + fid;  // full image, no bbox crop
+  var lb = document.getElementById('imgLb');
+  var img = document.getElementById('imgLbImg');
+  img.src = url;
+  lb.style.display = 'flex';
+  document.addEventListener('keydown', _imgLbKey);
+}
+function closeImgLb(){
+  var lb = document.getElementById('imgLb');
+  lb.style.display = 'none';
+  document.getElementById('imgLbImg').src = '';
+  document.removeEventListener('keydown', _imgLbKey);
+}
+function _imgLbKey(e){ if(e.key==='Escape') closeImgLb(); }
+</script>
 
 <!-- OCR Review Modal -->
 <div id="ocrReviewOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:200;align-items:flex-start;justify-content:center;overflow-y:auto;padding:30px 16px">
