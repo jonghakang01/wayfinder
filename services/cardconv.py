@@ -1195,8 +1195,8 @@ def _handle_status_change(username: str, entry_id: str, body: dict):
     return ("json", {"error": "not found"}, 404)
 
 
-def _handle_image_proxy(username: str, file_id: str):
-    """GET /cardconv/receipts/image/<file_id> — Drive media proxy, inline."""
+def _handle_image_proxy(username: str, file_id: str, bbox: list = None):
+    """GET /cardconv/receipts/image/<file_id>[?bbox=ymin,xmin,ymax,xmax] — Drive proxy with optional crop."""
     service = _get_drive_service(username)
     if not service:
         return ("html", "<p>Drive not connected</p>", 401)
@@ -1204,6 +1204,27 @@ def _handle_image_proxy(username: str, file_id: str):
         meta    = service.files().get(fileId=file_id, fields="mimeType").execute()
         mime    = meta.get("mimeType", "image/jpeg")
         content = service.files().get_media(fileId=file_id).execute()
+        if bbox and len(bbox) == 4:
+            try:
+                from PIL import Image as _Img
+                img = _Img.open(io.BytesIO(content)).convert("RGB")
+                w, h = img.size
+                ymin, xmin, ymax, xmax = [max(0, min(1000, v)) for v in bbox]
+                left   = int(xmin / 1000 * w)
+                upper  = int(ymin / 1000 * h)
+                right  = int(xmax / 1000 * w)
+                lower  = int(ymax / 1000 * h)
+                # add small padding
+                pad = max(6, min(w, h) // 40)
+                left, upper = max(0, left - pad), max(0, upper - pad)
+                right, lower = min(w, right + pad), min(h, lower + pad)
+                cropped = img.crop((left, upper, right, lower))
+                buf = io.BytesIO()
+                cropped.save(buf, format="JPEG", quality=88, optimize=True)
+                content = buf.getvalue()
+                mime = "image/jpeg"
+            except Exception:
+                pass  # fallback to original
         return ("binary", content, mime, None)
     except Exception as e:
         return ("html", f"<p>Image load error: {e}</p>", 404)
@@ -1478,7 +1499,14 @@ def handle(method, path, body, ctx=None):
         return _handle_status_change(user, entry_id, body)
     if method == "GET" and path.startswith("/cardconv/receipts/image/"):
         file_id = path[len("/cardconv/receipts/image/"):]
-        return _handle_image_proxy(user, file_id)
+        bbox = None
+        raw_bbox = (ctx.get("query") or {}).get("bbox")
+        if raw_bbox:
+            try:
+                bbox = [float(v) for v in raw_bbox.split(",")]
+            except Exception:
+                bbox = None
+        return _handle_image_proxy(user, file_id, bbox)
     if method == "POST" and path == "/cardconv/batch/run":
         return _handle_batch_run(user, ctx)
 
@@ -3136,9 +3164,16 @@ function openPanel(e){
   $('dMerchant').textContent = e.ocr_merchant || '–';
   $('dModel').textContent = e.ocr_model || '–';
   const img = $('dImage');
-  if(e.file_id){ img.src = '/cardconv/receipts/image/' + e.file_id; img.style.display='block'; }
-  else { img.style.display='none'; }
-  drawBoxes(e);
+  if(e.file_id){
+    let url = '/cardconv/receipts/image/' + e.file_id;
+    if(Array.isArray(e.ocr_bbox) && e.ocr_bbox.length===4)
+      url += '?bbox=' + e.ocr_bbox.join(',');
+    img.src = url;
+    img.style.display = 'block';
+  } else { img.style.display='none'; }
+  // SVG overlay not needed — multi-receipt images are cropped per entry
+  const svg = $('dBboxOverlay');
+  if(svg){ svg.innerHTML=''; svg.style.display='none'; }
   const mt = e.matched_transaction;
   $('dMatchSection').style.display = mt ? 'block' : 'none';
   if(mt){
