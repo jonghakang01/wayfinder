@@ -1678,9 +1678,11 @@ def handle(method, path, body, ctx=None):
     if method == "POST" and path == "/cardconv/drive/auth":
         return _handle_drive_auth(user, body)
 
-    # Drive sync
+    # Drive sync (background)
     if method == "POST" and path == "/cardconv/drive/sync":
         return _handle_drive_sync(user)
+    if method == "GET" and path == "/cardconv/drive/sync/status":
+        return _handle_drive_sync_status(user, body)  # GET passes query as body
 
     # Receipt upload
     if method == "POST" and path == "/cardconv/receipts/upload":
@@ -1826,14 +1828,18 @@ def _handle_drive_auth(username: str, body):
     return ("redirect", "/cardconv/ledger")
 
 
-def _handle_drive_sync(username: str):
-    """Scan Drive Wayfinder/Receipts/ folder, OCR new files, append to receipts json."""
-    service = _get_drive_service(username)
-    if not service:
-        return ("redirect", "/cardconv/ledger")
+import threading as _threading, uuid as _uuid
+
+_sync_jobs: dict = {}   # job_id → {"status": "running"|"done"|"error", "staged": int, "error": str}
+
+def _do_drive_sync_work(username: str, job_id: str):
+    """Background worker: scans Drive, OCRs new files, stages for review."""
     try:
-        # Scan both Receipts/ and legacy Matched/ (back-compat + safety): the
-        # auto-move is deprecated, but old setups may still have files in Matched/.
+        service = _get_drive_service(username)
+        if not service:
+            _sync_jobs[job_id] = {"status": "error", "staged": 0, "error": "Drive not connected"}
+            return
+
         receipts_id, matched_id = _get_receipts_folder_ids(service, username)
         results = service.files().list(
             q=(f"('{receipts_id}' in parents or '{matched_id}' in parents) "
@@ -1842,15 +1848,11 @@ def _handle_drive_sync(username: str):
         ).execute()
         drive_files = results.get('files', [])
 
-        existing     = _load_receipts(username)
-        # Skip files already processed by the multi-receipt pipeline (multi_ocr)
-        # or already matched (preserve match status). Legacy single-receipt
-        # entries and failed/new files are (re-)OCR'd as multi every sync, so any
-        # image auto-detects multiple receipts — no manual Re-OCR needed.
+        existing = _load_receipts(username)
         ocr_done_ids = {r.get('file_id') for r in existing
                         if (r.get('multi_ocr') and r.get('ocr_amount') is not None)
                         or r.get('matched')}
-        supported    = {'image/jpeg', 'image/png', 'application/pdf', 'image/gif', 'image/webp'}
+        supported = {'image/jpeg', 'image/png', 'application/pdf', 'image/gif', 'image/webp'}
 
         staged_entries = []
         now_disp = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -1866,7 +1868,6 @@ def _handle_drive_sync(username: str):
             content  = service.files().get_media(fileId=fid).execute()
             ocr_list = _ocr_receipt_auto(content, mime) or [{}]
             url      = f.get('webViewLink') or f'https://drive.google.com/file/d/{fid}/view'
-            # Remove any prior failed/pending rows for this file before staging.
             existing = [r for r in existing if r.get("file_id") != fid]
             for sub_index, ocr in enumerate(ocr_list):
                 entry = {
@@ -1884,7 +1885,6 @@ def _handle_drive_sync(username: str):
                 entry.update(_ocr_entry_fields(ocr))
                 staged_entries.append(entry)
 
-        # Save unchanged (already-processed) entries back, then stage new ones for review.
         _save_receipts(username, existing)
         ledger = _load_ledger(username)
         ledger["last_batch_at"] = now_iso
@@ -1895,12 +1895,31 @@ def _handle_drive_sync(username: str):
             stg.setdefault("entries", []).extend(staged_entries)
             stg["staged_at"] = now_iso
             _save_ocr_staging(username, stg)
-            return ("redirect", "/cardconv/ledger?ocr_review=1")
+
+        _sync_jobs[job_id] = {"status": "done", "staged": len(staged_entries)}
 
     except Exception as e:
-        return ("html", f"<p style='padding:20px;color:var(--danger)'>Sync error: {e} "
-                        f"<a href='/cardconv/ledger' style='color:var(--accent)'>Back</a></p>")
-    return ("redirect", "/cardconv/ledger")
+        _sync_jobs[job_id] = {"status": "error", "staged": 0, "error": str(e)}
+
+
+def _handle_drive_sync(username: str):
+    """POST /cardconv/drive/sync — start background sync, return job_id immediately."""
+    if not _get_drive_service(username):
+        return ("json", {"error": "Drive not connected"}, 400)
+    job_id = _uuid.uuid4().hex
+    _sync_jobs[job_id] = {"status": "running", "staged": 0}
+    t = _threading.Thread(target=_do_drive_sync_work, args=(username, job_id), daemon=True)
+    t.start()
+    return ("json", {"job_id": job_id})
+
+
+def _handle_drive_sync_status(username: str, query: dict):
+    """GET /cardconv/drive/sync/status?job=<id> — poll sync progress."""
+    job_id = (query.get("job", [""])[0]).strip()
+    job = _sync_jobs.get(job_id)
+    if not job:
+        return ("json", {"status": "not_found"})
+    return ("json", job)
 
 
 def _handle_receipt_upload(username: str, body):
@@ -2147,9 +2166,7 @@ def _register_section(user: str) -> str:
         drive_status_html = f'''
       <span style="font-size:.88rem;font-weight:600;color:var(--success)">✅ Connected</span>
       {folder_link}
-      <form method="POST" action="/cardconv/drive/sync" style="display:inline;margin-left:4px" onsubmit="showSyncOverlay()">
-        <button type="submit" class="btn btn-ghost btn-sm">🔄 Sync from Drive</button>
-      </form>
+      <button class="btn btn-ghost btn-sm" onclick="startDriveSync(this)" style="margin-left:4px">🔄 Sync from Drive</button>
       <span id="lastSynced" data-ts="{last_synced}" style="font-size:.78rem;color:var(--text-muted);margin-left:4px"></span>'''
         receipt_upload_html = '''
       <form id="rcptForm" method="POST" action="/cardconv/receipts/upload" enctype="multipart/form-data">
@@ -3683,9 +3700,40 @@ load();
   <div class="sync-dots"><span></span><span></span><span></span></div>
 </div>
 <script>
-function showSyncOverlay(){
-  var el = document.getElementById('syncOverlay');
-  el.style.display = 'flex';
+function startDriveSync(btn) {
+  btn.disabled = true;
+  document.getElementById('syncOverlay').style.display = 'flex';
+  fetch('/cardconv/drive/sync', {method: 'POST'})
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.error) { syncFail(d.error); return; }
+      pollSync(d.job_id);
+    })
+    .catch(function(e) { syncFail(String(e)); });
+}
+
+function pollSync(jobId) {
+  setTimeout(function() {
+    fetch('/cardconv/drive/sync/status?job=' + jobId)
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (d.status === 'running') { pollSync(jobId); return; }
+        document.getElementById('syncOverlay').style.display = 'none';
+        if (d.status === 'error') { alert('Sync error: ' + (d.error || 'unknown')); load(); return; }
+        // done
+        if (d.staged > 0) {
+          openOcrModal();
+        } else {
+          load();
+        }
+      })
+      .catch(function() { pollSync(jobId); });  // retry on network hiccup
+  }, 2500);
+}
+
+function syncFail(msg) {
+  document.getElementById('syncOverlay').style.display = 'none';
+  alert('Sync failed: ' + msg);
 }
 </script>
 
