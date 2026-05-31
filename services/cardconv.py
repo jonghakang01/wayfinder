@@ -1195,6 +1195,69 @@ def _handle_status_change(username: str, entry_id: str, body: dict):
     return ("json", {"error": "not found"}, 404)
 
 
+def _handle_reocr(username: str, entry_id: str):
+    """POST /cardconv/ledger/<id>/reocr — re-run OCR for all entries sharing the same file_id."""
+    service = _get_drive_service(username)
+    if not service:
+        return ("json", {"error": "Drive not connected"}, 401)
+    ledger = _load_ledger(username)
+    entries = ledger["entries"]
+
+    # Find the target entry to get its file_id
+    target = next((e for e in entries if e.get("id") == entry_id), None)
+    if not target:
+        return ("json", {"error": "not found"}, 404)
+    file_id = target.get("file_id")
+    if not file_id:
+        return ("json", {"error": "no file_id on entry"}, 400)
+
+    try:
+        meta    = service.files().get(fileId=file_id, fields="mimeType,name,webViewLink").execute()
+        mime    = meta.get("mimeType", "image/jpeg")
+        content = service.files().get_media(fileId=file_id).execute()
+    except Exception as e:
+        return ("json", {"error": f"Drive fetch failed: {e}"}, 500)
+
+    ocr_list = _ocr_receipt_auto(content, mime) or [{}]
+
+    # Preserve non-OCR fields from the existing sibling entries (matched at same sub_index)
+    siblings = {e.get("sub_index", 0): e for e in entries if e.get("file_id") == file_id}
+
+    # Remove all existing entries for this file_id
+    entries[:] = [e for e in entries if e.get("file_id") != file_id]
+
+    url     = meta.get("webViewLink") or f"https://drive.google.com/file/d/{file_id}/view"
+    now_iso = datetime.now().isoformat()
+    updated = []
+    for sub_index, ocr in enumerate(ocr_list):
+        fields  = _ocr_entry_fields(ocr)
+        sibling = siblings.get(sub_index, {})
+        entry   = {
+            "id":           _sub_entry_id(file_id, sub_index),
+            "file_id":      file_id,
+            "sub_index":    sub_index,
+            "filename":     sibling.get("filename") or meta.get("name", ""),
+            "drive_url":    url,
+            "mime_type":    mime,
+            "match_status": sibling.get("match_status", "pending_match"),
+            "matched":      sibling.get("matched", False),
+            "multi_ocr":    True,
+            "uploaded_at":  sibling.get("uploaded_at", now_iso),
+            "synced_at":    now_iso,
+            "reocr_at":     now_iso,
+        }
+        if sibling.get("matched_at"):
+            entry["matched_at"] = sibling["matched_at"]
+        if sibling.get("matched_transaction"):
+            entry["matched_transaction"] = sibling["matched_transaction"]
+        entry.update(fields)
+        entries.append(entry)
+        updated.append(entry)
+
+    _save_ledger(username, ledger)
+    return ("json", {"ok": True, "updated": updated})
+
+
 def _handle_image_proxy(username: str, file_id: str, bbox: list = None):
     """GET /cardconv/receipts/image/<file_id>[?bbox=ymin,xmin,ymax,xmax] — Drive proxy with optional crop."""
     service = _get_drive_service(username)
@@ -1497,6 +1560,9 @@ def handle(method, path, body, ctx=None):
     if method == "POST" and path.startswith("/cardconv/ledger/") and path.endswith("/status"):
         entry_id = path[len("/cardconv/ledger/"):-len("/status")]
         return _handle_status_change(user, entry_id, body)
+    if method == "POST" and path.startswith("/cardconv/ledger/") and path.endswith("/reocr"):
+        entry_id = path[len("/cardconv/ledger/"):-len("/reocr")]
+        return _handle_reocr(user, entry_id)
     if method == "GET" and path.startswith("/cardconv/receipts/image/"):
         file_id = path[len("/cardconv/receipts/image/"):]
         bbox = None
@@ -2905,6 +2971,7 @@ __TABCSS__
     <button class="btn btn-ghost btn-sm" data-set="matched" style="color:#22c55e">✅ Mark Matched</button>
     <button class="btn btn-ghost btn-sm" data-set="unmatched" style="color:#ef4444">❌ Mark Unmatched</button>
     <button class="btn btn-ghost btn-sm" data-set="pending_match" style="color:#f59e0b">⏳ Mark Pending</button>
+    <button class="btn btn-ghost btn-sm" id="reOcrBtn" onclick="reOCR()" style="color:#818cf8;margin-top:6px;width:100%">🔄 Re-OCR</button>
   </div>
 </div>
 
@@ -3203,6 +3270,39 @@ async function setStatus(status){
   });
   closePanel();
   load();
+}
+
+async function reOCR(){
+  if(!CUR_ID) return;
+  const btn = $('reOcrBtn');
+  btn.disabled = true;
+  btn.textContent = 'Processing...';
+  try {
+    const r = await fetch('/cardconv/ledger/' + CUR_ID + '/reocr', {method:'POST'});
+    const d = await r.json();
+    if(!r.ok || d.error){
+      alert('Re-OCR failed: ' + (d.error || r.status));
+      return;
+    }
+    // Update ENTRIES with the returned updated entries
+    if(Array.isArray(d.updated)){
+      d.updated.forEach(function(u){
+        const idx = ENTRIES.findIndex(function(e){ return e.id === u.id; });
+        if(idx >= 0) ENTRIES[idx] = u; else ENTRIES.push(u);
+      });
+      // Remove entries that were replaced (different sub_index count)
+      const updIds = new Set(d.updated.map(function(u){ return u.id; }));
+      const updFid = d.updated[0] && d.updated[0].file_id;
+      if(updFid){
+        ENTRIES = ENTRIES.filter(function(e){ return e.file_id !== updFid || updIds.has(e.id); });
+      }
+    }
+    closePanel();
+    load();
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🔄 Re-OCR';
+  }
 }
 
 // Undo Match from the ledger table — reset row to pending_match.
