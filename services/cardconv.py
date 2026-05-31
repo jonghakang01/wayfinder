@@ -918,13 +918,10 @@ def convert(csv_bytes: bytes, filename: str, username: str = None) -> tuple:
             if not receipt_match:
                 for (rdate, ramt), r in receipts_map.items():
                     amt_match  = abs(ramt - amt_rounded) <= 0.01
+                    # Date must match (None OCR date = unknown, still acceptable).
+                    # Merchant similarity alone is NOT enough to override a date mismatch.
                     date_match = (rdate is None or rdate == inv_date_str)
-                    # Also try merchant name fuzzy match
-                    ocr_merchant = (r.get("ocr_merchant") or "").upper()
-                    merch_match  = ocr_merchant and (
-                        ocr_merchant in vendor.upper() or vendor.upper()[:10] in ocr_merchant
-                    )
-                    if amt_match and (date_match or merch_match):
+                    if amt_match and date_match:
                         receipt_match = r
                         break
             if receipt_match:
@@ -2150,7 +2147,7 @@ def _register_section(user: str) -> str:
         drive_status_html = f'''
       <span style="font-size:.88rem;font-weight:600;color:var(--success)">✅ Connected</span>
       {folder_link}
-      <form method="POST" action="/cardconv/drive/sync" style="display:inline;margin-left:4px">
+      <form method="POST" action="/cardconv/drive/sync" style="display:inline;margin-left:4px" onsubmit="showSyncOverlay()">
         <button type="submit" class="btn btn-ghost btn-sm">🔄 Sync from Drive</button>
       </form>
       <span id="lastSynced" data-ts="{last_synced}" style="font-size:.78rem;color:var(--text-muted);margin-left:4px"></span>'''
@@ -3670,17 +3667,38 @@ load();
 </script>
 <script>__RCPTJS__</script>
 
+<!-- Sync Loading Overlay -->
+<div id="syncOverlay" style="display:none;position:fixed;inset:0;background:rgba(2,6,23,.82);z-index:500;flex-direction:column;align-items:center;justify-content:center;gap:20px">
+  <style>
+  @keyframes spin{to{transform:rotate(360deg)}}
+  @keyframes pulse{0%,100%{opacity:.6}50%{opacity:1}}
+  .sync-spinner{width:52px;height:52px;border:4px solid rgba(56,189,248,.2);border-top-color:#38bdf8;border-radius:50%;animation:spin .9s linear infinite}
+  .sync-dots span{display:inline-block;width:6px;height:6px;border-radius:50%;background:#38bdf8;margin:0 3px;animation:pulse 1.2s ease-in-out infinite}
+  .sync-dots span:nth-child(2){animation-delay:.2s}
+  .sync-dots span:nth-child(3){animation-delay:.4s}
+  </style>
+  <div class="sync-spinner"></div>
+  <div style="color:#e2e8f0;font-size:1rem;font-weight:600;letter-spacing:.02em">Syncing from Drive…</div>
+  <div style="color:#94a3b8;font-size:.82rem">Powered by Google Gemini — OCR is running, this may take a moment ✨</div>
+  <div class="sync-dots"><span></span><span></span><span></span></div>
+</div>
+<script>
+function showSyncOverlay(){
+  var el = document.getElementById('syncOverlay');
+  el.style.display = 'flex';
+}
+</script>
+
 <!-- Image Lightbox -->
 <div id="imgLb" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:300;align-items:center;justify-content:center;cursor:zoom-out" onclick="closeImgLb()">
   <img id="imgLbImg" style="max-width:95vw;max-height:95vh;object-fit:contain;border-radius:4px;box-shadow:0 0 40px rgba(0,0,0,.8)" alt="receipt">
   <button onclick="closeImgLb()" style="position:fixed;top:16px;right:20px;background:rgba(255,255,255,.15);border:none;color:#fff;font-size:1.6rem;line-height:1;width:36px;height:36px;border-radius:50%;cursor:pointer">&times;</button>
 </div>
 <script>
-var _imgLbUrl = '';
-function openImgLb(){
-  var fid = CUR_FILE_ID;
-  if(!fid) return;
-  var url = '/cardconv/receipts/image/' + fid;  // full image, no bbox crop
+function openImgLb(fid){
+  var fileId = fid || CUR_FILE_ID;
+  if(!fileId) return;
+  var url = '/cardconv/receipts/image/' + fileId;
   var lb = document.getElementById('imgLb');
   var img = document.getElementById('imgLbImg');
   img.src = url;
@@ -3743,8 +3761,9 @@ function _imgLbKey(e){ if(e.key==='Escape') closeImgLb(); }
     }
     body.innerHTML = entries.map(function(e) {
       var proxy = e.file_id ? '/cardconv/receipts/image/' + encodeURIComponent(e.file_id) : '';
+      var fid = e.file_id || '';
       var imgHtml = proxy
-        ? '<img src="' + proxy + '" style="width:100%;max-height:200px;object-fit:contain;display:block;background:#000" loading="lazy">'
+        ? '<img src="' + proxy + '" style="width:100%;max-height:200px;object-fit:contain;display:block;background:#000;cursor:zoom-in" loading="lazy" onclick="event.stopPropagation();openImgLb(\'' + fid + '\')" title="Click to enlarge">'
         : '<div style="height:120px;display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:.8rem">No image</div>';
       var ocrOk = e.ocr_status === 'done' && e.ocr_merchant;
       var badge = ocrOk
@@ -3789,10 +3808,15 @@ function _imgLbKey(e){ if(e.key==='Escape') closeImgLb(); }
     document.querySelectorAll('.ocr-cb').forEach(function(cb) { cb.checked = on; });
   };
 
+  function clearOcrBadge() {
+    var badge = document.querySelector('a[href="/cardconv/receipts/review"] .tab-badge');
+    if (badge) badge.remove();
+  }
+
   window.ocrDiscardAll = function() {
     if (!confirm('Discard all staged entries?')) return;
     fetch('/cardconv/receipts/review/discard', {method:'POST'})
-      .then(function() { closeOcrModal(); });
+      .then(function() { closeOcrModal(); clearOcrBadge(); });
   };
 
   window.ocrConfirmSelected = function() {
@@ -3814,7 +3838,7 @@ function _imgLbKey(e){ if(e.key==='Escape') closeImgLb(); }
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({confirmed: confirmed})
-    }).then(function() { closeOcrModal(); load(); });
+    }).then(function() { closeOcrModal(); clearOcrBadge(); load(); });
   };
 
   overlay.addEventListener('click', function(e) { if (e.target === overlay) closeOcrModal(); });
