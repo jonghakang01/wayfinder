@@ -3047,7 +3047,7 @@ function rvOpenMatchPanel(btn) {{
   info.textContent = (_mmTxn.merchant||'') + '  ' + (_mmTxn.date||'') +
     (_mmTxn.amount != null ? '  $'+Number(_mmTxn.amount).toFixed(2) : '');
   list.innerHTML = '<div style="color:var(--text-muted);padding:20px;text-align:center">Loading…</div>';
-  panel.style.transform = 'translateX(0)';
+  panel.style.display = 'flex';
   fetch('/cardconv/ledger/api?status=all')
     .then(function(r) {{ return r.json(); }})
     .then(function(d) {{ rvRenderMatchList(d.entries || []); }})
@@ -3055,7 +3055,7 @@ function rvOpenMatchPanel(btn) {{
 }}
 
 function rvCloseMatchPanel() {{
-  document.getElementById('rvMatchPanel').style.transform = 'translateX(100%)';
+  document.getElementById('rvMatchPanel').style.display = 'none';
 }}
 
 function rvRenderMatchList(entries) {{
@@ -3106,7 +3106,7 @@ document.addEventListener('keydown', function(e) {{
 </script>
 
 <!-- Manual match panel -->
-<div id="rvMatchPanel" style="position:fixed;top:0;right:0;width:340px;max-width:100vw;height:100vh;background:var(--surface);border-left:1px solid var(--border);z-index:400;transform:translateX(100%);transition:transform .25s cubic-bezier(.4,0,.2,1);display:flex;flex-direction:column;box-shadow:-4px 0 20px rgba(0,0,0,.2)">
+<div id="rvMatchPanel" style="display:none;position:fixed;top:0;right:0;width:360px;max-width:100vw;height:100vh;background:var(--surface);border-left:2px solid var(--border);z-index:9999;flex-direction:column;box-shadow:-6px 0 24px rgba(0,0,0,.35)">
   <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--border);flex-shrink:0">
     <div>
       <div style="font-size:.95rem;font-weight:700">Match Manually</div>
