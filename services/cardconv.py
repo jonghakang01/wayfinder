@@ -2120,18 +2120,17 @@ _CC_TAB_CSS = (
 
 
 def _tab_bar(active: str, user: str) -> str:
-    """Shared Card Converter tab bar. active ∈ ledger|convert|review|history|keywords|ocr_review."""
+    """Shared Card Converter tab bar. active ∈ ledger|convert|review|history|keywords."""
     unmatched_n = _ledger_stats(_ledger_entries(user))["unmatched"]
     ledger_badge = f'<span class="tab-badge">{unmatched_n}</span>' if unmatched_n else ''
     staged_n = len(_load_ocr_staging(user).get("entries", []))
-    ocr_badge = f'<span class="tab-badge" style="background:#f59e0b">{staged_n}</span>' if staged_n else ''
+    ocr_badge = f'<span class="tab-badge" style="background:#f59e0b;cursor:pointer" onclick="openOcrModal();return false;">{staged_n}</span>' if staged_n else ''
     tabs = [
-        ("ledger",     "/cardconv/ledger",          "Receipt Ledger" + ledger_badge),
-        ("ocr_review", "/cardconv/receipts/review", "OCR Review" + ocr_badge),
-        ("convert",    "/cardconv/convert",          "Convert"),
-        ("review",     "/cardconv/review",           "Review"),
-        ("history",    "/cardconv/history",          "History"),
-        ("keywords",   "/cardconv/keywords",         "Keywords"),
+        ("ledger",   "/cardconv/ledger",   "Receipt Ledger" + ledger_badge + ocr_badge),
+        ("convert",  "/cardconv/convert",  "Convert"),
+        ("review",   "/cardconv/review",   "Review"),
+        ("history",  "/cardconv/history",  "History"),
+        ("keywords", "/cardconv/keywords", "Keywords"),
     ]
     out = ['<div class="cc-tabs">']
     for key, href, label in tabs:
@@ -3898,14 +3897,6 @@ function _imgLbKey(e){ if(e.key==='Escape') closeImgLb(); }
     openOcrModal();
   }
 
-  // Also open if tab badge is clicked via OCR Review tab
-  var ocrTabLink = document.querySelector('a[href="/cardconv/receipts/review"]');
-  if (ocrTabLink) {
-    ocrTabLink.addEventListener('click', function(e) {
-      e.preventDefault();
-      openOcrModal();
-    });
-  }
 })();
 </script>
 </body></html>'''
