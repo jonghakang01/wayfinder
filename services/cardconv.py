@@ -1400,6 +1400,8 @@ def handle(method, path, body, ctx=None):
         return _handle_image_proxy(user, file_id)
     if method == "POST" and path == "/cardconv/batch/run":
         return _handle_batch_run(user, ctx)
+    if method == "POST" and path == "/cardconv/ledger/reocr":
+        return _handle_ledger_reocr(user, body)
 
     # Drive OAuth
     if method == "GET" and path == "/cardconv/drive/connect":
@@ -1625,31 +1627,85 @@ def _handle_receipt_upload(username: str, body):
         if mime_type not in supported:
             continue
         file_id, drive_url = _upload_file_to_drive(username, content, filename, mime_type)
-        ocr = _ocr_receipt_auto(content, mime_type)
-        ocr_date = ocr.get("date")
-        if ocr_date == "YYYY-MM-DD":
-            ocr_date = None
-        has_ocr = ocr.get("amount") is not None
-        receipts.append({
-            "id":           "rcpt_" + (file_id or uuid.uuid4().hex)[:8],
-            "file_id":      file_id,
-            "filename":     filename,
-            "drive_url":    drive_url,
-            "mime_type":    mime_type,
-            "uploaded_at":  datetime.now().strftime("%Y-%m-%d %H:%M"),
-            "synced_at":    datetime.now().isoformat(),
-            "ocr_status":   "done" if has_ocr else "failed",
-            "ocr_date":     ocr_date,
-            "ocr_amount":   ocr.get("amount"),
-            "ocr_printed_amount":     ocr.get("printed_amount"),
-            "ocr_handwritten_amount": ocr.get("handwritten_amount"),
-            "ocr_merchant": ocr.get("merchant"),
-            "ocr_model":    ocr.get("_model"),
-            "match_status": "pending_match",
-        })
+        # One image may hold multiple receipts → one ledger entry per receipt.
+        ocr_list = _ocr_receipt_auto(content, mime_type) or [{}]
+        now_disp = datetime.now().strftime("%Y-%m-%d %H:%M")
+        now_iso  = datetime.now().isoformat()
+        for sub_index, ocr in enumerate(ocr_list):
+            entry = {
+                "id":           _sub_entry_id(file_id, sub_index),
+                "file_id":      file_id,
+                "sub_index":    sub_index,
+                "filename":     filename,
+                "drive_url":    drive_url,
+                "mime_type":    mime_type,
+                "uploaded_at":  now_disp,
+                "synced_at":    now_iso,
+                "match_status": "pending_match",
+            }
+            entry.update(_ocr_entry_fields(ocr))
+            receipts.append(entry)
 
     _save_receipts(username, receipts)
     return ("redirect", "/cardconv/ledger")
+
+
+def _handle_ledger_reocr(username: str, body: dict):
+    """POST /cardconv/ledger/reocr — force multi-receipt re-OCR for given file_ids.
+
+    Body: {"file_ids": [...]}. Re-downloads each Drive original, runs multi-receipt
+    OCR, and replaces that file's ledger entries with fresh sub-receipts. Use this
+    to upgrade legacy single-receipt entries that actually held multiple receipts.
+    """
+    file_ids = body.get("file_ids") or []
+    if isinstance(file_ids, str):
+        file_ids = [file_ids]
+    if not file_ids:
+        return ("json", {"error": "no file_ids"}, 400)
+    service = _get_drive_service(username)
+    if not service:
+        return ("json", {"error": "drive not connected"}, 400)
+
+    ledger  = _load_ledger(username)
+    entries = ledger["entries"]
+    done = 0
+    for fid in file_ids:
+        old = next((e for e in entries if e.get("file_id") == fid), None)
+        if not old:
+            continue
+        try:
+            meta    = service.files().get(
+                fileId=fid, fields="id,name,mimeType,webViewLink").execute()
+            mime    = meta.get("mimeType", old.get("mime_type", ""))
+            content = service.files().get_media(fileId=fid).execute()
+        except Exception:
+            continue
+        ocr_list = _ocr_receipt_auto(content, mime)
+        if not ocr_list:
+            continue  # keep existing entries when re-OCR yields nothing
+        url      = (meta.get("webViewLink") or old.get("drive_url")
+                    or f'https://drive.google.com/file/d/{fid}/view')
+        filename = meta.get("name") or old.get("filename", "")
+        entries[:] = [e for e in entries if e.get("file_id") != fid]
+        now_iso = datetime.now().isoformat()
+        for sub_index, ocr in enumerate(ocr_list):
+            entry = {
+                "id":           _sub_entry_id(fid, sub_index),
+                "file_id":      fid,
+                "sub_index":    sub_index,
+                "filename":     filename,
+                "drive_url":    url,
+                "mime_type":    mime,
+                "uploaded_at":  old.get("uploaded_at") or now_iso,
+                "synced_at":    now_iso,
+                "match_status": "pending_match",
+            }
+            entry.update(_ocr_entry_fields(ocr))
+            entries.append(entry)
+        done += 1
+
+    _save_ledger(username, ledger)
+    return ("json", {"reocr": done})
 
 
 def _handle_upload(body, user=None):
@@ -2497,6 +2553,8 @@ __TABCSS__
     <button class="btn btn-ghost btn-sm" data-set="matched" style="color:#22c55e">✅ Mark Matched</button>
     <button class="btn btn-ghost btn-sm" data-set="unmatched" style="color:#ef4444">❌ Mark Unmatched</button>
     <button class="btn btn-ghost btn-sm" data-set="pending_match" style="color:#f59e0b">⏳ Mark Pending</button>
+    <button class="btn btn-ghost btn-sm" id="dReocr" style="color:#6366f1"
+      title="Re-run OCR — detects multiple receipts in this image">🔁 Re-OCR (multi)</button>
   </div>
 </div>
 
@@ -2513,7 +2571,7 @@ __TABCSS__
 </div>
 
 <script>
-let CUR_PAGE = 1, CUR_ID = null, ENTRIES = [], VIEW_MODE = 'all';
+let CUR_PAGE = 1, CUR_ID = null, CUR_FILE_ID = null, ENTRIES = [], VIEW_MODE = 'all';
 const $ = id => document.getElementById(id);
 const STATUS_LABEL = {matched:'✅ Matched', unmatched:'❌ Unmatched', pending_match:'⏳ Pending Match'};
 
@@ -2675,6 +2733,7 @@ async function load(){
 
 function openPanel(e){
   CUR_ID = e.id;
+  CUR_FILE_ID = e.file_id || null;
   $('dDate').textContent = e.ocr_date || '–';
   $('dAmount').textContent = fmtAmt(e.ocr_amount);
   $('dPrinted').textContent = fmtAmt(e.ocr_printed_amount);
@@ -2703,6 +2762,25 @@ function closePanel(){
   $('overlay').classList.remove('open');
   $('panel').classList.remove('open');
   CUR_ID = null;
+  CUR_FILE_ID = null;
+}
+
+// Re-OCR the current image as multi-receipt: replaces its ledger entries with
+// one row per detected receipt.
+async function reocrCurrent(){
+  if(!CUR_FILE_ID) return;
+  const btn = $('dReocr');
+  btn.disabled = true; btn.textContent = '⏳ Re-OCR…';
+  try {
+    await fetch('/cardconv/ledger/reocr', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({file_ids:[CUR_FILE_ID]})
+    });
+  } finally {
+    btn.disabled = false; btn.textContent = '🔁 Re-OCR (multi)';
+  }
+  closePanel();
+  load();
 }
 
 async function setStatus(status){
@@ -2788,8 +2866,9 @@ function setDefaultDates(){
   $('fTo').value = iso(now);
 }
 
-document.querySelectorAll('.detail-actions button').forEach(b =>
+document.querySelectorAll('.detail-actions button[data-set]').forEach(b =>
   b.addEventListener('click', () => setStatus(b.dataset.set)));
+$('dReocr').addEventListener('click', reocrCurrent);
 $('panelClose').addEventListener('click', closePanel);
 $('overlay').addEventListener('click', closePanel);
 document.addEventListener('keydown', e => { if(e.key==='Escape') closePanel(); });
