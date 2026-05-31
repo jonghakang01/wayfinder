@@ -3842,13 +3842,14 @@ function _imgLbKey(e){ if(e.key==='Escape') closeImgLb(); }
     }).join('');
   }
 
-  function openOcrModal() {
+  window.openOcrModal = function() {
     overlay.style.display = 'flex';
     fetch('/cardconv/receipts/review/api')
       .then(function(r) { return r.json(); })
       .then(function(d) { renderEntries(d.entries || []); })
       .catch(function() { body.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:var(--danger);padding:40px">Failed to load.</div>'; });
-  }
+  };
+  var openOcrModal = window.openOcrModal;
 
   window.closeOcrModal = function() { overlay.style.display = 'none'; };
 
