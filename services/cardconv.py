@@ -423,7 +423,10 @@ def _upload_file_to_drive(username: str, file_bytes: bytes, filename: str,
 
 
 def _move_to_matched_folder(username: str, file_id: str) -> bool:
-    """Move receipt file from Wayfinder/Receipts/ to Wayfinder/Receipts/Matched/."""
+    """DEPRECATED — no longer called. Drive is a plain store and the ledger is the
+    single source of truth, so receipts are never auto-moved to Matched/ anymore.
+    Kept for backward compatibility; Sync scans both Receipts/ and Matched/.
+    Move receipt file from Wayfinder/Receipts/ to Wayfinder/Receipts/Matched/."""
     try:
         service = _get_drive_service(username)
         if not service:
@@ -770,10 +773,8 @@ def convert(csv_bytes: bytes, filename: str, username: str = None) -> tuple:
                         'vendor': vendor,
                     }
                     receipts_dirty = True
-                    # Best-effort Drive folder move — failure does not block status update.
-                    fid = receipt_match.get('file_id')
-                    if fid and username:
-                        _move_to_matched_folder(username, fid)
+                    # NOTE: Drive folder auto-move is deprecated. Drive is a plain
+                    # store; the Wayfinder ledger is the single source of truth.
             else:
                 ws.cell(start, 27).value = "❌ Missing"
 
@@ -782,10 +783,12 @@ def convert(csv_bytes: bytes, filename: str, username: str = None) -> tuple:
         if receipt_match:
             receipt_matched += 1
             rcpt_info = {
-                "file_id":    receipt_match.get("file_id"),
-                "filename":   receipt_match.get("filename"),
-                "drive_url":  receipt_match.get("drive_url"),
-                "ocr_amount": receipt_match.get("ocr_amount"),
+                "file_id":      receipt_match.get("file_id"),
+                "filename":     receipt_match.get("filename"),
+                "drive_url":    receipt_match.get("drive_url"),
+                "ocr_amount":   receipt_match.get("ocr_amount"),
+                "ocr_date":     receipt_match.get("ocr_date"),
+                "ocr_merchant": receipt_match.get("ocr_merchant"),
             }
         review_rows.append({
             "id":          "rv_" + uuid.uuid4().hex[:8],
@@ -836,10 +839,12 @@ def _run_batch_ocr(username: str) -> dict:
     if not service:
         return {"error": "drive not connected"}
     try:
-        receipts_id, _ = _get_receipts_folder_ids(service, username)
+        # Scan both Receipts/ and legacy Matched/ (back-compat + safety): the
+        # auto-move is deprecated, but old setups may still have files in Matched/.
+        receipts_id, matched_id = _get_receipts_folder_ids(service, username)
         results = service.files().list(
-            q=(f"'{receipts_id}' in parents and trashed=false "
-               f"and mimeType!='application/vnd.google-apps.folder'"),
+            q=(f"('{receipts_id}' in parents or '{matched_id}' in parents) "
+               f"and trashed=false and mimeType!='application/vnd.google-apps.folder'"),
             fields="files(id,name,mimeType,webViewLink)"
         ).execute()
         drive_files = results.get('files', [])
@@ -938,40 +943,61 @@ def _mark_duplicates(entries: list):
     Two receipts are considered duplicates when their OCR (date, final amount,
     merchant) match. Within each duplicate group the first entry (already sorted
     newest-first) is the keeper; the rest are flagged for easy bulk-deletion.
-    Sets e['dup'] (bool) and e['dup_keep'] (bool) on each entry.
+    Sets e['dup'] (bool), e['dup_keep'] (bool) and e['dup_group_id'] (str|None)
+    on each entry. dup_group_id lets the UI collapse a group into one row.
     """
     groups = {}
     for e in entries:
         e["dup"] = False
         e["dup_keep"] = False
+        e["dup_group_id"] = None
         date, amt = e.get("ocr_date"), e.get("ocr_amount")
         if date is None or amt is None:
             continue
         merch = (e.get("ocr_merchant") or "").strip().lower()
         groups.setdefault((date, round(amt, 2), merch), []).append(e)
+    gi = 0
     for grp in groups.values():
         if len(grp) > 1:
+            gid = f"dg_{gi}"
+            gi += 1
             for i, e in enumerate(grp):
                 e["dup"] = True
                 e["dup_keep"] = (i == 0)
+                e["dup_group_id"] = gid
 
 
 def _handle_ledger_delete(username: str, body: dict):
     """POST /cardconv/ledger/delete — remove entries by id from the ledger.
 
-    Body: {"ids": [...]}. Drive files are intentionally left untouched — the
-    user cleans up Drive separately.
+    Body: {"ids": [...], "also_drive": bool}. When also_drive is true, the
+    corresponding Drive originals are moved to the trash (best-effort).
     """
     raw = body.get("ids", [])
     ids = {str(i) for i in (raw if isinstance(raw, list) else [raw]) if i}
     if not ids:
         return ("json", {"error": "no ids"}, 400)
+    also_drive = bool(body.get("also_drive"))
+
     ledger = _load_ledger(username)
-    before = len(ledger["entries"])
+    removed_entries = [e for e in ledger["entries"] if e.get("id") in ids]
     ledger["entries"] = [e for e in ledger["entries"] if e.get("id") not in ids]
-    removed = before - len(ledger["entries"])
     _save_ledger(username, ledger)
-    return ("json", {"ok": True, "removed": removed})
+
+    trashed = 0
+    if also_drive and removed_entries:
+        service = _get_drive_service(username)
+        if service:
+            for e in removed_entries:
+                fid = e.get("file_id")
+                if not fid:
+                    continue
+                try:
+                    service.files().update(fileId=fid, body={"trashed": True}).execute()
+                    trashed += 1
+                except Exception:
+                    pass  # best-effort; ledger removal already succeeded
+    return ("json", {"ok": True, "removed": len(removed_entries), "trashed": trashed})
 
 
 def _handle_ledger_api(username: str, query: dict):
@@ -1458,11 +1484,12 @@ def _handle_drive_sync(username: str):
     if not service:
         return ("redirect", "/cardconv/ledger")
     try:
-        receipts_id, _ = _get_receipts_folder_ids(service, username)
-        # List files directly in Receipts (exclude subfolders)
+        # Scan both Receipts/ and legacy Matched/ (back-compat + safety): the
+        # auto-move is deprecated, but old setups may still have files in Matched/.
+        receipts_id, matched_id = _get_receipts_folder_ids(service, username)
         results = service.files().list(
-            q=(f"'{receipts_id}' in parents and trashed=false "
-               f"and mimeType!='application/vnd.google-apps.folder'"),
+            q=(f"('{receipts_id}' in parents or '{matched_id}' in parents) "
+               f"and trashed=false and mimeType!='application/vnd.google-apps.folder'"),
             fields="files(id,name,mimeType,webViewLink)"
         ).execute()
         drive_files = results.get('files', [])
@@ -2084,46 +2111,58 @@ def _render_review(user: str) -> str:
     source    = review.get("source", "")
     gen_at    = (review.get("generated_at", "") or "")[:19].replace("T", " ")
 
+    def _money(a):
+        return f'${a:,.2f}' if isinstance(a, (int, float)) else (_esc(a) or '–')
+
     if not rows:
-        body_html = ('<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:40px">'
+        body_html = ('<div style="text-align:center;color:var(--text-muted);padding:40px">'
                      'No conversion yet — upload a CSV on the '
-                     '<a href="/cardconv/convert" style="color:var(--accent)">Convert</a> tab.</td></tr>')
+                     '<a href="/cardconv/convert" style="color:var(--accent)">Convert</a> tab.</div>')
     else:
-        trs = []
+        items = []
         for r in rows:
             is_matched = r.get("matched")
             rc = r.get("receipt") or {}
+            # Transaction (CSV line item) header
+            txn = (
+                '<div class="rv-txn">'
+                  '<div class="rv-txn-main">'
+                    f'<span class="rv-date">{_esc(r.get("date")) or "–"}</span>'
+                    f'<span class="rv-merchant">{_esc(r.get("merchant"))}</span>'
+                  '</div>'
+                  '<div class="rv-txn-meta">'
+                    f'<span class="rv-amt">{_money(r.get("amount"))}</span>'
+                    f'<span class="rv-gl">G/L {_esc(r.get("gl"))}</span>'
+                  '</div>'
+                '</div>')
+            # Inline matched-receipt mini card, or unmatched + loss-reason input
             if is_matched and rc.get("file_id"):
                 fid   = rc["file_id"]
-                tn    = f'https://drive.google.com/thumbnail?id={fid}&sz=w80'
+                tn    = f'https://drive.google.com/thumbnail?id={fid}&sz=w240'
                 proxy = f'/cardconv/receipts/image/{fid}'
-                amt   = rc.get("ocr_amount")
-                amt_s = f'${amt:,.2f}' if isinstance(amt, (int, float)) else ''
-                link  = (f'<a href="{_esc(rc.get("drive_url"))}" target="_blank" class="btn btn-ghost btn-sm" '
-                         f'style="padding:2px 6px">🔗</a>' if rc.get("drive_url") else '')
-                receipt_cell = (
-                    '<div style="display:flex;align-items:center;gap:8px">'
-                    f'<img class="receipt-thumb" src="{tn}" loading="lazy" '
-                    f'onerror="this.onerror=null;this.src=\'{proxy}\'">'
-                    f'<span style="font-size:.78rem;color:var(--text-muted)">{amt_s}</span>{link}</div>')
-                action_cell = '<span class="status-badge status-matched">✅ Matched</span>'
+                link  = (f'<a href="{_esc(rc.get("drive_url"))}" target="_blank" '
+                         f'class="rv-drive-link">🔗 Drive</a>' if rc.get("drive_url") else '')
+                receipt_block = (
+                    '<div class="rv-receipt matched">'
+                      f'<img class="rv-thumb" src="{tn}" loading="lazy" '
+                      f'onerror="this.onerror=null;this.src=\'{proxy}\'">'
+                      '<div class="rv-card-info">'
+                        f'<div class="rv-card-line">🗓 {_esc(rc.get("ocr_date")) or "–"}</div>'
+                        f'<div class="rv-card-line rv-card-merchant">{_esc(rc.get("ocr_merchant")) or "–"}</div>'
+                        f'<div class="rv-card-line rv-card-amt">{_money(rc.get("ocr_amount"))}</div>'
+                        f'{link}'
+                      '</div>'
+                    '</div>')
             else:
-                receipt_cell = '<span style="color:var(--danger);font-size:.8rem;font-weight:600">❌ Missing</span>'
-                action_cell = (f'<textarea class="reason-input" data-id="{_esc(r.get("id"))}" rows="1" '
-                               f'placeholder="영수증 분실 사유 입력...">{_esc(r.get("loss_reason"))}</textarea>')
-            amount   = r.get("amount")
-            amt_disp = f'${amount:,.2f}' if isinstance(amount, (int, float)) else (_esc(amount) or '–')
-            row_cls  = '' if is_matched else ' class="row-unmatched"'
-            trs.append(
-                f'<tr{row_cls}>'
-                f'<td>{_esc(r.get("date")) or "–"}</td>'
-                f'<td style="font-weight:600">{_esc(r.get("merchant"))}</td>'
-                f'<td>{amt_disp}</td>'
-                f'<td style="color:var(--text-muted)">{_esc(r.get("gl"))}</td>'
-                f'<td>{receipt_cell}</td>'
-                f'<td>{action_cell}</td>'
-                '</tr>')
-        body_html = "".join(trs)
+                receipt_block = (
+                    '<div class="rv-receipt unmatched">'
+                      '<div class="rv-nomatch">❌ No receipt matched</div>'
+                      f'<textarea class="reason-input" data-id="{_esc(r.get("id"))}" rows="2" '
+                      f'placeholder="영수증 분실 사유 입력...">{_esc(r.get("loss_reason"))}</textarea>'
+                    '</div>')
+            item_cls = 'rv-item' + ('' if is_matched else ' unmatched')
+            items.append(f'<div class="{item_cls}">{txn}{receipt_block}</div>')
+        body_html = "".join(items)
 
     download_btn = (f'<a href="/cardconv/download/{out_fn}" class="btn btn-primary">⬇ Download xlsx</a>'
                     if out_fn else '')
@@ -2139,16 +2178,29 @@ def _render_review(user: str) -> str:
 .stat-card{{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md);padding:16px 20px;text-align:center}}
 .stat-value{{font-size:1.6rem;font-weight:700;color:var(--text);line-height:1.2}}
 .stat-label{{font-size:.73rem;color:var(--text-muted);margin-top:4px;text-transform:uppercase;letter-spacing:.06em}}
-.rv-table{{width:100%;border-collapse:collapse;font-size:.83rem}}
-.rv-table th{{padding:8px 12px;text-align:left;font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);border-bottom:1px solid var(--border)}}
-.rv-table td{{padding:10px 12px;border-bottom:1px solid var(--border);vertical-align:middle}}
-.rv-table tr:last-child td{{border-bottom:none}}
-.row-unmatched td{{background:rgba(239,68,68,.07)}}
-.receipt-thumb{{width:40px;height:40px;border-radius:6px;object-fit:cover;border:1px solid var(--border);background:var(--surface-3)}}
-.status-badge{{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:999px;font-size:.72rem;font-weight:700;white-space:nowrap}}
-.status-matched{{background:rgba(34,197,94,.15);color:#22c55e}}
+.rv-list{{display:flex;flex-direction:column;gap:10px}}
+.rv-item{{display:flex;gap:14px;align-items:stretch;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md);padding:12px 14px}}
+.rv-item.unmatched{{border-color:rgba(239,68,68,.35);background:rgba(239,68,68,.06)}}
+.rv-txn{{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;gap:6px}}
+.rv-txn-main{{display:flex;flex-direction:column;gap:2px}}
+.rv-date{{font-size:.74rem;color:var(--text-muted)}}
+.rv-merchant{{font-size:.95rem;font-weight:700;color:var(--text)}}
+.rv-txn-meta{{display:flex;gap:12px;align-items:baseline;flex-wrap:wrap}}
+.rv-amt{{font-size:1.05rem;font-weight:700;color:var(--text)}}
+.rv-gl{{font-size:.74rem;color:var(--text-muted)}}
+.rv-receipt{{flex:0 0 230px;border-left:1px solid var(--border);padding-left:14px}}
+.rv-receipt.matched{{display:flex;gap:12px;align-items:flex-start}}
+.rv-thumb{{width:120px;height:120px;border-radius:8px;object-fit:cover;border:1px solid var(--border);background:var(--surface-3);cursor:zoom-in}}
+.rv-card-info{{display:flex;flex-direction:column;gap:4px;min-width:0}}
+.rv-card-line{{font-size:.8rem;color:var(--text-muted)}}
+.rv-card-merchant{{font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
+.rv-card-amt{{font-size:1rem;font-weight:700;color:#22c55e}}
+.rv-drive-link{{font-size:.76rem;color:var(--accent);text-decoration:none;margin-top:2px}}
+.rv-drive-link:hover{{text-decoration:underline}}
+.rv-nomatch{{color:var(--danger);font-size:.84rem;font-weight:700;margin-bottom:6px}}
 .reason-input{{width:100%;min-width:160px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.78rem;padding:5px 8px;outline:none;resize:vertical;font-family:inherit}}
 .reason-input:focus{{border-color:var(--accent)}}
+@media(max-width:600px){{.rv-item{{flex-direction:column;gap:10px}}.rv-receipt{{flex:none;border-left:none;border-top:1px solid var(--border);padding-left:0;padding-top:10px}}}}
 .rv-foot{{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 4px;flex-wrap:wrap}}
 @media(max-width:600px){{.stat-grid{{grid-template-columns:1fr 1fr 1fr}}}}
 </style>
@@ -2169,18 +2221,13 @@ def _render_review(user: str) -> str:
   </div>
 
   <div class="notepad-card">
-    <div class="notepad-body" style="padding:8px 16px 4px;overflow-x:auto">
-      <table class="rv-table">
-        <thead><tr>
-          <th>Date</th><th>Merchant</th><th>Amount</th><th>G/L Account</th><th>Receipt</th><th>Action</th>
-        </tr></thead>
-        <tbody>{body_html}</tbody>
-      </table>
+    <div class="notepad-body" style="padding:12px 14px">
+      <div class="rv-list">{body_html}</div>
     </div>
   </div>
 
   <div class="rv-foot">
-    <span style="font-size:.78rem;color:var(--text-muted)">미매칭 거래는 빨간색으로 표시되며 분실 사유를 입력하면 자동 저장됩니다.</span>
+    <span style="font-size:.78rem;color:var(--text-muted)">각 거래 옆에 매칭된 영수증이 바로 표시됩니다. 미매칭 거래는 빨간색으로 표시되며 분실 사유를 입력하면 자동 저장됩니다.</span>
     {download_btn}
   </div>
 </div>
@@ -2246,6 +2293,23 @@ __TABCSS__
 .preset-btn{background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);
   font-size:.76rem;padding:4px 9px;cursor:pointer}
 .preset-btn:hover{border-color:var(--accent)}
+.preset-btn.active{background:rgba(250,204,21,.18);border-color:#facc15;color:#b45309;font-weight:700}
+.grp-toggle{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:10px;font-size:.62rem;
+  font-weight:700;background:rgba(99,102,241,.18);color:#6366f1;cursor:pointer;white-space:nowrap}
+.grp-toggle:hover{background:rgba(99,102,241,.3)}
+.ledger-table tr.dup-child{display:none}
+.ledger-table tr.dup-child.show{display:table-row}
+.del-modal{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) scale(.96);z-index:120;
+  width:380px;max-width:92vw;background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius-md);padding:22px 22px 18px;opacity:0;pointer-events:none;
+  transition:opacity .18s,transform .18s;box-shadow:0 12px 40px rgba(0,0,0,.4)}
+.del-modal.open{opacity:1;pointer-events:all;transform:translate(-50%,-50%) scale(1)}
+.del-title{font-size:1rem;font-weight:700;margin-bottom:10px}
+.del-body{font-size:.86rem;color:var(--text);margin-bottom:14px}
+.del-check{display:flex;align-items:center;gap:8px;font-size:.82rem;color:var(--text-muted);
+  cursor:pointer;margin-bottom:18px}
+.del-check input{width:15px;height:15px;cursor:pointer;accent-color:var(--danger)}
+.del-actions{display:flex;justify-content:flex-end;gap:10px}
 .receipt-thumb{width:40px;height:40px;border-radius:6px;object-fit:cover;border:1px solid var(--border);
   background:var(--surface-3);cursor:zoom-in}
 .receipt-thumb-placeholder{width:40px;height:40px;border-radius:6px;border:1px dashed var(--border);
@@ -2318,6 +2382,7 @@ __TABCSS__
     <button class="preset-btn" data-preset="3m">Last 3 months</button>
     <button class="preset-btn" data-preset="ytd">YTD</button>
     <button class="preset-btn" data-preset="all">All time</button>
+    <button class="preset-btn" id="viewToggle" title="Collapse duplicate receipts into one row">🔁 Group Duplicates</button>
     <button class="btn btn-sm" id="fDelete" disabled
       style="margin-left:auto;background:rgba(239,68,68,.15);color:#ef4444;border:1px solid rgba(239,68,68,.3)">
       🗑 Delete Selected (0)</button>
@@ -2378,8 +2443,20 @@ __TABCSS__
   </div>
 </div>
 
+<div class="overlay-bg" id="delOverlay"></div>
+<div class="del-modal" id="delModal">
+  <div class="del-title">🗑 영수증 삭제</div>
+  <div class="del-body" id="delBody">체크된 영수증을 Ledger에서 삭제할까요?</div>
+  <label class="del-check"><input type="checkbox" id="delDrive"> Drive 원본도 함께 휴지통으로 이동</label>
+  <div class="del-actions">
+    <button class="btn btn-ghost btn-sm" id="delCancel">취소</button>
+    <button class="btn btn-sm" id="delConfirm"
+      style="background:rgba(239,68,68,.15);color:#ef4444;border:1px solid rgba(239,68,68,.3)">삭제</button>
+  </div>
+</div>
+
 <script>
-let CUR_PAGE = 1, CUR_ID = null, ENTRIES = [];
+let CUR_PAGE = 1, CUR_ID = null, ENTRIES = [], VIEW_MODE = 'all';
 const $ = id => document.getElementById(id);
 const STATUS_LABEL = {matched:'✅ Matched', unmatched:'❌ Unmatched', pending_match:'⏳ Pending Match'};
 
@@ -2432,6 +2509,92 @@ function renderLastSynced(iso){
   el.textContent = fmtAgo(el.dataset.ts);
 }
 
+// Build one ledger <tr>. opts.groupHead adds a clickable '+N' badge that toggles
+// the group's child rows; opts.groupChild marks a collapsed duplicate row.
+function rowHtml(e, i, opts){
+  opts = opts || {};
+  const h = e.ocr_handwritten_amount;
+  const handCell = (h===null||h===undefined)
+    ? '<td style="color:var(--text-muted)">–</td>'
+    : '<td style="color:#f59e0b;font-weight:600">' + fmtAmt(h) + ' ✍️</td>';
+  const actionCell = (e.match_status==='matched')
+    ? '<td><button class="btn btn-ghost btn-sm act-undo" data-id="' + e.id +
+      '" style="color:#f59e0b;padding:2px 8px" title="Undo match — reset to pending">↩ Undo</button></td>'
+    : '<td></td>';
+  // Duplicate group: non-keeper rows are pre-checked for quick cleanup.
+  const preCheck = (e.dup && !e.dup_keep) ? ' checked' : '';
+  const checkCell = '<td><input type="checkbox" class="row-check sel" data-id="' +
+    e.id + '"' + preCheck + '></td>';
+  let dupTag = e.dup
+    ? (e.dup_keep ? '<span class="keep-tag">KEEP</span>'
+                  : '<span class="dup-tag">🔁 Duplicate</span>')
+    : '';
+  if(opts.groupHead){
+    dupTag = '<span class="grp-toggle" data-gid="' + opts.groupHead + '">+' +
+      opts.extra + ' duplicate' + (opts.extra>1?'s':'') + '</span>';
+  }
+  let cls = e.dup ? 'dup-row' : '';
+  if(opts.groupChild) cls += ' dup-child gc-' + opts.groupChild;
+  return '<tr data-i="' + i + '"' + (cls?(' class="'+cls.trim()+'"'):'') + '>' +
+    checkCell +
+    '<td>' + (e.ocr_date||'–') + dupTag + '</td>' +
+    '<td style="color:var(--text-muted)">' + fmtAmt(e.ocr_printed_amount) + '</td>' +
+    handCell +
+    '<td style="font-weight:700">' + fmtAmt(e.ocr_amount) + '</td>' +
+    '<td>' + (e.ocr_merchant||'–') + '</td>' +
+    '<td>' + thumb(e) + '</td>' +
+    '<td><span class="status-badge status-' + (e.match_status||'unmatched') + '">' +
+      (STATUS_LABEL[e.match_status]||e.match_status||'–') + '</span>' + matchInfo(e) + '</td>' +
+    '<td>' + aiBadge(e.ocr_model) + '</td>' +
+    actionCell +
+  '</tr>';
+}
+
+function renderBody(entries){
+  if(VIEW_MODE === 'all') return entries.map((e,i) => rowHtml(e,i)).join('');
+  // Group mode: collapse each dup_group_id into a head row + hidden child rows.
+  const groups = {}, order = [];
+  entries.forEach((e,i) => {
+    const gid = e.dup_group_id;
+    if(gid){
+      if(!groups[gid]){ groups[gid] = []; order.push({type:'group', gid}); }
+      groups[gid].push(i);
+    } else { order.push({type:'single', i}); }
+  });
+  let html = '';
+  order.forEach(o => {
+    if(o.type==='single'){ html += rowHtml(entries[o.i], o.i); return; }
+    const idxs = groups[o.gid], head = idxs[0];
+    html += rowHtml(entries[head], head, {groupHead:o.gid, extra:idxs.length-1});
+    idxs.slice(1).forEach(ci => { html += rowHtml(entries[ci], ci, {groupChild:o.gid}); });
+  });
+  return html;
+}
+
+function rerender(){
+  const body = $('ledgerBody');
+  if(!ENTRIES.length){
+    body.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--text-muted);padding:30px">No receipts</td></tr>';
+  } else {
+    body.innerHTML = renderBody(ENTRIES);
+    body.querySelectorAll('tr[data-i]').forEach(tr =>
+      tr.addEventListener('click', () => openPanel(ENTRIES[+tr.dataset.i])));
+    body.querySelectorAll('.act-undo').forEach(b =>
+      b.addEventListener('click', ev => { ev.stopPropagation(); unmatchRow(b.dataset.id); }));
+    body.querySelectorAll('.sel').forEach(c =>
+      c.addEventListener('click', ev => ev.stopPropagation()));
+    body.querySelectorAll('.sel').forEach(c =>
+      c.addEventListener('change', updateDeleteBtn));
+    body.querySelectorAll('.grp-toggle').forEach(g =>
+      g.addEventListener('click', ev => {
+        ev.stopPropagation();
+        body.querySelectorAll('.gc-' + g.dataset.gid).forEach(r => r.classList.toggle('show'));
+      }));
+  }
+  $('checkAll').checked = false;
+  updateDeleteBtn();
+}
+
 async function load(){
   const p = new URLSearchParams();
   if($('fFrom').value) p.set('from', $('fFrom').value);
@@ -2444,52 +2607,7 @@ async function load(){
   $('statMatched').textContent = d.matched;
   $('statUnmatched').textContent = d.unmatched;
   ENTRIES = d.entries;
-  const body = $('ledgerBody');
-  if(!d.entries.length){
-    body.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--text-muted);padding:30px">No receipts</td></tr>';
-  } else {
-    body.innerHTML = d.entries.map((e,i) => {
-      const h = e.ocr_handwritten_amount;
-      const handCell = (h===null||h===undefined)
-        ? '<td style="color:var(--text-muted)">–</td>'
-        : '<td style="color:#f59e0b;font-weight:600">' + fmtAmt(h) + ' ✍️</td>';
-      const actionCell = (e.match_status==='matched')
-        ? '<td><button class="btn btn-ghost btn-sm act-undo" data-id="' + e.id +
-          '" style="color:#f59e0b;padding:2px 8px" title="Undo match — reset to pending">↩ Undo</button></td>'
-        : '<td></td>';
-      // Duplicate group: non-keeper rows are pre-checked for quick cleanup.
-      const preCheck = (e.dup && !e.dup_keep) ? ' checked' : '';
-      const checkCell = '<td><input type="checkbox" class="row-check sel" data-id="' +
-        e.id + '"' + preCheck + '></td>';
-      const dupTag = e.dup
-        ? (e.dup_keep ? '<span class="keep-tag">KEEP</span>'
-                      : '<span class="dup-tag">🔁 Duplicate</span>')
-        : '';
-      return '<tr data-i="' + i + '"' + (e.dup ? ' class="dup-row"' : '') + '>' +
-        checkCell +
-        '<td>' + (e.ocr_date||'–') + dupTag + '</td>' +
-        '<td style="color:var(--text-muted)">' + fmtAmt(e.ocr_printed_amount) + '</td>' +
-        handCell +
-        '<td style="font-weight:700">' + fmtAmt(e.ocr_amount) + '</td>' +
-        '<td>' + (e.ocr_merchant||'–') + '</td>' +
-        '<td>' + thumb(e) + '</td>' +
-        '<td><span class="status-badge status-' + (e.match_status||'unmatched') + '">' +
-          (STATUS_LABEL[e.match_status]||e.match_status||'–') + '</span>' + matchInfo(e) + '</td>' +
-        '<td>' + aiBadge(e.ocr_model) + '</td>' +
-        actionCell +
-      '</tr>';
-    }).join('');
-    body.querySelectorAll('tr[data-i]').forEach(tr =>
-      tr.addEventListener('click', () => openPanel(ENTRIES[+tr.dataset.i])));
-    body.querySelectorAll('.act-undo').forEach(b =>
-      b.addEventListener('click', ev => { ev.stopPropagation(); unmatchRow(b.dataset.id); }));
-    body.querySelectorAll('.sel').forEach(c =>
-      c.addEventListener('click', ev => ev.stopPropagation()));
-    body.querySelectorAll('.sel').forEach(c =>
-      c.addEventListener('change', updateDeleteBtn));
-  }
-  $('checkAll').checked = false;
-  updateDeleteBtn();
+  rerender();
   renderLastSynced(d.last_synced);
   $('pInfo').textContent = d.page + ' / ' + d.pages;
   $('pPrev').disabled = d.page <= 1;
@@ -2563,14 +2681,29 @@ function updateDeleteBtn(){
   btn.disabled = n === 0;
 }
 
-async function deleteSelected(){
+function deleteSelected(){
   const ids = selectedIds();
   if(!ids.length) return;
-  if(!confirm('Delete ' + ids.length + ' receipt(s) from the ledger?\n(Drive files are NOT deleted.)')) return;
+  $('delBody').textContent = '체크된 영수증 ' + ids.length + '건을 Ledger에서 삭제할까요?';
+  $('delDrive').checked = false;
+  $('delOverlay').classList.add('open');
+  $('delModal').classList.add('open');
+}
+
+function closeDelModal(){
+  $('delOverlay').classList.remove('open');
+  $('delModal').classList.remove('open');
+}
+
+async function confirmDelete(){
+  const ids = selectedIds();
+  const alsoDrive = $('delDrive').checked;
+  closeDelModal();
+  if(!ids.length) return;
   await fetch('/cardconv/ledger/delete', {
     method:'POST',
     headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ids: ids})
+    body: JSON.stringify({ids: ids, also_drive: alsoDrive})
   });
   load();
 }
@@ -2622,8 +2755,21 @@ $('checkAll').addEventListener('change', () => {
   document.querySelectorAll('.sel').forEach(c => { c.checked = $('checkAll').checked; });
   updateDeleteBtn();
 });
-document.querySelectorAll('.preset-btn').forEach(b =>
+document.querySelectorAll('.preset-btn:not(#viewToggle)').forEach(b =>
   b.addEventListener('click', () => applyPreset(b.dataset.preset)));
+
+// Group Duplicates toggle — re-renders the current page without refetching.
+$('viewToggle').addEventListener('click', () => {
+  VIEW_MODE = (VIEW_MODE === 'all') ? 'group' : 'all';
+  $('viewToggle').textContent = (VIEW_MODE === 'all') ? '🔁 Group Duplicates' : '☰ Show All';
+  $('viewToggle').classList.toggle('active', VIEW_MODE === 'group');
+  rerender();
+});
+
+// Delete confirmation modal (with optional Drive trashing).
+$('delCancel').addEventListener('click', closeDelModal);
+$('delOverlay').addEventListener('click', closeDelModal);
+$('delConfirm').addEventListener('click', confirmDelete);
 
 setDefaultDates();
 load();
