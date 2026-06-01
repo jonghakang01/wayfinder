@@ -1093,36 +1093,32 @@ def _run_batch_ocr(username: str) -> dict:
 
         ledger  = _load_ledger(username)
         entries = ledger["entries"]
-        # Skip files already processed by the multi-receipt pipeline (multi_ocr)
-        # or already matched (preserve match status). Everything else — legacy
-        # single-receipt entries and failed/new files — is (re-)OCR'd as multi so
-        # any image auto-detects multiple receipts without a manual Re-OCR.
+
+        # Skip files already confirmed in the ledger.
         done_fids = {e.get("file_id") for e in entries
                      if (e.get("multi_ocr") and e.get("ocr_amount") is not None)
                      or e.get("matched")}
-        processed = failed = 0
+        # Also skip files already waiting in the staging queue (accumulated from
+        # previous runs the user hasn't reviewed yet).
+        staging = _load_ocr_staging(username)
+        staged_fids = {e.get("file_id") for e in staging.get("entries", [])}
+        skip_fids = done_fids | staged_fids
+
+        new_staged = []
+        now_disp = datetime.now().strftime("%Y-%m-%d %H:%M")
+        now_iso  = datetime.now().isoformat()
 
         for f in drive_files:
             fid  = f.get('id')
             mime = f.get('mimeType', '')
             if mime not in _SUPPORTED_MIME:
                 continue
-            if fid in done_fids:
-                continue  # already OCR'd successfully
+            if fid in skip_fids:
+                continue
             content  = service.files().get_media(fileId=fid).execute()
             ocr_list = _ocr_receipt_auto(content, mime) or [{}]
             url      = f.get('webViewLink') or f'https://drive.google.com/file/d/{fid}/view'
-            # Drop prior failed/pending rows for this file so single→multi upgrades
-            # don't leave stale entries behind.
-            entries[:] = [e for e in entries if e.get("file_id") != fid]
-            now_disp = datetime.now().strftime("%Y-%m-%d %H:%M")
-            now_iso  = datetime.now().isoformat()
             for sub_index, ocr in enumerate(ocr_list):
-                fields = _ocr_entry_fields(ocr)
-                if fields["ocr_status"] == "done":
-                    processed += 1
-                else:
-                    failed += 1
                 entry = {
                     "id":           _sub_entry_id(fid, sub_index),
                     "file_id":      fid,
@@ -1135,19 +1131,27 @@ def _run_batch_ocr(username: str) -> dict:
                     "uploaded_at":  now_disp,
                     "synced_at":    now_iso,
                 }
-                entry.update(fields)
-                entries.append(entry)
+                entry.update(_ocr_entry_fields(ocr))
+                new_staged.append(entry)
 
-        ledger["last_batch_at"] = datetime.now().isoformat()
+        # Accumulate into staging queue — never replace, always append.
+        if new_staged:
+            staging.setdefault("entries", []).extend(new_staged)
+            staging["staged_at"] = now_iso
+            _save_ocr_staging(username, staging)
+
+        ledger["last_batch_at"] = now_iso
         _save_ledger(username, ledger)
-        if processed > 0:
+
+        if new_staged:
+            total_pending = len(staging.get("entries", []))
             _send_push_notification(
                 username,
-                title="🧾 New receipts synced",
-                body=f"{processed} new receipt{'s' if processed != 1 else ''} imported from Drive.",
+                title="🧾 New receipts ready to review",
+                body=f"{len(new_staged)} new receipt{'s' if len(new_staged) != 1 else ''} synced from Drive — {total_pending} total pending review.",
                 url="/cardconv/ledger",
             )
-        return {"processed": processed, "failed": failed, "total": len(entries)}
+        return {"staged": len(new_staged), "total_pending": len(staging.get("entries", []))}
     except Exception as e:
         return {"error": str(e)}
 
@@ -1954,26 +1958,29 @@ def _do_drive_sync_work(username: str, job_id: str):
         drive_files = results.get('files', [])
 
         existing = _load_receipts(username)
-        ocr_done_ids = {r.get('file_id') for r in existing
-                        if (r.get('multi_ocr') and r.get('ocr_amount') is not None)
-                        or r.get('matched')}
+        done_fids = {r.get('file_id') for r in existing
+                     if (r.get('multi_ocr') and r.get('ocr_amount') is not None)
+                     or r.get('matched')}
+        # Skip files already in the staging queue.
+        staging = _load_ocr_staging(username)
+        staged_fids = {e.get("file_id") for e in staging.get("entries", [])}
+        skip_fids = done_fids | staged_fids
         supported = {'image/jpeg', 'image/png', 'application/pdf', 'image/gif', 'image/webp'}
 
-        staged_entries = []
+        new_staged = []
         now_disp = datetime.now().strftime("%Y-%m-%d %H:%M")
         now_iso  = datetime.now().isoformat()
 
         for f in drive_files:
             fid = f.get('id')
-            if fid in ocr_done_ids:
-                continue
             mime = f.get('mimeType', '')
             if mime not in supported:
+                continue
+            if fid in skip_fids:
                 continue
             content  = service.files().get_media(fileId=fid).execute()
             ocr_list = _ocr_receipt_auto(content, mime) or [{}]
             url      = f.get('webViewLink') or f'https://drive.google.com/file/d/{fid}/view'
-            existing = [r for r in existing if r.get("file_id") != fid]
             for sub_index, ocr in enumerate(ocr_list):
                 entry = {
                     "id":           _sub_entry_id(fid, sub_index),
@@ -1988,17 +1995,19 @@ def _do_drive_sync_work(username: str, job_id: str):
                     "synced_at":    now_iso,
                 }
                 entry.update(_ocr_entry_fields(ocr))
-                staged_entries.append(entry)
+                new_staged.append(entry)
 
-        _save_receipts(username, existing)
+        # Accumulate — append to existing staging queue, never replace.
+        if new_staged:
+            staging.setdefault("entries", []).extend(new_staged)
+            staging["staged_at"] = now_iso
+            _save_ocr_staging(username, staging)
+
         ledger = _load_ledger(username)
         ledger["last_batch_at"] = now_iso
         _save_ledger(username, ledger)
 
-        if staged_entries:
-            _save_ocr_staging(username, {"entries": staged_entries, "staged_at": now_iso})
-
-        _sync_jobs[job_id] = {"status": "done", "staged": len(staged_entries)}
+        _sync_jobs[job_id] = {"status": "done", "staged": len(new_staged)}
 
     except Exception as e:
         _sync_jobs[job_id] = {"status": "error", "staged": 0, "error": str(e)}
