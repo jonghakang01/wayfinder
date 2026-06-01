@@ -899,11 +899,13 @@ def convert(csv_bytes: bytes, filename: str, username: str = None) -> tuple:
     if username:
         receipts = _load_receipts(username)
         for r in receipts:
-            rdate   = r.get("ocr_date")
-            ramount = r.get("ocr_amount")
-            # Treat literal "YYYY-MM-DD" placeholder as None
+            rdate = r.get("ocr_date")
             if rdate == "YYYY-MM-DD":
                 rdate = None
+            # Handwritten amount takes priority as the final match target.
+            hw = r.get("ocr_handwritten_amount")
+            pr = r.get("ocr_printed_amount") or r.get("ocr_amount")
+            ramount = hw if hw is not None else pr
             if ramount is not None:
                 try:
                     key = (rdate, round(float(ramount), 2))
@@ -1352,11 +1354,14 @@ def _handle_rematch(username: str, entry_id: str):
     rdate = entry.get("ocr_date")
     if rdate == "YYYY-MM-DD":
         rdate = None
-    ramount = entry.get("ocr_amount")
-    if ramount is None:
+    # Handwritten amount takes priority over printed as the final match target.
+    hw = entry.get("ocr_handwritten_amount")
+    pr = entry.get("ocr_printed_amount") or entry.get("ocr_amount")
+    raw_amount = hw if hw is not None else pr
+    if raw_amount is None:
         return ("json", {"error": "no OCR amount to match against"}, 400)
     try:
-        ramount = round(float(ramount), 2)
+        ramount = round(float(raw_amount), 2)
     except (ValueError, TypeError):
         return ("json", {"error": "invalid amount"}, 400)
 
@@ -2885,7 +2890,7 @@ def _handle_ledger_update(username: str, entry_id: str, body: dict):
             if raw is not None:
                 val = (raw[0] if isinstance(raw, list) else str(raw)).strip()
                 e[field] = val or None
-        for field in ("ocr_amount", "ocr_handwritten_amount"):
+        for field in ("ocr_printed_amount", "ocr_handwritten_amount"):
             raw = body.get(field)
             if raw is not None:
                 val = (raw[0] if isinstance(raw, list) else str(raw)).strip()
@@ -2893,10 +2898,10 @@ def _handle_ledger_update(username: str, entry_id: str, body: dict):
                     e[field] = float(val) if val else None
                 except ValueError:
                     pass
-        # Recompute final amount
+        # ocr_amount always reflects handwritten-priority final amount.
         hw = e.get("ocr_handwritten_amount")
-        pr = e.get("ocr_amount")
-        e["ocr_final_amount"] = hw if hw is not None else pr
+        pr = e.get("ocr_printed_amount")
+        e["ocr_amount"] = hw if hw is not None else pr
         updated = True
         break
     if not updated:
@@ -4146,7 +4151,7 @@ async function savePanelEdit(){
   var body = new URLSearchParams({
     ocr_date:                 $('eDate').value,
     ocr_merchant:             $('eMerchant').value,
-    ocr_amount:               $('ePrinted').value,
+    ocr_printed_amount:       $('ePrinted').value,
     ocr_handwritten_amount:   $('eHand').value,
   });
   var r = await fetch('/cardconv/ledger/' + CUR_ID + '/update', {method:'POST', body});
