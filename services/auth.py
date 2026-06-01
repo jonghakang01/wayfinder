@@ -7,7 +7,11 @@ SETTINGS_FILE = os.path.join(DATA_ROOT, "settings.json")
 SESSIONS = {}  # token -> username  (persisted to SESSIONS_FILE)
 
 ADMIN_USERNAME    = "jongha.kang"
-CONTROLLED_SERVICES = {"todo", "habit"}
+CONTROLLED_SERVICES = {"todo", "cardconv"}
+APP_LABELS = {
+    "todo":     "📋 Daily Task",
+    "cardconv": "💳 Cheil USA AMEX Converter",
+}
 
 
 def _load_sessions():
@@ -66,16 +70,22 @@ def _migrate_format(data):
         if isinstance(v, str):
             data[k] = {
                 "pw": v, "role": "admin" if k == ADMIN_USERNAME else "user",
-                "email": "", "services": sorted(CONTROLLED_SERVICES),
+                "email": "", "services": sorted(CONTROLLED_SERVICES), "blocked": False,
             }
             changed = True
         else:
             if "email" not in v:
-                v["email"] = ""
-                changed = True
+                v["email"] = ""; changed = True
+            if "blocked" not in v:
+                v["blocked"] = False; changed = True
             if "services" not in v:
-                v["services"] = sorted(CONTROLLED_SERVICES)
-                changed = True
+                v["services"] = sorted(CONTROLLED_SERVICES); changed = True
+            else:
+                # Migrate old "habit" service → "cardconv" if applicable
+                svcs = v["services"]
+                new_svcs = [s for s in svcs if s in CONTROLLED_SERVICES]
+                if set(new_svcs) != set(svcs):
+                    v["services"] = new_svcs; changed = True
     return data, changed
 
 
@@ -124,6 +134,12 @@ def is_admin(username):
     return get_role(username) == "admin"
 
 
+def is_blocked(username):
+    if not username:
+        return False
+    return load_users().get(username, {}).get("blocked", False)
+
+
 def has_service_access(username, service_path):
     service_name = service_path.lstrip("/").split("/")[0]
     if service_name not in CONTROLLED_SERVICES:
@@ -131,7 +147,39 @@ def has_service_access(username, service_path):
     if is_admin(username):
         return True
     users = load_users()
+    if users.get(username, {}).get("blocked"):
+        return False
     return service_name in users.get(username, {}).get("services", [])
+
+
+def block_user(username):
+    users = load_users()
+    if username in users:
+        users[username]["blocked"] = True
+        save_users(users)
+        # Invalidate all sessions for this user
+        for token, uname in list(SESSIONS.items()):
+            if uname == username:
+                del SESSIONS[token]
+        _save_sessions()
+
+
+def unblock_user(username):
+    users = load_users()
+    if username in users:
+        users[username]["blocked"] = False
+        save_users(users)
+
+
+def delete_user(username):
+    users = load_users()
+    if username in users and users[username].get("role") != "admin":
+        del users[username]
+        save_users(users)
+        for token, uname in list(SESSIONS.items()):
+            if uname == username:
+                del SESSIONS[token]
+        _save_sessions()
 
 
 def set_role(username, role):
@@ -195,7 +243,7 @@ def handle(method, path, body, ctx=None):
 def render_login(error="", register_error=""):
     settings = load_settings()
     available = settings.get("available_services", [])
-    svc_labels = {"todo": "📋 Todo", "habit": "🏃 습관 트래커"}
+    svc_labels = APP_LABELS
 
     svc_html = ""
     if available:

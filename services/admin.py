@@ -32,6 +32,24 @@ def handle(method, path, body, ctx=None):
                 auth.save_users(users)
         return ("redirect", "/admin")
 
+    if method == "POST" and path == "/admin/block_user":
+        target = body.get("username", [""])[0].strip()
+        if target and target != user:
+            auth.block_user(target)
+        return ("redirect", "/admin")
+
+    if method == "POST" and path == "/admin/unblock_user":
+        target = body.get("username", [""])[0].strip()
+        if target and target != user:
+            auth.unblock_user(target)
+        return ("redirect", "/admin")
+
+    if method == "POST" and path == "/admin/delete_user":
+        target = body.get("username", [""])[0].strip()
+        if target and target != user:
+            auth.delete_user(target)
+        return ("redirect", "/admin")
+
     if method == "POST" and path == "/admin/toggle_service":
         svc = body.get("service", [""])[0].strip()
         if svc in auth.CONTROLLED_SERVICES:
@@ -111,16 +129,19 @@ def render_admin(current_user, notify_result=""):
     available_svcs = settings.get("available_services", [])
     total = len(users)
     admin_count = sum(1 for v in users.values() if v.get("role") == "admin")
-    svc_labels = {"todo": "📋 Todo", "habit": "🏃 습관"}
+    svc_labels = auth.APP_LABELS
 
     rows = ""
     for username in sorted(users):
-        info = users[username]
+        info     = users[username]
         role     = info.get("role", "user")
         email    = info.get("email", "") or "—"
+        blocked  = info.get("blocked", False)
         is_self  = username == current_user
         is_adm   = role == "admin"
 
+        name_style = "color:#ef4444;text-decoration:line-through" if blocked else ""
+        blocked_tag = ' <span class="badge" style="background:#fee2e2;color:#b91c1c;font-size:11px">🚫 Blocked</span>' if blocked else ""
         badge = (
             '<span class="badge adm-badge">🔑 Admin</span>' if is_adm
             else '<span class="badge usr-badge">👥 User</span>'
@@ -129,13 +150,11 @@ def render_admin(current_user, notify_result=""):
         if is_self:
             control   = '<span class="self-tag">본인</span>'
             svc_col   = '<span class="svc-all-badge">전체 접근</span>'
-            view_col  = ""
+            action_col = ""
         elif is_adm:
-            adm_active = "seg-active adm-active"
-            usr_active = ""
-            confirm_adm = f'onclick="return confirm(\'{username}님의 Admin 권한을 제거할까요?\')"'
-            control = f'''
-            <div class="seg-wrap">
+            adm_active  = "seg-active adm-active"
+            confirm_adm = f"return confirm('{username}님의 Admin 권한을 제거할까요?')"
+            control = f'''<div class="seg-wrap">
               <form method="POST" action="/admin/set_role" style="display:contents">
                 <input type="hidden" name="username" value="{username}">
                 <input type="hidden" name="role" value="admin">
@@ -144,23 +163,19 @@ def render_admin(current_user, notify_result=""):
               <form method="POST" action="/admin/set_role" style="display:contents">
                 <input type="hidden" name="username" value="{username}">
                 <input type="hidden" name="role" value="user">
-                <button class="seg-btn {usr_active}" type="submit" {confirm_adm}>User</button>
+                <button class="seg-btn" type="submit" onclick="{confirm_adm}">User</button>
               </form>
             </div>'''
-            svc_col  = '<span class="svc-all-badge">전체 접근</span>'
-            view_col = f'''
-            <a href="/admin/view/{username}/todo"  class="view-btn">📋 Todo</a>
-            <a href="/admin/view/{username}/habit" class="view-btn">🏃 습관</a>'''
+            svc_col   = '<span class="svc-all-badge">전체 접근</span>'
+            action_col = ""  # Admin 계정은 Block/Delete 없음
         else:
-            adm_active = ""
-            usr_active = "seg-active"
-            confirm_usr = f'onclick="return confirm(\'{username}님에게 Admin 권한을 부여할까요?\')"'
-            control = f'''
-            <div class="seg-wrap">
+            usr_active  = "seg-active"
+            confirm_usr = f"return confirm('{username}님에게 Admin 권한을 부여할까요?')"
+            control = f'''<div class="seg-wrap">
               <form method="POST" action="/admin/set_role" style="display:contents">
                 <input type="hidden" name="username" value="{username}">
                 <input type="hidden" name="role" value="admin">
-                <button class="seg-btn {adm_active}" type="submit" {confirm_usr}>Admin</button>
+                <button class="seg-btn" type="submit" onclick="{confirm_usr}">Admin</button>
               </form>
               <form method="POST" action="/admin/set_role" style="display:contents">
                 <input type="hidden" name="username" value="{username}">
@@ -172,29 +187,41 @@ def render_admin(current_user, notify_result=""):
             checks = "".join(
                 f'<label class="svc-check"><input type="checkbox" name="services" value="{s}"'
                 f'{" checked" if s in user_svcs else ""}> {svc_labels.get(s, s)}</label>'
-                for s in auth.CONTROLLED_SERVICES
+                for s in sorted(auth.CONTROLLED_SERVICES)
             )
-            svc_col = f'''
-            <form method="POST" action="/admin/set_services" class="svc-form">
+            svc_col = f'''<form method="POST" action="/admin/set_services" class="svc-form">
               <input type="hidden" name="username" value="{username}">
               {checks}
               <button type="submit" class="svc-save-btn">저장</button>
             </form>'''
-            view_col = f'''
-            <a href="/admin/view/{username}/todo"  class="view-btn">📋 Todo</a>
-            <a href="/admin/view/{username}/habit" class="view-btn">🏃 습관</a>'''
+            # Block / Unblock / Delete
+            if blocked:
+                block_btn = f'''<form method="POST" action="/admin/unblock_user" style="display:inline">
+                  <input type="hidden" name="username" value="{username}">
+                  <button type="submit" class="action-btn unblock-btn">✅ Unblock</button>
+                </form>'''
+            else:
+                block_btn = f'''<form method="POST" action="/admin/block_user" style="display:inline">
+                  <input type="hidden" name="username" value="{username}">
+                  <button type="submit" class="action-btn block-btn" onclick="return confirm('{username}님을 차단할까요?')">🚫 Block</button>
+                </form>'''
+            delete_btn = f'''<form method="POST" action="/admin/delete_user" style="display:inline">
+              <input type="hidden" name="username" value="{username}">
+              <button type="submit" class="action-btn delete-btn" onclick="return confirm('{username}님을 완전히 삭제할까요? 되돌릴 수 없습니다.')">🗑 Delete</button>
+            </form>'''
+            action_col = block_btn + " " + delete_btn
 
         rows += f'''
-        <tr class="{"row-self" if is_self else ""}">
+        <tr class="{"row-self" if is_self else "row-blocked" if blocked else ""}">
           <td class="col-name">
-            <span class="u-icon">{"🔑" if is_adm else "👤"}</span>
-            <span class="u-name">{username}</span>
+            <span class="u-icon">{"🔑" if is_adm else "🚫" if blocked else "👤"}</span>
+            <span class="u-name" style="{name_style}">{username}</span>{blocked_tag}
           </td>
           <td>{badge}</td>
           <td class="col-email">{email}</td>
           <td>{svc_col}</td>
           <td>{control}</td>
-          <td class="col-view">{view_col}</td>
+          <td class="col-action">{action_col}</td>
         </tr>'''
 
     # 전역 서비스 토글
@@ -264,6 +291,15 @@ tr.row-self{{background:#f0f9ff}}
 .notify-send-btn:hover{{background:#2563eb}}
 .notify-result{{padding:10px 16px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;color:#166534;font-size:13px;margin-bottom:16px}}
 .sec-desc{{font-size:13px;color:#64748b;margin-bottom:16px}}
+.action-btn{{padding:4px 10px;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap}}
+.block-btn{{background:#fef3c7;color:#92400e;border:1px solid #fde68a}}
+.block-btn:hover{{background:#fde68a}}
+.unblock-btn{{background:#d1fae5;color:#065f46;border:1px solid #6ee7b7}}
+.unblock-btn:hover{{background:#a7f3d0}}
+.delete-btn{{background:#fee2e2;color:#991b1b;border:1px solid #fca5a5}}
+.delete-btn:hover{{background:#fca5a5}}
+.col-action{{display:flex;gap:6px;align-items:center;flex-wrap:wrap}}
+tr.row-blocked td{{opacity:.65;background:#fff5f5}}
 </style>
 </head><body>
 <nav>
@@ -288,7 +324,7 @@ tr.row-self{{background:#f0f9ff}}
           <th>이메일</th>
           <th>서비스 권한</th>
           <th>권한 변경</th>
-          <th>데이터 열람</th>
+          <th>관리</th>
         </tr>
       </thead>
       <tbody>{rows}</tbody>
