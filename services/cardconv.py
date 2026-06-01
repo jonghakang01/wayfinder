@@ -145,9 +145,11 @@ def _save_hist(hist):
 
 
 def _add_hist(entry: dict):
+    if "id" not in entry:
+        entry["id"] = uuid.uuid4().hex[:10]
     hist = _load_hist()
     hist.insert(0, entry)
-    _save_hist(hist[:20])
+    _save_hist(hist[:100])
 
 
 def _receipts_file(username: str) -> Path:
@@ -1623,9 +1625,17 @@ def _handle_ledger_pdf(username: str, query: dict):
         y += cur_row_h + GAP
         row_in_page = (row_in_page + 1) % N_ROWS
 
-    out = pdf.output()
-    return ("binary", bytes(out), "application/pdf",
-            f"receipts_{username}_{date.today().isoformat()}.pdf")
+    out  = pdf.output()
+    fname = f"receipts_{username}_{date.today().isoformat()}.pdf"
+    _add_hist({
+        "type":     "pdf_download",
+        "date":     datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "filename": fname,
+        "filter":   flabel if 'flabel' in dir() else status,
+        "count":    stats.get("total", 0),
+        "user":     username,
+    })
+    return ("binary", bytes(out), "application/pdf", fname)
 
 
 # ── HTTP handler ──────────────────────────────────────────────────────────────
@@ -1644,6 +1654,15 @@ def handle(method, path, body, ctx=None):
         return ("html", _render_review(user))
     if method == "GET" and path == "/cardconv/history":
         return ("html", _render_history(user))
+    if method == "POST" and path == "/cardconv/history/delete":
+        ids = body.get("ids", [])
+        if isinstance(ids, str): ids = [ids]
+        hist = [h for h in _load_hist() if h.get("id") not in ids]
+        _save_hist(hist)
+        return ("json", {"ok": True})
+    if method == "POST" and path == "/cardconv/history/clear":
+        _save_hist([])
+        return ("json", {"ok": True})
     if method == "GET" and path == "/cardconv/keywords":
         return ("html", _render_keywords(user))
     if method == "POST" and path == "/cardconv/review/reason":
@@ -2014,11 +2033,13 @@ def _handle_upload(body, user=None):
     try:
         xlsx_bytes, out_fn, total, unmatched = convert(csv_bytes, csv_name, username=user)
         _add_hist({
+            "type":      "conversion",
             "filename":  out_fn,
             "source":    csv_name,
             "rows":      total,
             "unmatched": unmatched,
             "date":      datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "user":      user or "",
         })
         if user:
             _save_uploaded_csv(user, csv_bytes, csv_name, total, out_fn)
@@ -2436,20 +2457,47 @@ csvZone.addEventListener('drop', e => {{
 def _render_history(user: str) -> str:
     from server import CSS_VER
     hist = _load_hist()
-    hist_rows = ""
+
+    rows_html = ""
     for h in hist:
-        unm = (f'<span style="font-size:.72rem;color:var(--warn)">{h["unmatched"]} unmatched</span>'
-               if h.get("unmatched") else "")
-        hist_rows += (
-            f'<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)">'
-            f'<span style="font-size:.8rem;color:var(--text-muted);min-width:130px">{h["date"]}</span>'
-            f'<span style="flex:1;font-size:.85rem;color:var(--text);font-weight:600">{h["filename"]}</span>'
-            f'<span style="font-size:.78rem;color:var(--success)">{h["rows"]} rows</span>'
-            f'{unm}'
-            f'<a href="/cardconv/download/{h["filename"]}" class="btn btn-ghost btn-sm">⬇ Download</a>'
+        hid   = _esc(h.get("id", ""))
+        htype = h.get("type", "conversion")
+        hdate = _esc(h.get("date", ""))
+        icon  = "📤" if htype == "conversion" else "📥"
+        type_label = "Conversion" if htype == "conversion" else "PDF Download"
+        type_color = "color:#38bdf8" if htype == "conversion" else "color:#a78bfa"
+
+        if htype == "conversion":
+            src  = _esc(h.get("source", ""))
+            fn   = _esc(h.get("filename", ""))
+            rows = h.get("rows", 0)
+            unm  = h.get("unmatched", 0)
+            dl   = f'<a href="/cardconv/download/{fn}" class="btn btn-ghost btn-sm" style="font-size:.74rem;padding:3px 10px">⬇ xlsx</a>'
+            detail = (f'<span style="font-size:.8rem;color:var(--text);font-weight:600">{fn}</span>'
+                      f'<span style="font-size:.74rem;color:var(--text-muted)">from {src}</span>'
+                      f'<span style="font-size:.74rem;color:var(--success)">{rows} rows</span>')
+            if unm:
+                detail += f'<span style="font-size:.72rem;color:var(--warn)">{unm} unmatched</span>'
+        else:
+            fn     = _esc(h.get("filename", ""))
+            count  = h.get("count", 0)
+            filt   = _esc(h.get("filter", "All"))
+            dl     = ""
+            detail = (f'<span style="font-size:.8rem;color:var(--text);font-weight:600">{fn}</span>'
+                      f'<span style="font-size:.74rem;color:var(--text-muted)">Filter: {filt} · {count} receipts</span>')
+
+        rows_html += (
+            f'<div class="hist-row" data-id="{hid}" style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--border)">'
+            f'<input type="checkbox" class="hist-cb" data-id="{hid}" style="width:14px;height:14px;accent-color:var(--accent);cursor:pointer;flex-shrink:0">'
+            f'<span style="font-size:1rem;flex-shrink:0">{icon}</span>'
+            f'<span style="font-size:.72rem;font-weight:600;padding:1px 7px;border-radius:8px;background:var(--surface-3);{type_color};flex-shrink:0">{type_label}</span>'
+            f'<span style="font-size:.78rem;color:var(--text-muted);min-width:120px;flex-shrink:0">{hdate}</span>'
+            f'<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;flex:1;min-width:0">{detail}</div>'
+            f'{dl}'
             f'</div>')
-    if not hist_rows:
-        hist_rows = '<div style="color:var(--text-muted);font-size:.85rem;padding:16px 0">No conversions yet</div>'
+
+    if not rows_html:
+        rows_html = '<div style="color:var(--text-muted);font-size:.85rem;padding:20px 0;text-align:center">No history yet</div>'
 
     return f'''<!DOCTYPE html>
 <html lang="en"><head>
@@ -2466,14 +2514,52 @@ def _render_history(user: str) -> str:
   {_tab_bar("history", user)}
 
   <div class="notepad-card" style="margin-bottom:20px">
-    <div class="notepad-header">
-      <span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--slate-400)">Recent Conversions</span>
+    <div class="notepad-header" style="display:flex;align-items:center;justify-content:space-between">
+      <span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--slate-400)">Upload &amp; Download History</span>
+      <div style="display:flex;gap:8px">
+        <button onclick="delSelected()" class="btn btn-ghost btn-sm" style="font-size:.74rem" id="delSelBtn" disabled>🗑 Delete Selected</button>
+        <button onclick="clearAll()" class="btn btn-danger btn-sm" style="font-size:.74rem">✕ Clear All</button>
+      </div>
     </div>
-    <div class="notepad-body" style="padding:8px 16px 12px">
-      {hist_rows}
+    <div class="notepad-body" style="padding:4px 16px 12px">
+      <label style="display:flex;align-items:center;gap:6px;padding:6px 0;font-size:.78rem;color:var(--text-muted);cursor:pointer;border-bottom:1px solid var(--border);margin-bottom:2px">
+        <input type="checkbox" id="checkAll" style="width:14px;height:14px;accent-color:var(--accent);cursor:pointer"> Select all
+      </label>
+      <div id="histList">{rows_html}</div>
     </div>
   </div>
 </div>
+<script>
+const checkAll = document.getElementById('checkAll');
+const delSelBtn = document.getElementById('delSelBtn');
+
+function updateBtn(){{
+  var n = document.querySelectorAll('.hist-cb:checked').length;
+  delSelBtn.disabled = n === 0;
+  delSelBtn.textContent = n ? '🗑 Delete Selected (' + n + ')' : '🗑 Delete Selected';
+}}
+
+checkAll.addEventListener('change', function(){{
+  document.querySelectorAll('.hist-cb').forEach(cb => cb.checked = checkAll.checked);
+  updateBtn();
+}});
+
+document.getElementById('histList').addEventListener('change', function(e){{
+  if(e.target.classList.contains('hist-cb')) updateBtn();
+}});
+
+function delSelected(){{
+  var ids = Array.from(document.querySelectorAll('.hist-cb:checked')).map(cb => cb.dataset.id);
+  if(!ids.length) return;
+  fetch('/cardconv/history/delete', {{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{ids}}) }})
+    .then(() => location.reload());
+}}
+
+function clearAll(){{
+  if(!confirm('Clear all history?')) return;
+  fetch('/cardconv/history/clear', {{method:'POST'}}).then(() => location.reload());
+}}
+</script>
 </body></html>'''
 
 
@@ -3359,7 +3445,7 @@ __TABCSS__
   <span class="nav-brand">💳 Card Converter</span>
   <span class="nav-user">👤 __USER__ &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
 </nav>
-<div class="container" style="max-width:860px">
+<div class="container" style="max-width:1100px">
 
   __TABS__
 
