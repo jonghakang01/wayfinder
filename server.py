@@ -296,6 +296,7 @@ def app_tabs(active):
         ("/todo",      "✅", "Tasks"),
         ("/habit",     "🏃", "Habits"),
         ("/dashboard", "📊", "Overview"),
+        ("/pov",       "🗞", "POV"),
     ]
     html = APP_TAB_CSS + '<nav class="app-tabs">'
     for path, icon, label in tabs:
@@ -664,8 +665,9 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    port = 8080
-    os.system("pkill -f todo_web.py 2>/dev/null; pkill -f 'server.py' 2>/dev/null; sleep 0.5")
+    port = int(os.environ.get("PORT", 8080))
+    # Kill only the process occupying this specific port
+    os.system(f"lsof -ti:{port} | xargs kill -9 2>/dev/null; sleep 0.3")
     server = ThreadingHTTPServer(("0.0.0.0", port), Handler)
     print(f"🧭 Wayfinder running → http://localhost:{port}")
     server.serve_forever()

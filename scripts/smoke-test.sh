@@ -36,6 +36,7 @@ check "Review (auth required)"    "$BASE/cardconv/review"  "302"
 check "Review DL (auth required)" "$BASE/cardconv/review/download" "302"
 check "History (auth required)"   "$BASE/cardconv/history" "302"
 check "Keywords (auth required)"  "$BASE/cardconv/keywords" "302"
+check "POV News (auth required)"  "$BASE/pov"              "302"
 
 echo ""
 echo "Result: $PASS passed, $FAIL failed"
