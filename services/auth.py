@@ -7,10 +7,12 @@ SETTINGS_FILE = os.path.join(DATA_ROOT, "settings.json")
 SESSIONS = {}  # token -> username  (persisted to SESSIONS_FILE)
 
 ADMIN_USERNAME    = "jongha.kang"
-CONTROLLED_SERVICES = {"todo", "cardconv"}
+CONTROLLED_SERVICES = {"todo", "cardconv", "aeo", "llm-check"}
 APP_LABELS = {
-    "todo":     "📋 Daily Task",
-    "cardconv": "💳 Cheil USA AMEX Converter",
+    "todo":      "📋 Daily Task",
+    "cardconv":  "💳 Cheil USA AMEX Converter",
+    "aeo":       "🔍 AEO Analysis",
+    "llm-check": "🤖 AEO 페이지 진단",
 }
 
 

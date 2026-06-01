@@ -24,7 +24,7 @@ ADMIN  = "jongha.kang"
 TARGET_NAMES = {"JONG KANG", "JONGHA KANG"}
 
 META = {
-    "name": "Card Converter",
+    "name": "Cheil USA AMEX Converter",
     "path": "/cardconv",
     "icon": "💳",
     "description": "Corporate card CSV → SAP upload xlsx",

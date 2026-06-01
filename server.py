@@ -313,10 +313,13 @@ def wayfinder(user):
 
     user_is_admin = auth.is_admin(user)
 
-    # 대시보드 통계
-    todos = todo_svc.load(user)
-    todo_total = len([t for t in todos if not t.get("done")])
-    todo_done_today = len([t for t in todos if t.get("done") and t.get("done_at", "").startswith(datetime.now().strftime("%Y-%m-%d"))])
+    # 대시보드 통계 (todo 접근 권한 있을 때만)
+    has_todo = user_is_admin or auth.has_service_access(user, "/todo")
+    todo_total = todo_done_today = 0
+    if has_todo:
+        todos = todo_svc.load(user)
+        todo_total = len([t for t in todos if not t.get("done")])
+        todo_done_today = len([t for t in todos if t.get("done") and t.get("done_at", "").startswith(datetime.now().strftime("%Y-%m-%d"))])
 
     hour = datetime.now().hour
     if hour < 6:
@@ -330,7 +333,7 @@ def wayfinder(user):
 
     today_str = datetime.now().strftime("%B %d, %Y")
 
-    # 서비스 path → META 매핑
+    # 서비스 path → META 매핑 (일반 유저는 권한 있는 서비스만)
     svc_map = {}
     for path, svc in SERVICES.items():
         m = svc.META
@@ -338,42 +341,36 @@ def wayfinder(user):
             continue
         if m.get("admin_only") and not user_is_admin:
             continue
+        if not user_is_admin and not auth.has_service_access(user, path):
+            continue
         svc_map[path] = m
 
-    # 카테고리별 렌더링
-    sections_html = ""
-    rendered = set()
-    for cat_name, paths in CATEGORIES.items():
-        cards = ""
-        for p in paths:
-            if p in svc_map:
-                m = svc_map[p]
-                cards += f'''<a class="service-card" href="{m["path"]}">
-          <div class="service-icon">{m["icon"]}</div>
-          <div class="service-name">{m["name"]}</div>
-          <div class="service-desc">{m["description"]}</div>
-        </a>'''
-                rendered.add(p)
-        if cards:
-            sections_html += f'''<div class="category-section">
-      <div class="category-title">{cat_name}</div>
-      <div class="service-grid">{cards}</div>
-    </div>'''
+    def _svc_card(m):
+        return (f'<a class="service-card" href="{m["path"]}">'
+                f'<div class="service-icon">{m["icon"]}</div>'
+                f'<div class="service-name">{m["name"]}</div>'
+                f'<div class="service-desc">{m["description"]}</div>'
+                f'</a>')
 
-    # 카테고리 미분류 서비스
-    extra = ""
-    for p, m in svc_map.items():
-        if p not in rendered:
-            extra += f'''<a class="service-card" href="{m["path"]}">
-          <div class="service-icon">{m["icon"]}</div>
-          <div class="service-name">{m["name"]}</div>
-          <div class="service-desc">{m["description"]}</div>
-        </a>'''
-    if extra:
-        sections_html += f'''<div class="category-section">
-      <div class="category-title">Other</div>
-      <div class="service-grid">{extra}</div>
-    </div>'''
+    if user_is_admin:
+        # Admin: 카테고리별 전체 서비스 렌더링
+        sections_html = ""
+        rendered = set()
+        for cat_name, paths in CATEGORIES.items():
+            cards = "".join(_svc_card(svc_map[p]) for p in paths if p in svc_map)
+            if cards:
+                sections_html += f'<div class="category-section"><div class="category-title">{cat_name}</div><div class="service-grid">{cards}</div></div>'
+                rendered.update(p for p in paths if p in svc_map)
+        extra = "".join(_svc_card(m) for p, m in svc_map.items() if p not in rendered)
+        if extra:
+            sections_html += f'<div class="category-section"><div class="category-title">Other</div><div class="service-grid">{extra}</div></div>'
+    else:
+        # 일반 유저: 권한 있는 서비스만 하나의 그리드로
+        cards = "".join(_svc_card(m) for m in svc_map.values())
+        if cards:
+            sections_html = f'<div class="category-section"><div class="category-title">My Services</div><div class="service-grid">{cards}</div></div>'
+        else:
+            sections_html = '<div style="padding:40px;text-align:center;color:var(--text-muted)">접근 가능한 서비스가 없습니다. 관리자에게 문의하세요.</div>'
 
     # Projects section (admin only)
     projects_html = ""
@@ -436,26 +433,10 @@ def wayfinder(user):
       <h2>{greeting_icon} {greeting}, {user}</h2>
       <p>{today_str}</p>
     </div>
-    <div class="dashboard-stats">
-      <div class="stat-card highlight">
-        <div class="stat-num">{todo_total}</div>
-        <div class="stat-label">Tasks Left</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-num">{todo_done_today}</div>
-        <div class="stat-label">Done Today</div>
-      </div>
-    </div>
+    {'<div class="dashboard-stats"><div class="stat-card highlight"><div class="stat-num">' + str(todo_total) + '</div><div class="stat-label">Tasks Left</div></div><div class="stat-card"><div class="stat-num">' + str(todo_done_today) + '</div><div class="stat-label">Done Today</div></div></div>' if has_todo else ''}
   </div>
-  
-  <a href="/todo" class="app-entry-card">
-    <div class="app-entry-icon">🧭</div>
-    <div class="app-entry-text">
-      <div class="app-entry-name">My Productivity App</div>
-      <div class="app-entry-tabs">✅ Tasks &nbsp;·&nbsp; 🏃 Habits &nbsp;·&nbsp; 📊 Overview</div>
-    </div>
-    <div class="app-entry-arrow">→</div>
-  </a>
+
+  {'<a href="/todo" class="app-entry-card"><div class="app-entry-icon">🧭</div><div class="app-entry-text"><div class="app-entry-name">My Productivity App</div><div class="app-entry-tabs">✅ Tasks &nbsp;·&nbsp; 🏃 Habits &nbsp;·&nbsp; 📊 Overview</div></div><div class="app-entry-arrow">→</div></a>' if has_todo else ''}
 
   <div id="pwa-banner" class="pwa-banner">
     <div class="pwa-icon">📱</div>
