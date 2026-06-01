@@ -2379,6 +2379,40 @@ _CC_TAB_CSS = (
     ".tab-badge{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;"
     "background:#ef4444;border-radius:8px;font-size:.62rem;font-weight:700;color:#fff;padding:0 4px;"
     "margin-left:5px;vertical-align:middle}"
+    # Workflow step bar
+    ".cc-wf-bar{display:flex;align-items:center;background:var(--surface-2);"
+    "border:1px solid var(--border);border-radius:var(--radius-md);"
+    "padding:0 10px 0 8px;margin-bottom:16px;height:36px}"
+    ".cc-wf-close{margin-left:auto;flex-shrink:0;background:none;border:none;"
+    "color:var(--text-muted);cursor:pointer;font-size:.85rem;"
+    "padding:2px 6px;border-radius:4px;line-height:1}"
+    ".cc-wf-close:hover{color:var(--text);background:var(--surface-3)}"
+    ".cc-wf-steps{display:flex;align-items:center;flex:1;min-width:0;overflow:hidden}"
+    ".cc-wf-step{display:flex;align-items:center;gap:5px;padding:0 6px;"
+    "font-size:.74rem;color:var(--text-muted);white-space:nowrap;flex-shrink:0}"
+    ".cc-wf-step .sn{display:inline-flex;align-items:center;justify-content:center;"
+    "width:18px;height:18px;border-radius:50%;border:1.5px solid currentColor;"
+    "font-size:.6rem;font-weight:700;flex-shrink:0}"
+    ".cc-wf-step.wf-active{color:var(--text);font-weight:600}"
+    ".cc-wf-step.wf-active .sn{background:var(--accent);border-color:var(--accent);color:#000}"
+    ".cc-wf-step.wf-done .sn{background:#22c55e;border-color:#22c55e;color:#fff}"
+    ".cc-wf-step.wf-done{color:var(--text-muted)}"
+    ".cc-wf-sep{color:var(--border);font-size:.65rem;flex-shrink:0;padding:0 2px}"
+    "@media(max-width:600px){.cc-wf-label{display:none}}"
+    # Inline info tooltip
+    ".cc-info-wrap{position:relative;display:inline-flex;align-items:center;vertical-align:middle}"
+    ".cc-info{display:inline-flex;align-items:center;justify-content:center;"
+    "width:14px;height:14px;border-radius:50%;font-size:.6rem;font-weight:700;"
+    "color:var(--text-muted);cursor:pointer;border:1px solid var(--border);"
+    "margin-left:6px;flex-shrink:0;line-height:1;user-select:none}"
+    ".cc-info:hover{color:var(--accent);border-color:var(--accent)}"
+    ".cc-tip{display:none;position:absolute;z-index:200;"
+    "background:var(--surface-3);border:1px solid var(--border);"
+    "border-radius:var(--radius-md);padding:10px 12px;font-size:.78rem;"
+    "color:var(--text);max-width:280px;width:max-content;"
+    "box-shadow:0 4px 16px rgba(0,0,0,.18);line-height:1.5;"
+    "white-space:normal;text-align:left;top:calc(100% + 6px);left:0}"
+    ".cc-tip.tip-right{left:auto;right:0}"
 )
 
 
@@ -2400,7 +2434,92 @@ def _tab_bar(active: str, user: str) -> str:
         cls = "cc-tab active" if key == active else "cc-tab"
         out.append(f'<a href="{href}" class="{cls}">{label}</a>')
     out.append('</div>')
-    return "".join(out)
+    return "".join(out) + _workflow_bar(active, user)
+
+
+def _info_icon(tip: str, right: bool = False) -> str:
+    """Inline ℹ icon with click-toggled tooltip."""
+    tip_cls = "cc-tip tip-right" if right else "cc-tip"
+    return (f'<span class="cc-info-wrap">'
+            f'<span class="cc-info" onclick="ccTipToggle(this)">ℹ</span>'
+            f'<span class="{tip_cls}">{tip}</span>'
+            f'</span>')
+
+
+def _workflow_bar(active: str, user: str) -> str:
+    """5-step onboarding workflow bar shown below the tab bar.
+    Hidden for history/keywords tabs and after user dismisses with ×."""
+    if active in ("history", "keywords", "ocr_review"):
+        return ""
+
+    drive_done = _is_drive_connected(user)
+
+    # (step_num, label, tabs_where_active)
+    steps = [
+        (1, "Connect Drive",    ["ledger"]),
+        (2, "Add Receipts",     ["ledger"]),
+        (3, "Review Ledger",    ["ledger"]),
+        (4, "Convert CSV",      ["convert"]),
+        (5, "Review & Download",["review"]),
+    ]
+
+    parts = ['<div class="cc-wf-steps">']
+    for i, (num, label, active_tabs) in enumerate(steps):
+        if num == 1 and drive_done:
+            cls = "cc-wf-step wf-done"
+            badge = "✓"
+        elif active in active_tabs:
+            cls = "cc-wf-step wf-active"
+            badge = str(num)
+        else:
+            cls = "cc-wf-step"
+            badge = str(num)
+        parts.append(
+            f'<span class="{cls}">'
+            f'<span class="sn">{badge}</span>'
+            f'<span class="cc-wf-label">{label}</span>'
+            f'</span>'
+        )
+        if i < len(steps) - 1:
+            parts.append('<span class="cc-wf-sep">›</span>')
+    parts.append('</div>')
+
+    js = """<script>
+(function(){
+  if(localStorage.getItem('cc_guide_hidden')){
+    var b=document.getElementById('ccWfBar');
+    if(b) b.style.display='none';
+  }
+  window.ccHideGuide=function(){
+    localStorage.setItem('cc_guide_hidden','1');
+    document.getElementById('ccWfBar').style.display='none';
+  };
+  window.ccTipToggle=function(el){
+    var tip=el.nextElementSibling;
+    var open=tip.style.display==='block';
+    document.querySelectorAll('.cc-tip').forEach(function(t){t.style.display='none';});
+    if(!open){
+      tip.style.display='block';
+      var r=tip.getBoundingClientRect();
+      if(r.right>window.innerWidth-20) tip.classList.add('tip-right');
+      else tip.classList.remove('tip-right');
+    }
+  };
+  document.addEventListener('click',function(e){
+    if(!e.target.classList.contains('cc-info')){
+      document.querySelectorAll('.cc-tip').forEach(function(t){t.style.display='none';});
+    }
+  });
+})();
+</script>"""
+
+    return (
+        f'<div class="cc-wf-bar" id="ccWfBar">'
+        + "".join(parts)
+        + '<button class="cc-wf-close" onclick="ccHideGuide()" title="Hide guide">×</button>'
+        + '</div>'
+        + js
+    )
 
 
 # Shared upload-zone CSS (used by Convert and Ledger register section)
@@ -2425,10 +2544,12 @@ def _register_section(user: str) -> str:
         if receipts_folder_id:
             folder_link = (f'<a href="https://drive.google.com/drive/folders/{receipts_folder_id}" '
                            f'target="_blank" class="btn btn-ghost btn-sm">📂 Open in Drive →</a>')
+        sync_tip = _info_icon(
+            'Fetches new receipts from Drive and uses AI (Gemini/Claude) to automatically extract date, amount, and merchant.')
         drive_status_html = f'''
       <span style="font-size:.88rem;font-weight:600;color:var(--success)">✅ Connected</span>
       {folder_link}
-      <button class="btn btn-ghost btn-sm" onclick="startDriveSync(this)" style="margin-left:4px">🔄 Sync from Drive</button>
+      <button class="btn btn-ghost btn-sm" onclick="startDriveSync(this)" style="margin-left:4px">🔄 Sync from Drive</button>{sync_tip}
       <span id="lastSynced" data-ts="{last_synced}" style="font-size:.78rem;color:var(--text-muted);margin-left:4px"></span>'''
         receipt_upload_html = '''
       <form id="rcptForm" method="POST" action="/cardconv/receipts/upload" enctype="multipart/form-data">
@@ -2450,10 +2571,13 @@ def _register_section(user: str) -> str:
         )
         receipt_upload_html = ('<p style="color:var(--text-muted);font-size:.85rem">'
                                'Connect Google Drive above to enable receipt upload.</p>')
+    drive_tip = _info_icon(
+        'Links to your Wayfinder/Receipts/ folder in Google Drive. '
+        'After connecting, click Sync to automatically OCR all receipts in that folder.')
     return f'''
   <div class="notepad-card" style="margin-bottom:20px">
     <div class="notepad-header">
-      <span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--slate-400)">Google Drive</span>
+      <span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--slate-400)">Google Drive</span>{drive_tip}
     </div>
     <div class="notepad-body" style="padding:14px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap">
       {drive_status_html}
@@ -2546,7 +2670,7 @@ def _render_convert(user: str) -> str:
 
   <div class="notepad-card" style="margin-bottom:20px">
     <div class="notepad-header">
-      <span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--accent)">My Card Names</span>
+      <span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--accent)">My Card Names</span>{_info_icon('Only transactions whose Card Member Name matches one of these names will be converted. Enter your name exactly as it appears in the AMEX CSV.')}
     </div>
     <div class="notepad-body" style="padding:12px 16px">
       <p style="font-size:.78rem;color:var(--text-muted);margin-bottom:12px">CSV의 'Card Member Name'이 아래 이름과 일치하는 거래만 변환됩니다.</p>
@@ -2560,7 +2684,7 @@ def _render_convert(user: str) -> str:
 
   <div class="notepad-card" style="margin-bottom:20px">
     <div class="notepad-header">
-      <span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--accent)">Upload CSV</span>
+      <span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--accent)">Upload CSV</span>{_info_icon('Upload the Posted_*.csv downloaded from your AMEX statement. It will be automatically matched with receipts and exported as an SAP-ready xlsx.', right=True)}
     </div>
     <div class="notepad-body" style="padding:20px">
       <form id="upForm" method="POST" action="/cardconv/upload" enctype="multipart/form-data">
@@ -3185,7 +3309,9 @@ def _render_review(user: str) -> str:
 <div class="container" style="max-width:920px">
   {_tab_bar("review", user)}
 
-  <div style="font-size:.8rem;color:var(--text-muted);margin-bottom:12px">{meta_line}</div>
+  <div style="font-size:.8rem;color:var(--text-muted);margin-bottom:12px;display:flex;align-items:center;gap:6px">
+    <span>{meta_line}</span>{_info_icon('Shows converted transactions with receipt matching results. Unmatched rows (red) can be linked via 🔗 Match manually, or carried over to the next billing cycle.', right=True)}
+  </div>
 
   <div class="stat-grid">
     <div class="stat-card"><div class="stat-value" id="rvTotal">{total}</div><div class="stat-label">Total</div></div>
@@ -3713,6 +3839,7 @@ __TABCSS__
     <button class="preset-btn" data-preset="ytd">YTD</button>
     <button class="preset-btn" data-preset="all">All time</button>
     <button class="preset-btn" id="viewToggle" title="Collapse duplicate receipts into one row">🔁 Group Duplicates</button>
+    <span class="cc-info-wrap"><span class="cc-info" onclick="ccTipToggle(this)">ℹ</span><span class="cc-tip">같은 영수증이 여러 장 인식된 경우 그룹으로 묶어 표시합니다. 불필요한 중복은 삭제하세요.</span></span>
     <button class="btn btn-sm" id="fDelete" disabled
       style="margin-left:auto;background:rgba(239,68,68,.15);color:#ef4444;border:1px solid rgba(239,68,68,.3)">
       🗑 Delete Selected (0)</button>
