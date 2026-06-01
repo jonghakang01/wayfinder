@@ -1341,6 +1341,96 @@ def _handle_status_change(username: str, entry_id: str, body: dict):
     return ("json", {"error": "not found"}, 404)
 
 
+def _handle_rematch(username: str, entry_id: str):
+    """POST /cardconv/ledger/<id>/rematch — re-try CSV matching for a pending/unmatched entry."""
+    ledger = _load_ledger(username)
+    entries = ledger["entries"]
+    entry = next((e for e in entries if e.get("id") == entry_id), None)
+    if not entry:
+        return ("json", {"error": "not found"}, 404)
+
+    rdate = entry.get("ocr_date")
+    if rdate == "YYYY-MM-DD":
+        rdate = None
+    ramount = entry.get("ocr_amount")
+    if ramount is None:
+        return ("json", {"error": "no OCR amount to match against"}, 400)
+    try:
+        ramount = round(float(ramount), 2)
+    except (ValueError, TypeError):
+        return ("json", {"error": "invalid amount"}, 400)
+
+    uploads = _load_uploads(username)
+    uploads_dir_path = _uploads_dir(username)
+    target_names = set(_get_card_member_names(username))
+    matched_tx = None
+
+    for upload in uploads:
+        csv_path = uploads_dir_path / upload.get("stored_name", "")
+        if not csv_path.exists():
+            continue
+        try:
+            csv_bytes = csv_path.read_bytes()
+            reader = csv.DictReader(
+                io.TextIOWrapper(io.BytesIO(csv_bytes), encoding='utf-8-sig', newline=''))
+            rows = [r for r in reader
+                    if r.get("Card Member Name", "").strip().upper() in target_names]
+        except Exception:
+            continue
+
+        for row in rows:
+            try:
+                amount = round(float(row.get("Amount", 0)), 2)
+            except ValueError:
+                continue
+            if abs(amount - ramount) > 0.01:
+                continue
+
+            inv_dt = _parse_date(row.get("Date", ""))
+            inv_date_str = inv_dt.strftime("%Y-%m-%d") if inv_dt else None
+
+            if rdate is None or inv_date_str is None:
+                date_match = True
+            elif rdate == inv_date_str:
+                date_match = True
+            else:
+                try:
+                    from datetime import timedelta as _td
+                    rd  = date.fromisoformat(rdate)
+                    id_ = date.fromisoformat(inv_date_str)
+                    date_match = abs((rd - id_).days) <= 1
+                except Exception:
+                    date_match = False
+
+            if date_match:
+                merchant = row.get("Merchant Name", "").strip()
+                dba      = row.get("Merchant Doing Business As", "").strip()
+                matched_tx = {
+                    "date":   inv_date_str,
+                    "amount": amount,
+                    "vendor": dba if (dba and dba != merchant) else merchant,
+                }
+                break
+        if matched_tx:
+            break
+
+    now_iso = datetime.now().isoformat()
+    if matched_tx:
+        entry["matched"]             = True
+        entry["match_status"]        = "matched"
+        entry["matched_at"]          = now_iso
+        entry["matched_transaction"] = matched_tx
+        if entry.get("ocr_date") in (None, "", "unknown") and matched_tx.get("date"):
+            entry["ocr_date_original"] = entry.get("ocr_date")
+            entry["ocr_date"]          = matched_tx["date"]
+    else:
+        entry["match_status"] = "unmatched"
+        entry["matched"]      = False
+
+    _save_ledger(username, ledger)
+    return ("json", {"ok": True, "matched": bool(matched_tx), "entry": entry})
+
+
 def _handle_reocr(username: str, entry_id: str):
     """POST /cardconv/ledger/<id>/reocr — re-run OCR for all entries sharing the same file_id."""
     service = _get_drive_service(username)
@@ -1747,6 +1837,9 @@ def handle(method, path, body, ctx=None):
     if method == "POST" and path.startswith("/cardconv/ledger/") and path.endswith("/reocr"):
         entry_id = path[len("/cardconv/ledger/"):-len("/reocr")]
         return _handle_reocr(user, entry_id)
+    if method == "POST" and path.startswith("/cardconv/ledger/") and path.endswith("/rematch"):
+        entry_id = path[len("/cardconv/ledger/"):-len("/rematch")]
+        return _handle_rematch(user, entry_id)
     if method == "GET" and path.startswith("/cardconv/receipts/image/"):
         file_id = path[len("/cardconv/receipts/image/"):]
         bbox = None
@@ -3807,8 +3900,8 @@ function rowHtml(e, i, opts){
   const actionCell = (e.match_status==='matched')
     ? '<td><button class="btn btn-ghost btn-sm act-undo" data-id="' + e.id +
       '" style="color:#f59e0b;padding:2px 8px" title="Undo match — reset to pending">↩ Undo</button></td>'
-    : '<td><button class="btn btn-ghost btn-sm act-rerun" data-id="' + e.id +
-      '" style="color:#818cf8;padding:2px 8px" title="Re-run OCR for this entry">🔄 Re-run</button></td>';
+    : '<td><button class="btn btn-ghost btn-sm act-rematch" data-id="' + e.id +
+      '" style="color:#818cf8;padding:2px 8px" title="Re-try CSV matching for this receipt">🔗 Rematch</button></td>';
   // Duplicate group: non-keeper rows are pre-checked for quick cleanup.
   const preCheck = (e.dup && !e.dup_keep) ? ' checked' : '';
   const checkCell = '<td><input type="checkbox" class="row-check sel" data-id="' +
@@ -3895,8 +3988,8 @@ function rerender(){
       tr.addEventListener('click', () => openPanel(ENTRIES[+tr.dataset.i])));
     body.querySelectorAll('.act-undo').forEach(b =>
       b.addEventListener('click', ev => { ev.stopPropagation(); unmatchRow(b.dataset.id); }));
-    body.querySelectorAll('.act-rerun').forEach(b =>
-      b.addEventListener('click', ev => { ev.stopPropagation(); quickReOCR(b.dataset.id, b); }));
+    body.querySelectorAll('.act-rematch').forEach(b =>
+      b.addEventListener('click', ev => { ev.stopPropagation(); quickRematch(b.dataset.id, b); }));
     body.querySelectorAll('.sel').forEach(c =>
       c.addEventListener('click', ev => ev.stopPropagation()));
     body.querySelectorAll('.sel').forEach(c =>
@@ -4121,6 +4214,25 @@ async function quickReOCR(id, btn){
     }
     load();
   } catch(e) { btn.disabled=false; btn.textContent='🔄 Re-run'; }
+}
+
+// Re-try CSV matching for a pending/unmatched row.
+async function quickRematch(id, btn){
+  if(!id) return;
+  btn.disabled = true; btn.textContent = '⏳';
+  try {
+    const r = await fetch('/cardconv/ledger/' + id + '/rematch', {method:'POST'});
+    const d = await r.json();
+    if(!r.ok || d.error){ btn.textContent = '❌'; setTimeout(()=>{ btn.disabled=false; btn.textContent='🔗 Rematch'; }, 2000); return; }
+    if(d.matched){
+      btn.textContent = '✅';
+      setTimeout(()=>{ btn.disabled=false; btn.textContent='🔗 Rematch'; }, 1500);
+    } else {
+      btn.textContent = '❌ No match';
+      setTimeout(()=>{ btn.disabled=false; btn.textContent='🔗 Rematch'; }, 2000);
+    }
+    load();
+  } catch(e) { btn.disabled=false; btn.textContent='🔗 Rematch'; }
 }
 
 // Undo Match from the ledger table — reset row to pending_match.
