@@ -4,6 +4,52 @@ from pathlib import Path
 
 import openpyxl
 
+# ── Web Push helpers ──────────────────────────────────────────────────────────
+def _push_subs_file(username: str) -> Path:
+    return DATA_DIR / f"push_subs_{username}.json"
+
+def _load_push_subs(username: str) -> list:
+    f = _push_subs_file(username)
+    if not f.exists():
+        return []
+    try:
+        return json.loads(f.read_text())
+    except Exception:
+        return []
+
+def _save_push_subs(username: str, subs: list):
+    _push_subs_file(username).write_text(json.dumps(subs, ensure_ascii=False))
+
+def _send_push_notification(username: str, title: str, body: str, url: str = "/cardconv/ledger"):
+    """Send Web Push to all stored subscriptions for the user. Silently skips on error."""
+    subs = _load_push_subs(username)
+    if not subs:
+        return
+    pem_path = DATA_DIR / "vapid_private.pem"
+    if not pem_path.exists():
+        return
+    try:
+        from pywebpush import webpush, WebPushException
+        payload = json.dumps({"title": title, "body": body, "url": url})
+        pem = pem_path.read_text()
+        dead = []
+        for sub in subs:
+            try:
+                webpush(
+                    subscription_info=sub,
+                    data=payload,
+                    vapid_private_key=pem,
+                    vapid_claims={"sub": "mailto:jongha.kang01@gmail.com"},
+                    content_encoding="aes128gcm",
+                )
+            except WebPushException as e:
+                if e.response and e.response.status_code in (404, 410):
+                    dead.append(sub)
+        if dead:
+            _save_push_subs(username, [s for s in subs if s not in dead])
+    except Exception:
+        pass
+
 DATA_DIR   = Path(os.path.expanduser("~/.appdata/cardconv"))
 KW_FILE    = DATA_DIR / "keywords.json"
 HIST_FILE  = DATA_DIR / "history.json"
@@ -1094,6 +1140,13 @@ def _run_batch_ocr(username: str) -> dict:
 
         ledger["last_batch_at"] = datetime.now().isoformat()
         _save_ledger(username, ledger)
+        if processed > 0:
+            _send_push_notification(
+                username,
+                title="🧾 New receipts synced",
+                body=f"{processed} new receipt{'s' if processed != 1 else ''} imported from Drive.",
+                url="/cardconv/ledger",
+            )
         return {"processed": processed, "failed": failed, "total": len(entries)}
     except Exception as e:
         return {"error": str(e)}
@@ -1719,6 +1772,27 @@ def handle(method, path, body, ctx=None):
     if method == "POST" and path == "/cardconv/receipts/upload":
         return _handle_receipt_upload(user, body)
 
+    # Manual receipt addition (for OCR-missed sub-receipts on an existing image)
+    if method == "POST" and path == "/cardconv/receipts/manual-add":
+        return _handle_manual_receipt_add(user, body)
+
+    # Web Push subscription management
+    if method == "POST" and path == "/cardconv/push/subscribe":
+        sub = body if isinstance(body, dict) else {}
+        if not sub.get("endpoint"):
+            return ("json", {"error": "invalid subscription"}, 400)
+        subs = _load_push_subs(user)
+        endpoints = {s.get("endpoint") for s in subs}
+        if sub["endpoint"] not in endpoints:
+            subs.append(sub)
+            _save_push_subs(user, subs)
+        return ("json", {"ok": True})
+    if method == "POST" and path == "/cardconv/push/unsubscribe":
+        endpoint = (body or {}).get("endpoint", "")
+        subs = [s for s in _load_push_subs(user) if s.get("endpoint") != endpoint]
+        _save_push_subs(user, subs)
+        return ("json", {"ok": True})
+
     # OCR staging review
     if method == "GET" and path == "/cardconv/receipts/review":
         return ("html", _render_ocr_staging_review(user))
@@ -1996,6 +2070,58 @@ def _handle_receipt_upload(username: str, body):
     existing["staged_at"] = now_iso
     _save_ocr_staging(username, existing)
     return ("redirect", "/cardconv/receipts/review")
+
+
+def _handle_manual_receipt_add(username: str, body: dict):
+    """Add a manually-entered receipt sub-entry to an existing Drive image in the ledger."""
+    file_id   = (body.get("file_id") or "").strip()
+    filename  = (body.get("filename") or "").strip()
+    drive_url = (body.get("drive_url") or "").strip()
+    mime_type = (body.get("mime_type") or "image/jpeg").strip()
+
+    def _num(v):
+        try: return float(v) if v not in (None, "") else None
+        except: return None
+
+    ocr_date   = (body.get("ocr_date") or "").strip() or None
+    merchant   = (body.get("ocr_merchant") or "").strip() or None
+    printed    = _num(body.get("ocr_printed_amount"))
+    handw      = _num(body.get("ocr_handwritten_amount"))
+    final_amt  = handw if handw is not None else printed
+
+    if not file_id:
+        return ("json", {"error": "file_id required"}, 400)
+
+    entries = _load_receipts(username)
+    # Assign the next sub_index for this file_id.
+    existing_subs = [e.get("sub_index", 0) for e in entries if e.get("file_id") == file_id]
+    sub_index = (max(existing_subs) + 1) if existing_subs else 0
+
+    now_disp = datetime.now().strftime("%Y-%m-%d %H:%M")
+    now_iso  = datetime.now().isoformat()
+    entry = {
+        "id":                    _sub_entry_id(file_id, sub_index),
+        "file_id":               file_id,
+        "sub_index":             sub_index,
+        "filename":              filename,
+        "drive_url":             drive_url,
+        "mime_type":             mime_type,
+        "uploaded_at":           now_disp,
+        "synced_at":             now_iso,
+        "match_status":          "pending_match",
+        "multi_ocr":             True,
+        "ocr_status":            "manual",
+        "ocr_model":             "Manual",
+        "ocr_date":              ocr_date,
+        "ocr_merchant":          merchant,
+        "ocr_printed_amount":    printed,
+        "ocr_handwritten_amount": handw,
+        "ocr_amount":            final_amt,
+        "ocr_bbox":              None,
+    }
+    entries.append(entry)
+    _save_receipts(username, entries)
+    return ("json", {"ok": True, "id": entry["id"]})
 
 
 def _handle_upload(body, user=None):
@@ -3341,13 +3467,15 @@ function toggleAll(on) {{
 
 def _render_ledger(user: str) -> str:
     from server import CSS_VER
+    vapid_pub = os.environ.get("VAPID_PUBLIC_KEY", "")
     return (_LEDGER_HTML
             .replace("__CSSVER__", str(CSS_VER))
             .replace("__USER__", user)
             .replace("__TABS__", _tab_bar("ledger", user))
             .replace("__REGISTER__", _register_section(user))
             .replace("__TABCSS__", _CC_TAB_CSS + _UPLOAD_CSS)
-            .replace("__RCPTJS__", _RCPT_JS))
+            .replace("__RCPTJS__", _RCPT_JS)
+            .replace("__VAPID_PUB__", vapid_pub))
 
 
 # Raw (non-f) template so CSS/JS braces need no escaping; only __TOKENS__ are filled.
@@ -3557,6 +3685,38 @@ __TABCSS__
     <button class="btn btn-ghost btn-sm" data-set="unmatched" style="color:#ef4444">❌ Mark Unmatched</button>
     <button class="btn btn-ghost btn-sm" data-set="pending_match" style="color:#f59e0b">⏳ Mark Pending</button>
     <button class="btn btn-ghost btn-sm" id="reOcrBtn" onclick="reOCR()" style="color:#818cf8;margin-top:6px;width:100%">🔄 Re-OCR</button>
+    <button class="btn btn-ghost btn-sm" id="manualAddBtn" onclick="openManualAdd()" style="color:#34d399;margin-top:2px;width:100%">➕ 이 이미지에 영수증 수동 추가</button>
+  </div>
+</div>
+
+<!-- Manual Receipt Add Modal -->
+<div class="overlay-bg" id="manualOverlay"></div>
+<div class="del-modal" id="manualModal" style="width:420px">
+  <div class="del-title">➕ 영수증 수동 추가</div>
+  <div style="font-size:.82rem;color:var(--text-muted);margin-bottom:14px">OCR에서 누락된 영수증을 이 이미지에 직접 추가합니다.</div>
+  <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px">
+    <div>
+      <label style="font-size:.76rem;color:var(--text-muted);display:block;margin-bottom:4px">날짜</label>
+      <input id="mDate" type="date" style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.85rem;padding:6px 10px;outline:none;box-sizing:border-box">
+    </div>
+    <div>
+      <label style="font-size:.76rem;color:var(--text-muted);display:block;margin-bottom:4px">가맹점</label>
+      <input id="mMerchant" type="text" placeholder="가맹점명" style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.85rem;padding:6px 10px;outline:none;box-sizing:border-box">
+    </div>
+    <div style="display:flex;gap:10px">
+      <div style="flex:1">
+        <label style="font-size:.76rem;color:var(--text-muted);display:block;margin-bottom:4px">인쇄 금액 ($)</label>
+        <input id="mPrinted" type="number" step="0.01" min="0" placeholder="0.00" style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.85rem;padding:6px 10px;outline:none;box-sizing:border-box">
+      </div>
+      <div style="flex:1">
+        <label style="font-size:.76rem;color:var(--text-muted);display:block;margin-bottom:4px">수기 금액 ✍️</label>
+        <input id="mHandw" type="number" step="0.01" min="0" placeholder="선택" style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.85rem;padding:6px 10px;outline:none;box-sizing:border-box">
+      </div>
+    </div>
+  </div>
+  <div class="del-actions">
+    <button class="btn btn-ghost btn-sm" onclick="closeManualAdd()">취소</button>
+    <button class="btn btn-primary btn-sm" id="manualAddConfirm" onclick="submitManualAdd()">추가</button>
   </div>
 </div>
 
@@ -3590,6 +3750,7 @@ function thumb(e){
 function aiBadge(m){
   if(m==='Gemini') return '<span class="ai-badge gemini">Gemini</span>';
   if(m==='Claude') return '<span class="ai-badge claude">Claude</span>';
+  if(m==='Manual') return '<span class="ai-badge" style="color:#34d399;background:rgba(52,211,153,.12)">Manual</span>';
   return '<span style="color:var(--text-muted);font-size:.72rem">–</span>';
 }
 
@@ -4059,6 +4220,47 @@ $('viewToggle').addEventListener('click', () => {
   rerender();
 });
 
+// Manual receipt add modal.
+let _MANUAL_FILE_ID = null, _MANUAL_META = {};
+function openManualAdd(){
+  if(!CUR_FILE_ID) return;
+  _MANUAL_FILE_ID = CUR_FILE_ID;
+  const cur = ENTRIES.find(e => e.id === CUR_ID) || {};
+  _MANUAL_META = { filename: cur.filename||'', drive_url: cur.drive_url||'', mime_type: cur.mime_type||'image/jpeg' };
+  $('mDate').value = ''; $('mMerchant').value = ''; $('mPrinted').value = ''; $('mHandw').value = '';
+  $('manualOverlay').classList.add('open');
+  $('manualModal').classList.add('open');
+}
+function closeManualAdd(){
+  $('manualOverlay').classList.remove('open');
+  $('manualModal').classList.remove('open');
+}
+async function submitManualAdd(){
+  if(!_MANUAL_FILE_ID) return;
+  const btn = $('manualAddConfirm');
+  btn.disabled = true; btn.textContent = '추가 중...';
+  const body = new URLSearchParams({
+    file_id:               _MANUAL_FILE_ID,
+    filename:              _MANUAL_META.filename,
+    drive_url:             _MANUAL_META.drive_url,
+    mime_type:             _MANUAL_META.mime_type,
+    ocr_date:              $('mDate').value,
+    ocr_merchant:          $('mMerchant').value,
+    ocr_printed_amount:    $('mPrinted').value,
+    ocr_handwritten_amount: $('mHandw').value,
+  });
+  try {
+    const r = await fetch('/cardconv/receipts/manual-add', {method:'POST', body});
+    const d = await r.json();
+    if(!d.ok){ alert('추가 실패: ' + (d.error||r.status)); return; }
+    closeManualAdd();
+    closePanel();
+    load();
+  } catch(e){ alert('오류: '+e); }
+  finally { btn.disabled=false; btn.textContent='추가'; }
+}
+$('manualOverlay').addEventListener('click', closeManualAdd);
+
 // Delete confirmation modal (with optional Drive trashing).
 $('delCancel').addEventListener('click', closeDelModal);
 $('delOverlay').addEventListener('click', closeDelModal);
@@ -4068,6 +4270,33 @@ setDefaultDates();
 load();
 </script>
 <script>__RCPTJS__</script>
+<script>
+(function(){
+  const VAPID_PUB = '__VAPID_PUB__';
+  if(!VAPID_PUB || !('serviceWorker' in navigator) || !('PushManager' in window)) return;
+  function urlB64ToUint8Array(b64){
+    const pad = '='.repeat((4 - b64.length%4)%4);
+    const raw = atob((b64+pad).replace(/-/g,'+').replace(/_/g,'/'));
+    return Uint8Array.from(raw, c => c.charCodeAt(0));
+  }
+  navigator.serviceWorker.ready.then(function(reg){
+    reg.pushManager.getSubscription().then(function(existing){
+      if(existing) return;  // already subscribed
+      if(Notification.permission === 'denied') return;
+      return reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlB64ToUint8Array(VAPID_PUB)
+      }).then(function(sub){
+        return fetch('/cardconv/push/subscribe', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify(sub.toJSON())
+        });
+      });
+    });
+  });
+})();
+</script>
 
 <!-- Sync Loading Overlay -->
 <div id="syncOverlay" style="display:none;position:fixed;inset:0;background:rgba(2,6,23,.82);z-index:500;flex-direction:column;align-items:center;justify-content:center;gap:20px">

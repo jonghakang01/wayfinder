@@ -262,6 +262,21 @@ self.addEventListener('fetch', e => {{
     )
   );
 }});
+
+self.addEventListener('push', function(event) {{
+  const data = event.data ? event.data.json() : {{}};
+  event.waitUntil(self.registration.showNotification(data.title || 'Wayfinder', {{
+    body: data.body || '',
+    icon: '/icons/icon.svg',
+    badge: '/icons/icon.svg',
+    data: {{ url: data.url || '/cardconv/ledger' }}
+  }}));
+}});
+
+self.addEventListener('notificationclick', function(event) {{
+  event.notification.close();
+  event.waitUntil(clients.openWindow(event.notification.data.url || '/cardconv/ledger'));
+}});
 """
 
 APP_TAB_CSS = """
@@ -631,6 +646,13 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/login":
             return self.dispatch(auth.handle("POST", path, body, ctx))
+        if path == "/cardconv/batch/run":
+            import os as _os
+            from services import cardconv as _cc
+            _secret = _os.environ.get("CARDCONV_BATCH_SECRET", "")
+            _provided = self.headers.get("X-Batch-Secret", "")
+            if _secret and _provided == _secret:
+                return self.dispatch(_cc.handle("POST", path, body, dict(ctx, user=_cc.ADMIN)))
         if not ctx["user"]:
             return self.redirect("/login")
         for svc_path, svc in SERVICES.items():

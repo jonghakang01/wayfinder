@@ -1,0 +1,26 @@
+name: Daily Drive Sync
+
+on:
+  schedule:
+    - cron: '0 14 * * *'  # 10:00 AM EDT (UTC-4). Shifts to 11 AM during EST (Nov–Mar)
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger batch OCR via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            pip3 install pywebpush --break-system-packages -q 2>/dev/null || true
+            secret=$(grep '^CARDCONV_BATCH_SECRET=' ~/webapp/.env | cut -d= -f2)
+            result=$(curl -sf -X POST http://localhost:8080/cardconv/batch/run \
+              -H "X-Batch-Secret: $secret" \
+              -H "Content-Type: application/json" \
+              -d '{}' 2>&1) || true
+            echo "Drive sync result: $result"
+            echo "Completed at $(date)"
