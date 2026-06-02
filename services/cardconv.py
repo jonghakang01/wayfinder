@@ -1435,34 +1435,43 @@ def _handle_ledger_complete(username: str, body: dict):
             e["completed_at"] = None if undo else now
             touched.append(e)
 
-    # A Drive file is moved only when none of its sibling entries remain in the
-    # opposite state, so a multi-receipt page isn't archived prematurely.
+    # A Drive file's correct location is derived purely from its siblings: it
+    # belongs in Completed iff EVERY entry sharing that file is completed,
+    # otherwise in Receipts. Computing this per affected file (rather than per
+    # touched entry) keeps a multi-receipt page consistent — partially-completed
+    # pages stay in Receipts, and the archived_drive flag is synced across all
+    # siblings so it never goes stale on an un-touched sibling.
     by_file = {}
     for e in ledger["entries"]:
         fid = e.get("file_id")
         if fid:
             by_file.setdefault(fid, []).append(e)
-    move_fids = set()
-    for e in touched:
-        fid = e.get("file_id")
-        sibs = by_file.get(fid, [e])
-        all_completed = all(s.get("completed") for s in sibs)
-        if not undo and all_completed:
-            move_fids.add(fid)
-        elif undo:
-            move_fids.add(fid)  # any sibling un-completed → bring file back
+    affected = {e.get("file_id") for e in touched if e.get("file_id")}
+    to_archive, to_restore = set(), set()
+    for fid in affected:
+        sibs = by_file.get(fid, [])
+        if sibs and all(s.get("completed") for s in sibs):
+            to_archive.add(fid)
+        else:
+            to_restore.add(fid)
 
-    if undo:
-        moved = _restore_from_completed(username, move_fids)
-        for e in touched:
+    moved = 0
+    if to_archive:
+        moved += _archive_to_completed(username, to_archive)
+    if to_restore:
+        moved += _restore_from_completed(username, to_restore)
+    # Sync archived_drive across every entry of each affected file.
+    for e in ledger["entries"]:
+        fid = e.get("file_id")
+        if fid in to_archive:
+            e["archived_drive"] = True
+        elif fid in to_restore:
             e["archived_drive"] = False
-    else:
-        moved = _archive_to_completed(username, move_fids)
-        for e in touched:
-            if e.get("file_id") in move_fids:
-                e["archived_drive"] = True
     _save_ledger(username, ledger)
-    return ("json", {"ok": True, "count": len(touched), "moved": moved})
+    # `attempted` = Drive moves we tried; the UI warns when moved < attempted
+    # (e.g. Drive offline) while the ledger flag — the source of truth — is set.
+    return ("json", {"ok": True, "count": len(touched),
+                     "moved": moved, "attempted": len(to_archive) + len(to_restore)})
 
 
 def _parse_filter_params(query: dict) -> dict:
@@ -4037,6 +4046,13 @@ __TABCSS__
   font-size:.8rem;padding:3px 6px;cursor:pointer;max-width:130px}
 .usage-sel:hover,.card-sel:hover{border-color:var(--border)}
 .usage-sel:focus,.card-sel:focus{border-color:var(--accent);outline:none}
+/* transient toast for bulk-action feedback */
+.cc-toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);
+  background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px 18px;
+  font-size:.84rem;color:var(--text);box-shadow:0 8px 30px rgba(0,0,0,.4);opacity:0;pointer-events:none;
+  transition:opacity .2s,transform .2s;z-index:2000;max-width:80vw;text-align:center}
+.cc-toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.cc-toast.warn{border-color:rgba(245,158,11,.5)}
 .ledger-table{width:100%;border-collapse:collapse;font-size:.83rem}
 .ledger-table th{padding:8px 12px;text-align:left;font-size:.72rem;font-weight:700;text-transform:uppercase;
   letter-spacing:.07em;color:var(--text-muted);border-bottom:1px solid var(--border)}
@@ -4360,6 +4376,16 @@ function cardBadge(b){
 
 function esc1(s){
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Transient bottom toast for bulk-action feedback. warn=true tints the border.
+function toast(msg, warn){
+  let t = document.getElementById('ccToast');
+  if(!t){ t = document.createElement('div'); t.id = 'ccToast'; t.className = 'cc-toast'; document.body.appendChild(t); }
+  t.textContent = msg;
+  t.classList.toggle('warn', !!warn);
+  t.classList.add('show');
+  clearTimeout(t._h); t._h = setTimeout(function(){ t.classList.remove('show'); }, 3600);
 }
 
 // Inline-editable Usage cell: a dropdown of known tags + the current value, plus
@@ -4770,6 +4796,10 @@ async function togglePanelComplete(){
   });
   var d = await r.json().catch(() => ({}));
   if(!d.ok){ alert('실패: '+(d && d.error||r.status)); return; }
+  toast(undo ? '완료 해제됨' : '완료 처리됨', false);
+  if(d.attempted && d.moved < d.attempted){
+    toast('Drive 원본 이동이 적용되지 않았습니다. 정산 데이터는 정상 반영됨.', true);
+  }
   closePanel();
   load();
 }
@@ -4897,8 +4927,12 @@ async function completeSelected(undo){
     body: JSON.stringify({ids: ids, undo: !!undo})
   });
   const d = await r.json().catch(() => ({}));
-  if(d && d.moved!=null && !undo && d.moved < ids.length){
-    // Some Drive moves may not apply (e.g. multi-receipt page partially completed).
+  if(!d.ok){ alert('실패: ' + (d.error || r.status)); load(); return; }
+  toast(ids.length + '건 ' + verb + ' 완료', false);
+  // Warn when some Drive originals couldn't be moved (e.g. Drive offline);
+  // the ledger flag is already set so exclusion from Sync/Mapping still holds.
+  if(d.attempted && d.moved < d.attempted){
+    toast('일부 Drive 원본 이동이 적용되지 않았습니다. 정산 데이터는 정상 반영됨.', true);
   }
   load();
 }
