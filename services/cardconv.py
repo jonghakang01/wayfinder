@@ -239,6 +239,10 @@ def _migrate_entry(e: dict) -> dict:
         if mt_date:
             e["ocr_date_original"] = e.get("ocr_date")
             e["ocr_date"] = mt_date
+    # A matched receipt is an AMEX transaction (the CSV is an AMEX statement);
+    # backfill the brand for already-matched entries that predate card detection.
+    if e.get("match_status") == "matched" and not e.get("card_brand"):
+        e["card_brand"] = "amex"
     return e
 
 
@@ -1038,6 +1042,11 @@ def convert(csv_bytes: bytes, filename: str, username: str = None) -> tuple:
                         'amount': amt_rounded,
                         'vendor': vendor,
                     }
+                    # The CSV is an AMEX statement, so a matched receipt is an AMEX
+                    # transaction — fill the brand when OCR left it unknown (don't
+                    # override an explicit OCR reading).
+                    if not receipt_match.get('card_brand'):
+                        receipt_match['card_brand'] = 'amex'
                     # Backfill OCR date from the matched CSV transaction when OCR
                     # failed to read it. Keep the original in ocr_date_original.
                     if receipt_match.get('ocr_date') in (None, '', 'unknown') and inv_date_str:
@@ -1545,6 +1554,9 @@ def _handle_status_change(username: str, entry_id: str, body: dict):
             e["matched"] = (status == "matched")
             if status == "matched":
                 e["matched_at"] = datetime.now().isoformat()
+                # Matched ⇒ AMEX transaction; fill brand only when unknown.
+                if not e.get("card_brand"):
+                    e["card_brand"] = "amex"
             _save_ledger(username, ledger)
             return ("json", {"ok": True})
     return ("json", {"error": "not found"}, 404)
@@ -3300,6 +3312,9 @@ def _handle_review_manual_match(username: str, body: dict):
         "amount": matched_row.get("amount"),
         "vendor": matched_row.get("merchant"),
     }
+    # Matched ⇒ AMEX transaction; fill brand only when unknown.
+    if not receipt.get("card_brand"):
+        receipt["card_brand"] = "amex"
     _save_receipts(username, receipts)
     _save_review(username, review)
     return ("json", {"ok": True, "receipt": matched_row["receipt"]})
