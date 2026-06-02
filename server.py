@@ -616,8 +616,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_text(ICON_SVG, "image/svg+xml")
         if path == "/health":
             return self.send_text('{"status":"ok"}', "application/json")
-        if path in ("/login", "/logout"):
-            return self.dispatch(auth.handle("GET", path, {}, ctx))
+        if path in ("/login", "/logout", "/signup"):
+            return self.dispatch(auth.handle("GET", path, query, ctx))
         if not ctx["user"]:
             return self.redirect("/login")
         if path == "/":

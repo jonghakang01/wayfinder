@@ -6,7 +6,12 @@ SESSIONS_FILE = os.path.join(DATA_ROOT, "sessions.json")
 SETTINGS_FILE = os.path.join(DATA_ROOT, "settings.json")
 SESSIONS = {}  # token -> username  (persisted to SESSIONS_FILE)
 
-ADMIN_USERNAME    = "jongha.kang"
+# Identity model: users are keyed by an internal id ("data_key") that also names
+# their on-disk data (data_dir, cardconv receipts_<id>.json, …). New users' key
+# IS their email; the admin keeps the legacy key "jongha.kang" so existing data is
+# never moved. Login is by email — _resolve_login maps an email to its key.
+ADMIN_USERNAME    = "jongha.kang"          # admin's data_key (legacy, preserves data)
+ADMIN_EMAIL       = "jongha.kang01@gmail.com"
 CONTROLLED_SERVICES = {"todo", "cardconv", "aeo", "llm-check"}
 APP_LABELS = {
     "todo":      "📋 Daily Task",
@@ -88,7 +93,37 @@ def _migrate_format(data):
                 new_svcs = [s for s in svcs if s in CONTROLLED_SERVICES]
                 if set(new_svcs) != set(svcs):
                     v["services"] = new_svcs; changed = True
+    # Email-as-ID migration. Give the admin its known email so it can log in by
+    # email, and prune legacy email-less accounts (the old test users) — every
+    # real account now carries an email at registration.
+    for k, v in list(data.items()):
+        if not isinstance(v, dict):
+            continue
+        if v.get("role") == "admin" or k == ADMIN_USERNAME:
+            if not v.get("email"):
+                v["email"] = ADMIN_EMAIL; changed = True
+        elif not (v.get("email") or "").strip():
+            del data[k]; changed = True
     return data, changed
+
+
+def _resolve_login(email: str):
+    """Map a login email to its internal user key, or None.
+
+    New accounts are keyed directly by email; legacy/admin accounts are matched
+    on their stored email field. The raw key is also accepted as a fallback so
+    the admin can still log in with the legacy id.
+    """
+    email = (email or "").strip().lower()
+    if not email:
+        return None
+    users = load_users()
+    if email in users:
+        return email
+    for k, v in users.items():
+        if isinstance(v, dict) and (v.get("email") or "").strip().lower() == email:
+            return k
+    return None
 
 
 def load_users():
@@ -204,59 +239,79 @@ def handle(method, path, body, ctx=None):
         return ("set_cookie_redirect", "/login", "session=; Max-Age=0; Path=/; HttpOnly")
 
     if method == "POST":
-        action = body.get("action", ["login"])[0]
-        username = body.get("username", [""])[0].strip().lower()
+        action   = body.get("action", ["login"])[0]
+        email    = body.get("email", [""])[0].strip().lower()
         password = body.get("password", [""])[0]
+        # Optional app scope from the per-app signup/login link (/login?app=cardconv).
+        app = body.get("app", [""])[0].strip()
+        if app not in CONTROLLED_SERVICES:
+            app = ""
 
-        if not username or not password:
-            return ("html", render_login("아이디와 비밀번호를 입력하세요."))
+        if not email or not password:
+            return ("html", render_login("이메일과 비밀번호를 입력하세요.", app=app))
+        if "@" not in email or "." not in email.split("@")[-1]:
+            return ("html", render_login("올바른 이메일을 입력하세요.", app=app))
 
-        users = load_users()
+        users   = load_users()
         pw_hash = hash_pw(password)
 
         if action == "register":
-            if username in users:
-                return ("html", render_login(register_error="이미 존재하는 아이디입니다."))
-            role = "admin" if username == ADMIN_USERNAME else "user"
-            email = body.get("email", [""])[0].strip()
-            services_raw = body.get("services", [])
-            services_list = [s for s in services_raw if s in CONTROLLED_SERVICES]
-            users[username] = {
+            if _resolve_login(email):
+                return ("html", render_login(
+                    register_error="이미 가입된 이메일입니다. 로그인하세요.", app=app))
+            role = "admin" if email == ADMIN_EMAIL else "user"
+            # All signups are auto-approved (open); the app link scopes access to
+            # exactly that one service. A bare signup (no app) starts with none.
+            services_list = [app] if app else []
+            key = email  # new accounts are keyed by their email
+            users[key] = {
                 "pw": pw_hash, "role": role,
-                "email": email, "services": services_list,
+                "email": email, "services": services_list, "blocked": False,
             }
             save_users(users)
         else:
-            if username not in users:
-                return ("html", render_login("존재하지 않는 아이디입니다."))
-            if users[username]["pw"] != pw_hash:
-                return ("html", render_login("비밀번호가 틀렸습니다."))
+            key = _resolve_login(email)
+            if not key:
+                return ("html", render_login("존재하지 않는 계정입니다.", app=app))
+            if users[key]["pw"] != pw_hash:
+                return ("html", render_login("비밀번호가 틀렸습니다.", app=app))
+            # Accumulate: logging in through an app link grants that app (password
+            # was just verified, so this is safe self-service access).
+            if app and app not in users[key].get("services", []):
+                users[key].setdefault("services", []).append(app)
+                save_users(users)
 
-        data_dir(username)
+        data_dir(key)
         token = secrets.token_urlsafe(32)
-        SESSIONS[token] = username
+        SESSIONS[token] = key
         _save_sessions()
         cookie = f"session={token}; HttpOnly; Path=/; SameSite=Lax"
         return ("set_cookie_redirect", "/", cookie)
 
-    return ("html", render_login())
+    # GET — render the login/signup page, scoped to ?app= when present.
+    app = body.get("app", [""])[0].strip() if isinstance(body, dict) else ""
+    if app not in CONTROLLED_SERVICES:
+        app = ""
+    return ("html", render_login(app=app))
 
 
-def render_login(error="", register_error=""):
-    settings = load_settings()
-    available = settings.get("available_services", [])
+def render_login(error="", register_error="", app=""):
     svc_labels = APP_LABELS
+    app = app if app in CONTROLLED_SERVICES else ""
 
-    svc_html = ""
-    if available:
-        checks = "".join(
-            f'<label class="svc-check"><input type="checkbox" name="services" value="{s}" checked> {svc_labels.get(s, s)}</label>'
-            for s in available
-        )
-        svc_html = f'''<div class="field">
-      <label>서비스 선택</label>
-      <div class="svc-checks">{checks}</div>
-    </div>'''
+    # App-scoped signup: the link (/login?app=cardconv) fixes which service the new
+    # account gets, so we drop the service picker and show the app name instead.
+    if app:
+        app_label = svc_labels.get(app, app)
+        svc_html = (f'<input type="hidden" name="app" value="{app}">'
+                    f'<div class="app-scope">가입 서비스: <b>{app_label}</b></div>')
+        signup_title = f"{app_label} 가입"
+        app_hidden = f'<input type="hidden" name="app" value="{app}">'
+    else:
+        svc_html = ('<div class="app-scope" style="color:#6e7681">'
+                    '서비스별 가입 링크로 들어오면 해당 서비스 권한이 부여됩니다.</div>')
+        signup_title = "새 계정 만들기"
+        app_hidden = ""
 
     err = f'<div class="error">{error}</div>' if error else ""
     reg_err = f'<div class="error">{register_error}</div>' if register_error else ""
@@ -285,6 +340,8 @@ input[type=text]:focus,input[type=password]:focus,input[type=email]:focus{{borde
 .svc-checks{{display:flex;gap:12px;flex-wrap:wrap;margin-top:6px}}
 .svc-check{{display:flex;align-items:center;gap:6px;font-size:13px;color:#c9d1d9;cursor:pointer}}
 .svc-check input{{width:auto}}
+.app-scope{{font-size:13px;color:#c9d1d9;background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:10px 14px;margin-bottom:14px}}
+.app-scope b{{color:#58a6ff}}
 </style>
 </head><body>
 <div class="wrap">
@@ -293,20 +350,20 @@ input[type=text]:focus,input[type=password]:focus,input[type=email]:focus{{borde
     {err}
     <form method="POST" action="/login">
       <input type="hidden" name="action" value="login">
-      <div class="field"><label>아이디</label><input type="text" name="username" autofocus autocomplete="username" placeholder="username"></div>
+      {app_hidden}
+      <div class="field"><label>이메일</label><input type="email" name="email" autofocus autocomplete="email" placeholder="you@example.com"></div>
       <div class="field"><label>비밀번호</label><input type="password" name="password" autocomplete="current-password" placeholder="••••••••"></div>
       <button class="btn-login" type="submit">로그인</button>
     </form>
   </div>
   <hr class="divider">
   <div class="box">
-    <h2>새 계정 만들기</h2>
+    <h2>{signup_title}</h2>
     {reg_err}
     <form method="POST" action="/login">
       <input type="hidden" name="action" value="register">
-      <div class="field"><label>아이디</label><input type="text" name="username" autocomplete="username" placeholder="username"></div>
+      <div class="field"><label>이메일</label><input type="email" name="email" autocomplete="email" placeholder="you@example.com"></div>
       <div class="field"><label>비밀번호</label><input type="password" name="password" autocomplete="new-password" placeholder="••••••••"></div>
-      <div class="field"><label>이메일 <span style="font-size:11px;color:#6e7681">(선택)</span></label><input type="email" name="email" autocomplete="email" placeholder="you@example.com"></div>
       {svc_html}
       <button class="btn-register" type="submit">가입</button>
     </form>

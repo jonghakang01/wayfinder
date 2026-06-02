@@ -2013,7 +2013,10 @@ def _handle_ledger_pdf(username: str, query: dict):
 
 def handle(method, path, body, ctx=None):
     user = (ctx or {}).get("user")
-    if user != ADMIN:
+    # Service-level access is already enforced by server.py (has_service_access);
+    # the batch endpoint injects user=ADMIN. Each user works on their own per-user
+    # ledger/Drive (receipts_<user>.json), so cardconv is multi-tenant by data_key.
+    if not user:
         return ("html", "<h2 style='padding:40px;color:#f87171'>Access denied</h2>")
 
     # Tab pages: Ledger (main) | Convert | Review | Keywords
