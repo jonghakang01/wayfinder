@@ -1,0 +1,36 @@
+name: Prod Diagnose
+
+# Read-only inspection of the production wayfinder service environment.
+# Used to diagnose why CARDCONV_BATCH_SECRET isn't reaching the server process.
+on:
+  workflow_dispatch:
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Inspect wayfinder service + env (read-only)
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            echo "=== systemctl cat wayfinder ==="
+            systemctl cat wayfinder 2>&1 || true
+            echo ""
+            echo "=== EnvironmentFiles / Environment ==="
+            systemctl show wayfinder -p EnvironmentFiles -p Environment -p ExecStart -p WorkingDirectory 2>&1 || true
+            echo ""
+            echo "=== .env location + KEY NAMES ONLY (values masked) ==="
+            for f in ~/webapp/.env /root/webapp/.env /home/*/webapp/.env; do
+              [ -f "$f" ] && echo "FILE: $f" && grep -oE '^[A-Z_]+=' "$f" 2>/dev/null
+            done
+            echo ""
+            echo "=== is CARDCONV_BATCH_SECRET in the running process env? (0/1) ==="
+            pid=$(systemctl show -p MainPID --value wayfinder 2>/dev/null)
+            echo "MainPID=$pid"
+            if [ -n "$pid" ] && [ "$pid" != "0" ]; then
+              tr '\0' '\n' < /proc/$pid/environ 2>/dev/null | grep -c '^CARDCONV_BATCH_SECRET=' || echo "0 (not present or no read perm)"
+            fi
+            echo "=== done ==="
