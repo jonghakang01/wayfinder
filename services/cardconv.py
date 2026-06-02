@@ -74,7 +74,6 @@ META = {
     "path": "/cardconv",
     "icon": "💳",
     "description": "Corporate card CSV → SAP upload xlsx",
-    "admin_only": True,
 }
 
 DEFAULT_KW = [
@@ -2888,7 +2887,7 @@ def _render_convert(user: str) -> str:
 <style>{_CC_TAB_CSS}{_UPLOAD_CSS}</style>
 </head><body>
 <nav>
-  <span class="nav-brand">💳 Card Converter</span>
+  <span class="nav-brand">💳 Cheil USA AMEX Converter</span>
   <span class="nav-user">👤 {user} &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
 </nav>
 <div class="container" style="max-width:860px">
@@ -3090,7 +3089,7 @@ def _render_history(user: str) -> str:
 <style>{_CC_TAB_CSS}</style>
 </head><body>
 <nav>
-  <span class="nav-brand">💳 Card Converter</span>
+  <span class="nav-brand">💳 Cheil USA AMEX Converter</span>
   <span class="nav-user">👤 {user} &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
 </nav>
 <div class="container" style="max-width:860px">
@@ -3176,7 +3175,7 @@ def _render_keywords(user: str) -> str:
 </style>
 </head><body>
 <nav>
-  <span class="nav-brand">💳 Card Converter</span>
+  <span class="nav-brand">💳 Cheil USA AMEX Converter</span>
   <span class="nav-user">👤 {user} &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
 </nav>
 <div class="container" style="max-width:860px">
@@ -3620,7 +3619,7 @@ def _render_review(user: str) -> str:
 </style>
 </head><body>
 <nav>
-  <span class="nav-brand">💳 Card Converter</span>
+  <span class="nav-brand">💳 Cheil USA AMEX Converter</span>
   <span class="nav-user">👤 {user} &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
 </nav>
 <div class="container" style="max-width:920px">
@@ -4152,7 +4151,7 @@ __TABCSS__
 </style>
 </head><body>
 <nav>
-  <span class="nav-brand">💳 Card Converter</span>
+  <span class="nav-brand">💳 Cheil USA AMEX Converter</span>
   <span class="nav-user">👤 __USER__ &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
 </nav>
 <div class="container" style="max-width:1100px">

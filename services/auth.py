@@ -179,8 +179,7 @@ def is_blocked(username):
 
 def has_service_access(username, service_path):
     service_name = service_path.lstrip("/").split("/")[0]
-    if service_name not in CONTROLLED_SERVICES:
-        return True
+    # Admin sees everything; everyone else only reaches explicitly granted services.
     if is_admin(username):
         return True
     users = load_users()
@@ -344,6 +343,7 @@ input[type=text]:focus,input[type=password]:focus,input[type=email]:focus{{borde
 .app-scope b{{color:#58a6ff}}
 </style>
 </head><body>
+<!--wf-root-->
 <div class="wrap">
   <div class="box">
     <h1>🧭 Wayfinder</h1>

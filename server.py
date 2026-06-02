@@ -316,6 +316,17 @@ PWA_INJECT = (
     "<script>if('serviceWorker'in navigator)navigator.serviceWorker.register('/sw.js');</script>"
 )
 
+# Small floating "back to home" link injected into every app page (not the home/login,
+# which carry the <!--wf-root--> sentinel).
+WAYFINDER_BACK = (
+    '<a href="/" title="Back to Wayfinder" '
+    'style="position:fixed;left:16px;bottom:16px;z-index:9999;display:inline-flex;'
+    'align-items:center;gap:6px;padding:8px 14px;background:rgba(17,24,39,.92);'
+    'color:#cbd5e1;border:1px solid #334155;border-radius:99px;font-size:.78rem;'
+    'font-weight:600;text-decoration:none;backdrop-filter:blur(6px);'
+    'box-shadow:0 4px 14px rgba(0,0,0,.35)">🧭 Wayfinder</a>'
+)
+
 CATEGORIES = {
     "Productivity": [],
     "Team Tools": ["/terminals", "/workspace"],
@@ -439,6 +450,7 @@ def wayfinder(user):
 <title>🧭 Wayfinder</title>
 <link rel="stylesheet" href="/static/style.css?v={CSS_VER}">
 </head><body>
+<!--wf-root-->
 <nav>
   <span class="nav-brand">🧭 Wayfinder</span>
   <span class="nav-user">👤 {user} &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
@@ -446,11 +458,31 @@ def wayfinder(user):
 <div class="container">
   <div class="dashboard">
     <div class="dashboard-greeting">
-      <h2>{greeting_icon} {greeting}, {user}</h2>
-      <p>{today_str}</p>
+      <h2 id="wf-greeting">{greeting_icon} {greeting}, {user}</h2>
+      <p id="wf-clock">{today_str}</p>
     </div>
     {'<div class="dashboard-stats"><div class="stat-card highlight"><div class="stat-num">' + str(todo_total) + '</div><div class="stat-label">Tasks Left</div></div><div class="stat-card"><div class="stat-num">' + str(todo_done_today) + '</div><div class="stat-label">Done Today</div></div></div>' if has_todo else ''}
   </div>
+  <script>
+  (function(){{
+    var name = {json.dumps(user)};
+    function pad(n){{ return (n < 10 ? '0' : '') + n; }}
+    function tick(){{
+      var d = new Date(), h = d.getHours(), g, ic;
+      if (h < 6)       {{ g = 'Good night';   ic = '🌙'; }}
+      else if (h < 12) {{ g = 'Good morning'; ic = '☀️'; }}
+      else if (h < 18) {{ g = 'Hello';        ic = '🌤️'; }}
+      else             {{ g = 'Good evening'; ic = '🌙'; }}
+      var ge = document.getElementById('wf-greeting');
+      var ce = document.getElementById('wf-clock');
+      if (ge) ge.textContent = ic + ' ' + g + ', ' + name;
+      if (ce) ce.textContent =
+        d.toLocaleDateString(undefined, {{weekday:'long', year:'numeric', month:'long', day:'numeric'}})
+        + ' · ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+    }}
+    tick(); setInterval(tick, 1000);
+  }})();
+  </script>
 
   {'<a href="/todo" class="app-entry-card"><div class="app-entry-icon">🧭</div><div class="app-entry-text"><div class="app-entry-name">My Productivity App</div><div class="app-entry-tabs">✅ Tasks &nbsp;·&nbsp; 🏃 Habits &nbsp;·&nbsp; 📊 Overview</div></div><div class="app-entry-arrow">→</div></a>' if has_todo else ''}
 
@@ -499,6 +531,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def send_html(self, html, code=200):
         html = html.replace('</head>', PWA_INJECT + '</head>', 1)
+        if '<!--wf-root-->' not in html and '</body>' in html:
+            html = html.replace('</body>', WAYFINDER_BACK + '</body>', 1)
         b = html.encode()
         self.send_response(code)
         self.send_header("Content-Type", "text/html; charset=utf-8")
