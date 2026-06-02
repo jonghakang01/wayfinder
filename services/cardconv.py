@@ -4032,11 +4032,11 @@ __TABCSS__
 .fb-act-uncomplete{background:rgba(148,163,184,.15);color:#94a3b8;border:1px solid rgba(148,163,184,.3)}
 .fb-act-delete{background:rgba(239,68,68,.15);color:#ef4444;border:1px solid rgba(239,68,68,.3)}
 .filter-bar .btn[disabled]{opacity:.45;cursor:default}
-/* inline usage editor in the ledger table */
-.usage-sel{background:var(--surface);border:1px solid transparent;border-radius:6px;color:var(--text);
+/* inline usage + card-type editors in the ledger table */
+.usage-sel,.card-sel{background:var(--surface);border:1px solid transparent;border-radius:6px;color:var(--text);
   font-size:.8rem;padding:3px 6px;cursor:pointer;max-width:130px}
-.usage-sel:hover{border-color:var(--border)}
-.usage-sel:focus{border-color:var(--accent);outline:none}
+.usage-sel:hover,.card-sel:hover{border-color:var(--border)}
+.usage-sel:focus,.card-sel:focus{border-color:var(--accent);outline:none}
 .ledger-table{width:100%;border-collapse:collapse;font-size:.83rem}
 .ledger-table th{padding:8px 12px;text-align:left;font-size:.72rem;font-weight:700;text-transform:uppercase;
   letter-spacing:.07em;color:var(--text-muted);border-bottom:1px solid var(--border)}
@@ -4255,7 +4255,7 @@ __TABCSS__
     <div class="detail-row"><span class="key">Card Type</span>
       <span class="val" id="dCard">–</span>
       <select id="eCard" style="display:none;width:120px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:.82rem;padding:2px 6px">
-        <option value="">–</option><option value="amex">AMEX</option><option value="visa">Visa</option><option value="other">Other</option>
+        <option value="none">–</option><option value="amex">AMEX</option><option value="visa">Visa</option><option value="other">Other</option>
       </select>
     </div>
     <div class="detail-row"><span class="key">Usage</span>
@@ -4391,6 +4391,29 @@ async function changeUsage(sel){
   load();   // refresh so the Usage filter dropdown picks up any new tag
 }
 
+// Inline-editable Card Type cell: dropdown of –/AMEX/Visa/Other, edited from the row.
+// The "none" value is an explicit sentinel (empty form values get dropped in
+// transit, so they can't clear a field) that the backend maps back to null.
+const CARD_OPTS = [['none','–'],['amex','AMEX'],['visa','Visa'],['other','Other']];
+function cardCell(e){
+  const cur = e.card_brand || 'none';
+  let html = '<select class="card-sel" data-id="' + esc1(e.id) + '" title="Card Type 변경">';
+  CARD_OPTS.forEach(function(o){
+    html += '<option value="' + o[0] + '"' + (o[0]===cur?' selected':'') + '>' + o[1] + '</option>';
+  });
+  html += '</select>';
+  return html;
+}
+
+async function changeCard(sel){
+  const id = sel.dataset.id, val = sel.value;
+  const r = await fetch('/cardconv/ledger/' + id + '/update',
+    {method:'POST', body: new URLSearchParams({card_brand: val})});
+  const d = await r.json().catch(function(){ return {}; });
+  if(!d.ok){ alert('Card Type 변경 실패: ' + (d.error || r.status)); load(); return; }
+  const e = ENTRIES.find(function(x){ return x.id===id; }); if(e) e.card_brand = (val==='none' ? null : val);
+}
+
 function matchInfo(e){
   const mt = e.matched_transaction;
   if(!mt) return '';
@@ -4460,7 +4483,7 @@ function rowHtml(e, i, opts){
     handCell +
     '<td style="font-weight:700">' + fmtAmt(e.ocr_amount) + '</td>' +
     '<td>' + (e.ocr_merchant||'–') + '</td>' +
-    '<td>' + cardBadge(e.card_brand) + '</td>' +
+    '<td>' + cardCell(e) + '</td>' +
     '<td>' + usageCell(e) + '</td>' +
     '<td>' + thumb(e) + '</td>' +
     '<td><span class="status-badge status-' + (e.match_status||'unmatched') + '">' +
@@ -4536,6 +4559,10 @@ function rerender(){
     body.querySelectorAll('.usage-sel').forEach(s => {
       s.addEventListener('click', ev => ev.stopPropagation());
       s.addEventListener('change', ev => { ev.stopPropagation(); changeUsage(s); });
+    });
+    body.querySelectorAll('.card-sel').forEach(s => {
+      s.addEventListener('click', ev => ev.stopPropagation());
+      s.addEventListener('change', ev => { ev.stopPropagation(); changeCard(s); });
     });
     body.querySelectorAll('.grp-toggle').forEach(g =>
       g.addEventListener('click', ev => {
@@ -4653,7 +4680,7 @@ function openPanel(e){
   $('eMerchant').value = e.ocr_merchant || '';
   $('ePrinted').value = (e.ocr_printed_amount != null) ? e.ocr_printed_amount : (e.ocr_amount || '');
   $('eHand').value = (e.ocr_handwritten_amount != null) ? e.ocr_handwritten_amount : '';
-  $('eCard').value = e.card_brand || '';
+  $('eCard').value = e.card_brand || 'none';
   $('eUsage').value = (e.usage && e.usage !== 'Regular') ? e.usage : '';
   // Complete toggle button reflects current state.
   var cb = $('dCompleteBtn');
