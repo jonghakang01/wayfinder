@@ -4015,11 +4015,28 @@ __TABCSS__
   padding:16px 20px;text-align:center}
 .stat-value{font-size:1.6rem;font-weight:700;color:var(--text);line-height:1.2}
 .stat-label{font-size:.73rem;color:var(--text-muted);margin-top:4px;text-transform:uppercase;letter-spacing:.06em}
-.filter-bar{display:flex;align-items:center;gap:10px;padding:10px 16px;background:var(--surface-2);
-  border:1px solid var(--border);border-radius:var(--radius-md);margin-bottom:14px;flex-wrap:wrap}
+.filter-bar{display:flex;align-items:center;gap:14px;padding:9px 16px;background:var(--surface-2);
+  border:1px solid var(--border);border-radius:var(--radius-md);margin-bottom:8px;flex-wrap:wrap}
+.filter-bar:last-of-type{margin-bottom:14px}
 .filter-bar input[type=date],.filter-bar select{background:var(--surface);border:1px solid var(--border);
   border-radius:6px;color:var(--text);font-size:.82rem;padding:5px 8px;outline:none}
 .filter-bar input[type=date]:focus,.filter-bar select:focus{border-color:var(--accent)}
+/* label+control bundled so a wrap never separates a label from its input */
+.fb-field{display:inline-flex;align-items:center;gap:7px;white-space:nowrap}
+.fb-field>span{font-size:.74rem;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em}
+.fb-dash{color:var(--text-muted);padding:0 2px}
+.fb-group{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
+.fb-spacer{margin-left:auto}
+/* selection-action buttons: color via class, share one disabled treatment */
+.fb-act-complete{background:rgba(129,140,248,.15);color:#818cf8;border:1px solid rgba(129,140,248,.3)}
+.fb-act-uncomplete{background:rgba(148,163,184,.15);color:#94a3b8;border:1px solid rgba(148,163,184,.3)}
+.fb-act-delete{background:rgba(239,68,68,.15);color:#ef4444;border:1px solid rgba(239,68,68,.3)}
+.filter-bar .btn[disabled]{opacity:.45;cursor:default}
+/* inline usage editor in the ledger table */
+.usage-sel{background:var(--surface);border:1px solid transparent;border-radius:6px;color:var(--text);
+  font-size:.8rem;padding:3px 6px;cursor:pointer;max-width:130px}
+.usage-sel:hover{border-color:var(--border)}
+.usage-sel:focus{border-color:var(--accent);outline:none}
 .ledger-table{width:100%;border-collapse:collapse;font-size:.83rem}
 .ledger-table th{padding:8px 12px;text-align:left;font-size:.72rem;font-weight:700;text-transform:uppercase;
   letter-spacing:.07em;color:var(--text-muted);border-bottom:1px solid var(--border)}
@@ -4117,56 +4134,68 @@ __TABCSS__
     <div class="stat-card"><div class="stat-value" id="statCompleted" style="color:#818cf8">–</div><div class="stat-label">Completed</div></div>
   </div>
 
+  <!-- Row 1 · date range + quick presets (kept together as one period control) -->
   <div class="filter-bar">
-    📅 <input type="date" id="fFrom"> ~ <input type="date" id="fTo">
-    <span style="margin-left:8px">Status:</span>
-    <select id="fStatus">
-      <option value="all">All</option>
-      <option value="matched">Matched</option>
-      <option value="unmatched">Unmatched</option>
-      <option value="pending_match">Pending Match</option>
-    </select>
-    <span>Card:</span>
-    <select id="fCard">
-      <option value="all">All</option>
-      <option value="amex">AMEX</option>
-      <option value="visa">Visa</option>
-      <option value="other">Other</option>
-      <option value="unknown">Unknown</option>
-    </select>
-    <span>Usage:</span>
-    <select id="fUsage"><option value="all">All</option></select>
-    <span>Show:</span>
-    <select id="fCompleted">
-      <option value="hide">Active (hide completed)</option>
-      <option value="only">Completed only</option>
-      <option value="all">All</option>
-    </select>
-    <button class="btn btn-ghost btn-sm" id="fReset">Reset</button>
-    <span style="margin-left:auto;display:flex;gap:6px">
-      <button class="btn btn-secondary btn-sm" id="fDownloadXlsx">⬇ Download xlsx</button>
-      <button class="btn btn-ghost btn-sm" id="fDownload">📄 PDF</button>
-    </span>
+    <div class="fb-field">
+      <span>📅 Date</span>
+      <input type="date" id="fFrom"><span class="fb-dash">~</span><input type="date" id="fTo">
+    </div>
+    <div class="fb-group" role="group" aria-label="Quick range">
+      <button class="preset-btn" data-preset="month">This month</button>
+      <button class="preset-btn" data-preset="30d">30 days</button>
+      <button class="preset-btn" data-preset="3m">3 months</button>
+      <button class="preset-btn" data-preset="ytd">YTD</button>
+      <button class="preset-btn" data-preset="all">All time</button>
+    </div>
   </div>
 
-  <div class="filter-bar" style="gap:8px">
-    <span style="font-size:.76rem;color:var(--text-muted)">Quick range:</span>
-    <button class="preset-btn" data-preset="month">This month</button>
-    <button class="preset-btn" data-preset="30d">Last 30 days</button>
-    <button class="preset-btn" data-preset="3m">Last 3 months</button>
-    <button class="preset-btn" data-preset="ytd">YTD</button>
-    <button class="preset-btn" data-preset="all">All time</button>
-    <button class="preset-btn" id="viewToggle" title="Collapse duplicate receipts into one row">🔁 Group Duplicates</button>
-    <span class="cc-info-wrap"><span class="cc-info" onclick="ccTipToggle(this)">ℹ</span><span class="cc-tip">같은 영수증이 여러 장 인식된 경우 그룹으로 묶어 표시합니다. 불필요한 중복은 삭제하세요.</span></span>
-    <button class="btn btn-sm" id="fComplete" disabled
-      style="margin-left:auto;background:rgba(129,140,248,.15);color:#818cf8;border:1px solid rgba(129,140,248,.3)">
-      ✓ Complete Selected (0)</button>
-    <button class="btn btn-sm" id="fUncomplete" disabled
-      style="background:rgba(148,163,184,.15);color:#94a3b8;border:1px solid rgba(148,163,184,.3)">
-      ↩ Un-complete (0)</button>
-    <button class="btn btn-sm" id="fDelete" disabled
-      style="background:rgba(239,68,68,.15);color:#ef4444;border:1px solid rgba(239,68,68,.3)">
-      🗑 Delete Selected (0)</button>
+  <!-- Row 2 · attribute filters (label+control bundled so they never split) -->
+  <div class="filter-bar">
+    <div class="fb-field"><span>Status</span>
+      <select id="fStatus">
+        <option value="all">All</option>
+        <option value="matched">Matched</option>
+        <option value="unmatched">Unmatched</option>
+        <option value="pending_match">Pending Match</option>
+      </select>
+    </div>
+    <div class="fb-field"><span>Card</span>
+      <select id="fCard">
+        <option value="all">All</option>
+        <option value="amex">AMEX</option>
+        <option value="visa">Visa</option>
+        <option value="other">Other</option>
+        <option value="unknown">Unknown</option>
+      </select>
+    </div>
+    <div class="fb-field"><span>Usage</span>
+      <select id="fUsage"><option value="all">All</option></select>
+    </div>
+    <div class="fb-field"><span>Show</span>
+      <select id="fCompleted">
+        <option value="hide">Active only</option>
+        <option value="only">Completed only</option>
+        <option value="all">All</option>
+      </select>
+    </div>
+    <button class="btn btn-ghost btn-sm fb-spacer" id="fReset">↺ Reset</button>
+  </div>
+
+  <!-- Row 3 · view + export (left) · bulk actions on selection (right) -->
+  <div class="filter-bar">
+    <div class="fb-group">
+      <button class="preset-btn" id="viewToggle" title="Collapse duplicate receipts into one row">🔁 Group Duplicates</button>
+      <span class="cc-info-wrap"><span class="cc-info" onclick="ccTipToggle(this)">ℹ</span><span class="cc-tip">같은 영수증이 여러 장 인식된 경우 그룹으로 묶어 표시합니다. 불필요한 중복은 삭제하세요.</span></span>
+    </div>
+    <div class="fb-group">
+      <button class="btn btn-secondary btn-sm" id="fDownloadXlsx">⬇ xlsx</button>
+      <button class="btn btn-ghost btn-sm" id="fDownload">📄 PDF</button>
+    </div>
+    <div class="fb-group fb-spacer" role="group" aria-label="Selection actions">
+      <button class="btn btn-sm fb-act-complete" id="fComplete" disabled>✓ Complete (0)</button>
+      <button class="btn btn-sm fb-act-uncomplete" id="fUncomplete" disabled>↩ Un-complete (0)</button>
+      <button class="btn btn-sm fb-act-delete" id="fDelete" disabled>🗑 Delete (0)</button>
+    </div>
   </div>
 
   <div class="notepad-card">
@@ -4329,6 +4358,39 @@ function cardBadge(b){
   return '<span class="card-badge card-' + b + '">' + CARD_LABEL[b] + '</span>';
 }
 
+function esc1(s){
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Inline-editable Usage cell: a dropdown of known tags + the current value, plus
+// a "+ New…" sentinel that prompts for a fresh tag. Edited straight from the row.
+function usageCell(e){
+  const cur = e.usage || 'Regular';
+  const known = (window.USAGES && window.USAGES.length ? window.USAGES : ['Regular']);
+  const opts = Array.from(new Set(['Regular'].concat(known).concat([cur])));
+  let html = '<select class="usage-sel" data-id="' + esc1(e.id) + '" title="Usage 변경">';
+  opts.forEach(function(u){
+    html += '<option value="' + esc1(u) + '"' + (u===cur?' selected':'') + '>' + esc1(u) + '</option>';
+  });
+  html += '<option value="__new__">+ New…</option></select>';
+  return html;
+}
+
+async function changeUsage(sel){
+  const id = sel.dataset.id;
+  let val = sel.value;
+  if(val === '__new__'){
+    val = (prompt('새 Usage 입력 (비우면 취소)', '') || '').trim();
+    if(!val){ load(); return; }   // cancelled → revert via reload
+  }
+  const r = await fetch('/cardconv/ledger/' + id + '/update',
+    {method:'POST', body: new URLSearchParams({usage: val})});
+  const d = await r.json().catch(function(){ return {}; });
+  if(!d.ok){ alert('Usage 변경 실패: ' + (d.error || r.status)); load(); return; }
+  const e = ENTRIES.find(function(x){ return x.id===id; }); if(e) e.usage = val;
+  load();   // refresh so the Usage filter dropdown picks up any new tag
+}
+
 function matchInfo(e){
   const mt = e.matched_transaction;
   if(!mt) return '';
@@ -4399,7 +4461,7 @@ function rowHtml(e, i, opts){
     '<td style="font-weight:700">' + fmtAmt(e.ocr_amount) + '</td>' +
     '<td>' + (e.ocr_merchant||'–') + '</td>' +
     '<td>' + cardBadge(e.card_brand) + '</td>' +
-    '<td style="color:var(--text-muted)">' + (e.usage||'Regular') + '</td>' +
+    '<td>' + usageCell(e) + '</td>' +
     '<td>' + thumb(e) + '</td>' +
     '<td><span class="status-badge status-' + (e.match_status||'unmatched') + '">' +
       (STATUS_LABEL[e.match_status]||e.match_status||'–') + '</span>' + matchInfo(e) + '</td>' +
@@ -4471,6 +4533,10 @@ function rerender(){
       c.addEventListener('click', ev => ev.stopPropagation()));
     body.querySelectorAll('.sel').forEach(c =>
       c.addEventListener('change', updateDeleteBtn));
+    body.querySelectorAll('.usage-sel').forEach(s => {
+      s.addEventListener('click', ev => ev.stopPropagation());
+      s.addEventListener('change', ev => { ev.stopPropagation(); changeUsage(s); });
+    });
     body.querySelectorAll('.grp-toggle').forEach(g =>
       g.addEventListener('click', ev => {
         ev.stopPropagation();
@@ -4512,6 +4578,7 @@ async function load(){
   $('statMatched').textContent = d.matched;
   $('statUnmatched').textContent = d.unmatched;
   $('statCompleted').textContent = (d.completed!=null ? d.completed : '–');
+  window.USAGES = d.usages || ['Regular'];
   syncUsageOptions(d.usages);
   ENTRIES = d.entries;
   rerender();
