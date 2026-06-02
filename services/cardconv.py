@@ -216,6 +216,15 @@ def _migrate_entry(e: dict) -> dict:
     e.setdefault("ocr_handwritten_amount", None)
     # v2.2: multi-receipt bounding box overlay. Legacy entries have no bbox.
     e.setdefault("ocr_bbox", None)
+    # v2.3: card brand (amex/visa/other, OCR-detected, user-editable), usage tag
+    # (default "Regular"), and completion state (completed entries are hidden from
+    # the default Ledger view, Sync and Mapping, and their Drive originals are
+    # moved to a "Completed" folder).
+    e.setdefault("card_brand", None)
+    e.setdefault("usage", "Regular")
+    e.setdefault("completed", False)
+    e.setdefault("completed_at", None)
+    e.setdefault("archived_drive", False)
     if "match_status" not in e:
         if e.get("matched"):
             e["match_status"] = "matched"
@@ -595,12 +604,16 @@ _OCR_PROMPT = (
     '4) handwritten_amount: any HAND-WRITTEN final amount including tip (number only, '
     'null if none visible). '
     'Handwritten amount, when present, is the REAL final amount and overrides printed. '
+    '5) card_brand: the payment card brand shown on the receipt, normalized to one '
+    'of "amex", "visa", "other", or null if no card brand is visible. Look for '
+    '"AMERICAN EXPRESS"/"AMEX"/"AMX" -> "amex"; "VISA" -> "visa"; any other brand '
+    '(Mastercard, Discover, cash, etc.) -> "other". '
     'For each receipt, ALSO return its bounding box in the image as bbox: '
     '[ymin, xmin, ymax, xmax] using a 0-1000 normalized coordinate system '
     '(0=top/left, 1000=bottom/right). '
     'Return a JSON ARRAY ONLY, one object per receipt: '
     '[{"date":"YYYY-MM-DD","merchant":"name","printed_amount":0.00,"handwritten_amount":null,'
-    '"bbox":[100,50,800,950]}]. '
+    '"card_brand":"amex","bbox":[100,50,800,950]}]. '
     'If only one receipt is visible, return an array with a single element.'
 )
 
@@ -633,7 +646,22 @@ def _normalize_ocr(result: dict) -> dict:
     result["amount"] = handwritten if handwritten is not None else printed
     # bbox: [ymin, xmin, ymax, xmax] in 0-1000 normalized coords (None if absent/invalid).
     result["bbox"] = _coerce_bbox(result.get("bbox"))
+    result["card_brand"] = _coerce_card_brand(result.get("card_brand"))
     return result
+
+
+def _coerce_card_brand(v):
+    """Normalize a model's card-brand string to 'amex'/'visa'/'other' or None."""
+    if not v:
+        return None
+    s = str(v).strip().lower()
+    if not s or s in ("null", "none", "unknown"):
+        return None
+    if "amex" in s or "american express" in s or s == "amx":
+        return "amex"
+    if "visa" in s:
+        return "visa"
+    return "other"
 
 
 def _coerce_bbox(v):
@@ -785,6 +813,7 @@ def _ocr_entry_fields(ocr: dict) -> dict:
         "ocr_merchant":           ocr.get("merchant"),
         "ocr_model":              ocr.get("_model"),
         "ocr_bbox":               ocr.get("bbox"),
+        "card_brand":             ocr.get("card_brand"),
     }
 
 
@@ -899,6 +928,8 @@ def convert(csv_bytes: bytes, filename: str, username: str = None) -> tuple:
     if username:
         receipts = _load_receipts(username)
         for r in receipts:
+            if r.get("completed"):
+                continue  # completed receipts are archived — excluded from mapping
             rdate = r.get("ocr_date")
             if rdate == "YYYY-MM-DD":
                 rdate = None
@@ -1099,7 +1130,7 @@ def _run_batch_ocr(username: str) -> dict:
         # Skip files already confirmed in the ledger.
         done_fids = {e.get("file_id") for e in entries
                      if (e.get("multi_ocr") and e.get("ocr_amount") is not None)
-                     or e.get("matched")}
+                     or e.get("matched") or e.get("completed")}
         # Also skip files already waiting in the staging queue (accumulated from
         # previous runs the user hasn't reviewed yet).
         staging = _load_ocr_staging(username)
@@ -1168,11 +1199,16 @@ def _handle_batch_run(username: str, ctx):
     return ("json", _run_batch_ocr(username))
 
 
-def _apply_ledger_filters(entries: list, status: str, dfrom: str, dto: str) -> list:
-    """Filter + sort ledger entries by status and OCR-date range.
+def _apply_ledger_filters(entries: list, status: str, dfrom: str, dto: str,
+                          card_brand: str = "", usage: str = "",
+                          completed: str = "hide") -> list:
+    """Filter + sort ledger entries by status, OCR-date range, card brand, usage
+    and completion state.
 
-    Shared by the JSON API and the PDF export so both honor identical filters.
-    Date filters keep entries without an OCR date always visible.
+    Shared by the JSON API, the PDF export and the xlsx export so all honor
+    identical filters. Date filters keep entries without an OCR date always
+    visible. `completed` is one of: "hide" (default — exclude completed),
+    "only" (completed only), "all" (include both).
     """
     filtered = entries
     if status and status != "all":
@@ -1181,6 +1217,17 @@ def _apply_ledger_filters(entries: list, status: str, dfrom: str, dto: str) -> l
         filtered = [e for e in filtered if not e.get("ocr_date") or e["ocr_date"] >= dfrom]
     if dto:
         filtered = [e for e in filtered if not e.get("ocr_date") or e["ocr_date"] <= dto]
+    if card_brand and card_brand != "all":
+        if card_brand == "unknown":
+            filtered = [e for e in filtered if not e.get("card_brand")]
+        else:
+            filtered = [e for e in filtered if e.get("card_brand") == card_brand]
+    if usage and usage != "all":
+        filtered = [e for e in filtered if (e.get("usage") or "Regular") == usage]
+    if completed == "only":
+        filtered = [e for e in filtered if e.get("completed")]
+    elif completed != "all":  # "hide" (default)
+        filtered = [e for e in filtered if not e.get("completed")]
     return sorted(
         filtered,
         key=lambda e: e.get("ocr_date") or e.get("uploaded_at") or "",
@@ -1290,13 +1337,150 @@ def _handle_ledger_delete(username: str, body: dict):
     return ("json", {"ok": True, "removed": len(removed_entries), "trashed": trashed})
 
 
+def _get_completed_folder_id(service, username: str) -> str:
+    """Drive folder ID for Wayfinder/Receipts/Completed/, created on demand."""
+    receipts_id, _ = _get_receipts_folder_ids(service, username)
+    return _get_or_create_folder(service, 'Completed', receipts_id)
+
+
+def _archive_to_completed(username: str, file_ids: set) -> int:
+    """Best-effort move of Drive originals into the Completed folder.
+
+    Returns the count moved. The ledger `completed` flag is the source of truth,
+    so any Drive failure is swallowed and reported only via the returned count.
+    """
+    if not file_ids:
+        return 0
+    service = _get_drive_service(username)
+    if not service:
+        return 0
+    try:
+        completed_id = _get_completed_folder_id(service, username)
+        receipts_id, matched_id = _get_receipts_folder_ids(service, username)
+    except Exception:
+        return 0
+    moved = 0
+    for fid in file_ids:
+        if not fid:
+            continue
+        try:
+            # Drop both possible source parents; addParents is idempotent.
+            cur = service.files().get(fileId=fid, fields='parents').execute()
+            parents = set(cur.get('parents', []))
+            remove = ",".join(parents & {receipts_id, matched_id}) or None
+            service.files().update(
+                fileId=fid, addParents=completed_id,
+                removeParents=remove, fields='id,parents'
+            ).execute()
+            moved += 1
+        except Exception:
+            pass  # best-effort; ledger flag already reflects completion
+    return moved
+
+
+def _restore_from_completed(username: str, file_ids: set) -> int:
+    """Best-effort move of Drive originals back from Completed to Receipts."""
+    if not file_ids:
+        return 0
+    service = _get_drive_service(username)
+    if not service:
+        return 0
+    try:
+        completed_id = _get_completed_folder_id(service, username)
+        receipts_id, _ = _get_receipts_folder_ids(service, username)
+    except Exception:
+        return 0
+    moved = 0
+    for fid in file_ids:
+        if not fid:
+            continue
+        try:
+            service.files().update(
+                fileId=fid, addParents=receipts_id,
+                removeParents=completed_id, fields='id,parents'
+            ).execute()
+            moved += 1
+        except Exception:
+            pass
+    return moved
+
+
+def _handle_ledger_complete(username: str, body: dict):
+    """POST /cardconv/ledger/complete — mark entries complete (or undo).
+
+    Body: {"ids": [...], "undo": bool}. Completing flags entries and moves their
+    Drive originals to the Completed folder; the ledger flag is authoritative so
+    Drive moves are best-effort. Multiple ledger entries can share one Drive file
+    (multi-receipt page) — that file is only moved when ALL its entries agree.
+    """
+    raw = body.get("ids", [])
+    ids = {str(i) for i in (raw if isinstance(raw, list) else [raw]) if i}
+    if not ids:
+        return ("json", {"error": "no ids"}, 400)
+    undo = bool(body.get("undo"))
+
+    ledger = _load_ledger(username)
+    now = datetime.now().isoformat()
+    touched = []
+    for e in ledger["entries"]:
+        if e.get("id") in ids:
+            e["completed"] = not undo
+            e["completed_at"] = None if undo else now
+            touched.append(e)
+
+    # A Drive file is moved only when none of its sibling entries remain in the
+    # opposite state, so a multi-receipt page isn't archived prematurely.
+    by_file = {}
+    for e in ledger["entries"]:
+        fid = e.get("file_id")
+        if fid:
+            by_file.setdefault(fid, []).append(e)
+    move_fids = set()
+    for e in touched:
+        fid = e.get("file_id")
+        sibs = by_file.get(fid, [e])
+        all_completed = all(s.get("completed") for s in sibs)
+        if not undo and all_completed:
+            move_fids.add(fid)
+        elif undo:
+            move_fids.add(fid)  # any sibling un-completed → bring file back
+
+    if undo:
+        moved = _restore_from_completed(username, move_fids)
+        for e in touched:
+            e["archived_drive"] = False
+    else:
+        moved = _archive_to_completed(username, move_fids)
+        for e in touched:
+            if e.get("file_id") in move_fids:
+                e["archived_drive"] = True
+    _save_ledger(username, ledger)
+    return ("json", {"ok": True, "count": len(touched), "moved": moved})
+
+
+def _parse_filter_params(query: dict) -> dict:
+    """Extract the shared Ledger filter params from a query dict.
+
+    Used by the JSON API, PDF export and xlsx export so all interpret the
+    status/date/card-brand/usage/completed filters identically.
+    """
+    def _q(key, default):
+        return (query.get(key, [default]) or [default])[0]
+    return {
+        "status":     _q("status", "all"),
+        "dfrom":      _q("from", ""),
+        "dto":        _q("to", ""),
+        "card_brand": _q("card_brand", "all"),
+        "usage":      _q("usage", "all"),
+        "completed":  _q("completed", "hide"),
+    }
+
+
 def _handle_ledger_api(username: str, query: dict):
     """GET /cardconv/ledger/api — filtered JSON data."""
     ledger  = _load_ledger(username)
     entries = ledger["entries"]
-    status  = (query.get("status", ["all"]) or ["all"])[0]
-    dfrom   = (query.get("from", [""]) or [""])[0]
-    dto     = (query.get("to", [""]) or [""])[0]
+    f = _parse_filter_params(query)
     try:
         page = max(1, int((query.get("page", ["1"]) or ["1"])[0]))
     except ValueError:
@@ -1306,18 +1490,25 @@ def _handle_ledger_api(username: str, query: dict):
     except ValueError:
         limit = 50
 
-    filtered = _apply_ledger_filters(entries, status, dfrom, dto)
+    filtered = _apply_ledger_filters(entries, f["status"], f["dfrom"], f["dto"],
+                                     f["card_brand"], f["usage"], f["completed"])
     _mark_duplicates(filtered)
 
     stats   = _ledger_stats(filtered)
     total_f = len(filtered)
     pages   = max(1, (total_f + limit - 1) // limit)
     start   = (page - 1) * limit
+    # Distinct usage tags across the whole ledger (for the filter dropdown), and
+    # a completed count so the UI can surface how many are archived.
+    usages = sorted({(e.get("usage") or "Regular") for e in entries})
+    completed_n = sum(1 for e in entries if e.get("completed"))
     return ("json", {
         "total":       stats["total"],
         "matched":     stats["matched"],
         "unmatched":   stats["unmatched"],
         "pending_match": stats["pending_match"],
+        "completed":   completed_n,
+        "usages":      usages,
         "page":        page,
         "pages":       pages,
         "last_synced": ledger.get("last_batch_at"),
@@ -1590,10 +1781,10 @@ def _handle_ledger_pdf(username: str, query: dict):
     """
     from fpdf import FPDF
 
-    status  = (query.get("status", ["all"]) or ["all"])[0]
-    dfrom   = (query.get("from", [""]) or [""])[0]
-    dto     = (query.get("to", [""]) or [""])[0]
-    entries = _apply_ledger_filters(_ledger_entries(username), status, dfrom, dto)
+    f = _parse_filter_params(query)
+    status, dfrom, dto = f["status"], f["dfrom"], f["dto"]
+    entries = _apply_ledger_filters(_ledger_entries(username), status, dfrom, dto,
+                                    f["card_brand"], f["usage"], f["completed"])
     stats   = _ledger_stats(entries)
     service = _get_drive_service(username)
 
@@ -1833,6 +2024,10 @@ def handle(method, path, body, ctx=None):
         return _handle_ledger_pdf(user, body)  # GET passes query dict as body
     if method == "POST" and path == "/cardconv/ledger/delete":
         return _handle_ledger_delete(user, body)
+    if method == "POST" and path == "/cardconv/ledger/complete":
+        return _handle_ledger_complete(user, body)
+    if method == "GET" and path == "/cardconv/ledger/download.xlsx":
+        return _handle_ledger_xlsx(user, body)  # GET passes query dict as body
     if method == "POST" and path.startswith("/cardconv/ledger/") and path.endswith("/status"):
         entry_id = path[len("/cardconv/ledger/"):-len("/status")]
         return _handle_status_change(user, entry_id, body)
@@ -3014,6 +3209,16 @@ def _handle_ledger_update(username: str, entry_id: str, body: dict):
             if raw is not None:
                 val = (raw[0] if isinstance(raw, list) else str(raw)).strip()
                 e[field] = val or None
+        # Card brand: normalize to amex/visa/other, or clear when blank.
+        raw = body.get("card_brand")
+        if raw is not None:
+            val = (raw[0] if isinstance(raw, list) else str(raw)).strip().lower()
+            e["card_brand"] = val if val in ("amex", "visa", "other") else None
+        # Usage: free-text tag, defaults back to "Regular" when cleared.
+        raw = body.get("usage")
+        if raw is not None:
+            val = (raw[0] if isinstance(raw, list) else str(raw)).strip()
+            e["usage"] = val or "Regular"
         for field in ("ocr_printed_amount", "ocr_handwritten_amount"):
             raw = body.get(field)
             if raw is not None:
@@ -3145,6 +3350,84 @@ def _handle_review_download(username: str, query: dict):
 
     buf = io.BytesIO()
     wb.save(buf)
+    return ("file_inline", buf.getvalue(),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", out_fn)
+
+
+_CARD_BRAND_LABEL = {"amex": "AMEX", "visa": "Visa", "other": "Other"}
+
+
+def _handle_ledger_xlsx(username: str, query: dict):
+    """GET /cardconv/ledger/download.xlsx — filtered ledger rows as a settlement xlsx.
+
+    Maps the currently-filtered Ledger entries onto the same template `convert`
+    uses, sourcing date/vendor/amount from each receipt (matched-transaction
+    values preferred when present). Card Type and Usage are appended as columns
+    28/29 for visibility. Honors all Ledger filters via the shared parser.
+    """
+    f = _parse_filter_params(query)
+    entries = _apply_ledger_filters(_ledger_entries(username),
+                                    f["status"], f["dfrom"], f["dto"],
+                                    f["card_brand"], f["usage"], f["completed"])
+    if TEMPLATE.exists():
+        template_path = TEMPLATE
+    elif TEMPLATE_FALLBACK.exists():
+        template_path = TEMPLATE_FALLBACK
+    else:
+        return ("html", "<h2 style='padding:40px'>Template file not found.</h2>", 404)
+
+    rules = _load_kw()
+    today = date.today()
+    posting_dt = datetime(today.year, today.month, today.day)
+    wb = openpyxl.load_workbook(template_path)
+    ws = wb["sheetMst"]
+    # Extra columns for receipt-centric metadata.
+    ws.cell(1, 28).value = "Card Type"
+    ws.cell(1, 29).value = "Usage"
+
+    start = 2
+    while ws.cell(start, 1).value is not None:
+        start += 1
+
+    for e in entries:
+        mt       = e.get("matched_transaction") or {}
+        vendor   = mt.get("vendor") or e.get("ocr_merchant") or ""
+        amount   = mt.get("amount")
+        if amount is None:
+            amount = e.get("ocr_amount") or 0.0
+        try:
+            amount = float(amount)
+        except (ValueError, TypeError):
+            amount = 0.0
+        date_str = mt.get("date") or e.get("ocr_date")
+        inv_dt   = _parse_date(date_str) if date_str else None
+
+        gl, ser, purpose = _classify(vendor, rules)
+        if gl is None:
+            gl, ser, purpose = 53410177, "160", "Coffee, Snack and meal"
+
+        ws.cell(start,  1).value = FIXED["receipt_type"]
+        ws.cell(start,  2).value = FIXED["employee_id"]
+        ws.cell(start,  3).value = FIXED["payee"]
+        ws.cell(start,  5).value = inv_dt
+        ws.cell(start,  6).value = FIXED["domestic"]
+        ws.cell(start,  7).value = vendor
+        ws.cell(start,  8).value = posting_dt
+        ws.cell(start,  9).value = gl
+        ws.cell(start, 10).value = ser
+        ws.cell(start, 11).value = FIXED["currency"]
+        ws.cell(start, 12).value = FIXED["tax_code"]
+        ws.cell(start, 14).value = amount
+        ws.cell(start, 15).value = FIXED["cost_center"]
+        ws.cell(start, 18).value = purpose
+        ws.cell(start, 26).value = amount
+        ws.cell(start, 28).value = _CARD_BRAND_LABEL.get(e.get("card_brand"), "")
+        ws.cell(start, 29).value = e.get("usage") or "Regular"
+        start += 1
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    out_fn = f"ledger_export_{today.strftime('%Y-%m-%d')}.xlsx"
     return ("file_inline", buf.getvalue(),
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", out_fn)
 
@@ -3720,7 +4003,7 @@ _LEDGER_HTML = r'''<!DOCTYPE html>
 <link rel="stylesheet" href="/static/style.css?v=__CSSVER__">
 <style>
 __TABCSS__
-.stat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px}
+.stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
 .stat-card{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md);
   padding:16px 20px;text-align:center}
 .stat-value{font-size:1.6rem;font-weight:700;color:var(--text);line-height:1.2}
@@ -3775,6 +4058,14 @@ __TABCSS__
 .ai-badge{font-size:.62rem;font-weight:700;padding:1px 6px;border-radius:10px;white-space:nowrap}
 .ai-badge.gemini{color:#1a73e8;background:rgba(26,115,232,.1)}
 .ai-badge.claude{color:#7c3aed;background:rgba(124,58,237,.1)}
+.card-badge{font-size:.66rem;font-weight:700;padding:2px 8px;border-radius:10px;white-space:nowrap}
+.card-amex{color:#1e40af;background:rgba(37,99,235,.14)}
+.card-visa{color:#6d28d9;background:rgba(124,58,237,.12)}
+.card-other{color:#64748b;background:rgba(100,116,139,.14)}
+.comp-tag{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:10px;font-size:.6rem;
+  font-weight:700;background:rgba(129,140,248,.18);color:#818cf8;white-space:nowrap}
+.ledger-table tr.completed-row td{opacity:.62}
+.ledger-table tr.completed-row:hover td{opacity:.85}
 .overlay-bg{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:100;opacity:0;pointer-events:none;transition:opacity .2s}
 .overlay-bg.open{opacity:1;pointer-events:all}
 .detail-panel{position:fixed;top:0;right:0;width:420px;max-width:100vw;height:100vh;background:var(--surface);
@@ -3816,6 +4107,7 @@ __TABCSS__
     <div class="stat-card"><div class="stat-value" id="statTotal">–</div><div class="stat-label">Total</div></div>
     <div class="stat-card"><div class="stat-value" id="statMatched" style="color:#22c55e">–</div><div class="stat-label">Matched</div></div>
     <div class="stat-card"><div class="stat-value" id="statUnmatched" style="color:#ef4444">–</div><div class="stat-label">Unmatched</div></div>
+    <div class="stat-card"><div class="stat-value" id="statCompleted" style="color:#818cf8">–</div><div class="stat-label">Completed</div></div>
   </div>
 
   <div class="filter-bar">
@@ -3827,8 +4119,27 @@ __TABCSS__
       <option value="unmatched">Unmatched</option>
       <option value="pending_match">Pending Match</option>
     </select>
+    <span>Card:</span>
+    <select id="fCard">
+      <option value="all">All</option>
+      <option value="amex">AMEX</option>
+      <option value="visa">Visa</option>
+      <option value="other">Other</option>
+      <option value="unknown">Unknown</option>
+    </select>
+    <span>Usage:</span>
+    <select id="fUsage"><option value="all">All</option></select>
+    <span>Show:</span>
+    <select id="fCompleted">
+      <option value="hide">Active (hide completed)</option>
+      <option value="only">Completed only</option>
+      <option value="all">All</option>
+    </select>
     <button class="btn btn-ghost btn-sm" id="fReset">Reset</button>
-    <button class="btn btn-secondary btn-sm" id="fDownload" style="margin-left:auto">📄 Download as PDF</button>
+    <span style="margin-left:auto;display:flex;gap:6px">
+      <button class="btn btn-secondary btn-sm" id="fDownloadXlsx">⬇ Download xlsx</button>
+      <button class="btn btn-ghost btn-sm" id="fDownload">📄 PDF</button>
+    </span>
   </div>
 
   <div class="filter-bar" style="gap:8px">
@@ -3840,8 +4151,14 @@ __TABCSS__
     <button class="preset-btn" data-preset="all">All time</button>
     <button class="preset-btn" id="viewToggle" title="Collapse duplicate receipts into one row">🔁 Group Duplicates</button>
     <span class="cc-info-wrap"><span class="cc-info" onclick="ccTipToggle(this)">ℹ</span><span class="cc-tip">같은 영수증이 여러 장 인식된 경우 그룹으로 묶어 표시합니다. 불필요한 중복은 삭제하세요.</span></span>
+    <button class="btn btn-sm" id="fComplete" disabled
+      style="margin-left:auto;background:rgba(129,140,248,.15);color:#818cf8;border:1px solid rgba(129,140,248,.3)">
+      ✓ Complete Selected (0)</button>
+    <button class="btn btn-sm" id="fUncomplete" disabled
+      style="background:rgba(148,163,184,.15);color:#94a3b8;border:1px solid rgba(148,163,184,.3)">
+      ↩ Un-complete (0)</button>
     <button class="btn btn-sm" id="fDelete" disabled
-      style="margin-left:auto;background:rgba(239,68,68,.15);color:#ef4444;border:1px solid rgba(239,68,68,.3)">
+      style="background:rgba(239,68,68,.15);color:#ef4444;border:1px solid rgba(239,68,68,.3)">
       🗑 Delete Selected (0)</button>
   </div>
 
@@ -3850,7 +4167,7 @@ __TABCSS__
       <table class="ledger-table">
         <thead><tr>
           <th style="width:24px"><input type="checkbox" class="row-check" id="checkAll" title="Select all"></th>
-          <th>Date</th><th>Printed</th><th>Handwritten</th><th>Final</th><th>Merchant</th><th>Receipt</th><th>Status</th><th>AI</th><th>Action</th>
+          <th>Date</th><th>Printed</th><th>Handwritten</th><th>Final</th><th>Merchant</th><th>Card</th><th>Usage</th><th>Receipt</th><th>Status</th><th>AI</th><th>Action</th>
         </tr></thead>
         <tbody id="ledgerBody"></tbody>
       </table>
@@ -3899,6 +4216,16 @@ __TABCSS__
       <input id="eHand" type="number" step="0.01" style="display:none;width:100px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:.82rem;padding:2px 6px">
     </div>
     <div class="detail-row"><span class="key">Amount (final)</span><span class="val" id="dAmount">–</span></div>
+    <div class="detail-row"><span class="key">Card Type</span>
+      <span class="val" id="dCard">–</span>
+      <select id="eCard" style="display:none;width:120px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:.82rem;padding:2px 6px">
+        <option value="">–</option><option value="amex">AMEX</option><option value="visa">Visa</option><option value="other">Other</option>
+      </select>
+    </div>
+    <div class="detail-row"><span class="key">Usage</span>
+      <span class="val" id="dUsage">Regular</span>
+      <input id="eUsage" type="text" placeholder="Regular" style="display:none;width:130px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:.82rem;padding:2px 6px">
+    </div>
     <div class="detail-row"><span class="key">AI Model</span><span class="val" id="dModel">–</span></div>
     <div id="dSaveRow" style="display:none;margin-top:8px;display:none">
       <button class="btn btn-primary btn-sm" style="width:100%;font-size:.82rem" onclick="savePanelEdit()">💾 Save Changes</button>
@@ -3918,6 +4245,7 @@ __TABCSS__
     <button class="btn btn-ghost btn-sm" data-set="matched" style="color:#22c55e">✅ Mark Matched</button>
     <button class="btn btn-ghost btn-sm" data-set="unmatched" style="color:#ef4444">❌ Mark Unmatched</button>
     <button class="btn btn-ghost btn-sm" data-set="pending_match" style="color:#f59e0b">⏳ Mark Pending</button>
+    <button class="btn btn-ghost btn-sm" id="dCompleteBtn" onclick="togglePanelComplete()" style="color:#818cf8;margin-top:6px;width:100%">✓ Mark Complete</button>
     <button class="btn btn-ghost btn-sm" id="reOcrBtn" onclick="reOCR()" style="color:#818cf8;margin-top:6px;width:100%">🔄 Re-OCR</button>
     <button class="btn btn-ghost btn-sm" id="manualAddBtn" onclick="openManualAdd()" style="color:#34d399;margin-top:2px;width:100%">➕ 이 이미지에 영수증 수동 추가</button>
   </div>
@@ -3988,6 +4316,12 @@ function aiBadge(m){
   return '<span style="color:var(--text-muted);font-size:.72rem">–</span>';
 }
 
+const CARD_LABEL = {amex:'AMEX', visa:'Visa', other:'Other'};
+function cardBadge(b){
+  if(!b || !CARD_LABEL[b]) return '<span style="color:var(--text-muted);font-size:.72rem">–</span>';
+  return '<span class="card-badge card-' + b + '">' + CARD_LABEL[b] + '</span>';
+}
+
 function matchInfo(e){
   const mt = e.matched_transaction;
   if(!mt) return '';
@@ -4048,13 +4382,17 @@ function rowHtml(e, i, opts){
   }
   let cls = e.dup ? 'dup-row' : '';
   if(opts.groupChild) cls += ' dup-child gc-' + opts.groupChild;
+  if(e.completed) cls += ' completed-row';
+  const compTag = e.completed ? '<span class="comp-tag">✓ Done</span>' : '';
   return '<tr data-i="' + i + '"' + (cls?(' class="'+cls.trim()+'"'):'') + '>' +
     checkCell +
-    '<td>' + (e.ocr_date||'–') + dupTag + '</td>' +
+    '<td>' + (e.ocr_date||'–') + dupTag + compTag + '</td>' +
     '<td style="color:var(--text-muted)">' + fmtAmt(e.ocr_printed_amount) + '</td>' +
     handCell +
     '<td style="font-weight:700">' + fmtAmt(e.ocr_amount) + '</td>' +
     '<td>' + (e.ocr_merchant||'–') + '</td>' +
+    '<td>' + cardBadge(e.card_brand) + '</td>' +
+    '<td style="color:var(--text-muted)">' + (e.usage||'Regular') + '</td>' +
     '<td>' + thumb(e) + '</td>' +
     '<td><span class="status-badge status-' + (e.match_status||'unmatched') + '">' +
       (STATUS_LABEL[e.match_status]||e.match_status||'–') + '</span>' + matchInfo(e) + '</td>' +
@@ -4113,7 +4451,7 @@ function renderBody(entries){
 function rerender(){
   const body = $('ledgerBody');
   if(!ENTRIES.length){
-    body.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--text-muted);padding:30px">No receipts</td></tr>';
+    body.innerHTML = '<tr><td colspan="12" style="text-align:center;color:var(--text-muted);padding:30px">No receipts</td></tr>';
   } else {
     body.innerHTML = renderBody(ENTRIES);
     body.querySelectorAll('tr[data-i]').forEach(tr =>
@@ -4136,17 +4474,38 @@ function rerender(){
   updateDeleteBtn();
 }
 
-async function load(){
+// Build the shared filter query string from the current control values.
+function filterParams(){
   const p = new URLSearchParams();
   if($('fFrom').value) p.set('from', $('fFrom').value);
   if($('fTo').value)   p.set('to', $('fTo').value);
   p.set('status', $('fStatus').value);
+  p.set('card_brand', $('fCard').value);
+  p.set('usage', $('fUsage').value);
+  p.set('completed', $('fCompleted').value);
+  return p;
+}
+
+// Rebuild the Usage dropdown from the distinct tags the API reports, keeping
+// the current selection if it still exists.
+function syncUsageOptions(usages){
+  const sel = $('fUsage'), cur = sel.value;
+  const opts = ['<option value="all">All</option>']
+    .concat((usages||[]).map(u => '<option value="' + u.replace(/"/g,'&quot;') + '">' + u + '</option>'));
+  sel.innerHTML = opts.join('');
+  sel.value = (usages||[]).includes(cur) || cur==='all' ? cur : 'all';
+}
+
+async function load(){
+  const p = filterParams();
   p.set('page', CUR_PAGE);
   const r = await fetch('/cardconv/ledger/api?' + p.toString());
   const d = await r.json();
   $('statTotal').textContent = d.total;
   $('statMatched').textContent = d.matched;
   $('statUnmatched').textContent = d.unmatched;
+  $('statCompleted').textContent = (d.completed!=null ? d.completed : '–');
+  syncUsageOptions(d.usages);
   ENTRIES = d.entries;
   rerender();
   renderLastSynced(d.last_synced);
@@ -4213,11 +4572,18 @@ function openPanel(e){
   $('dHand').style.color = hand ? '' : '#f59e0b';
   $('dMerchant').textContent = e.ocr_merchant || '–';
   $('dModel').textContent = e.ocr_model || '–';
+  $('dCard').innerHTML = cardBadge(e.card_brand);
+  $('dUsage').textContent = e.usage || 'Regular';
   // Pre-fill edit inputs
   $('eDate').value = e.ocr_date || '';
   $('eMerchant').value = e.ocr_merchant || '';
   $('ePrinted').value = (e.ocr_printed_amount != null) ? e.ocr_printed_amount : (e.ocr_amount || '');
   $('eHand').value = (e.ocr_handwritten_amount != null) ? e.ocr_handwritten_amount : '';
+  $('eCard').value = e.card_brand || '';
+  $('eUsage').value = (e.usage && e.usage !== 'Regular') ? e.usage : '';
+  // Complete toggle button reflects current state.
+  var cb = $('dCompleteBtn');
+  if(cb){ cb.textContent = e.completed ? '↩ Un-complete' : '✓ Mark Complete'; }
   // Reset edit mode
   exitPanelEdit();
 
@@ -4253,8 +4619,9 @@ function closePanel(){
   exitPanelEdit();
 }
 
+const PANEL_EDIT_FIELDS = ['dDate','dMerchant','dPrinted','dHand','dCard','dUsage'];
 function exitPanelEdit(){
-  ['dDate','dMerchant','dPrinted','dHand'].forEach(function(id){
+  PANEL_EDIT_FIELDS.forEach(function(id){
     var s = $(id); var e = $(id.replace('d','e')); if(!s||!e) return;
     s.style.display = ''; e.style.display = 'none';
   });
@@ -4265,7 +4632,7 @@ function exitPanelEdit(){
 function togglePanelEdit(){
   var editing = $('eDate').style.display !== 'none';
   if(editing){ exitPanelEdit(); return; }
-  ['dDate','dMerchant','dPrinted','dHand'].forEach(function(id){
+  PANEL_EDIT_FIELDS.forEach(function(id){
     var s = $(id); var e = $(id.replace('d','e')); if(!s||!e) return;
     s.style.display = 'none'; e.style.display = '';
   });
@@ -4280,6 +4647,8 @@ async function savePanelEdit(){
     ocr_merchant:             $('eMerchant').value,
     ocr_printed_amount:       $('ePrinted').value,
     ocr_handwritten_amount:   $('eHand').value,
+    card_brand:               $('eCard').value,
+    usage:                    $('eUsage').value,
   });
   var r = await fetch('/cardconv/ledger/' + CUR_ID + '/update', {method:'POST', body});
   var d = await r.json();
@@ -4287,6 +4656,21 @@ async function savePanelEdit(){
   exitPanelEdit();
   load();
   closePanel();
+}
+
+async function togglePanelComplete(){
+  if(!CUR_ID) return;
+  var e = ENTRIES.find(x => x.id === CUR_ID) || {};
+  var undo = !!e.completed;
+  if(!undo && !confirm('이 영수증을 완료 처리할까요?\n(기본 목록·Sync·Mapping에서 제외되고 Drive Completed 폴더로 이동됩니다)')) return;
+  var r = await fetch('/cardconv/ledger/complete', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ids:[CUR_ID], undo: undo})
+  });
+  var d = await r.json().catch(() => ({}));
+  if(!d.ok){ alert('실패: '+(d && d.error||r.status)); return; }
+  closePanel();
+  load();
 }
 
 async function setStatus(status){
@@ -4383,10 +4767,39 @@ function selectedIds(){
 }
 
 function updateDeleteBtn(){
-  const n = selectedIds().length;
-  const btn = $('fDelete');
-  btn.textContent = '🗑 Delete Selected (' + n + ')';
-  btn.disabled = n === 0;
+  const ids = selectedIds();
+  const n = ids.length;
+  $('fDelete').textContent = '🗑 Delete Selected (' + n + ')';
+  $('fDelete').disabled = n === 0;
+  // Split selection into active vs already-completed to drive the two buttons.
+  const sel = new Set(ids);
+  let active = 0, done = 0;
+  ENTRIES.forEach(e => { if(sel.has(e.id)){ e.completed ? done++ : active++; } });
+  $('fComplete').textContent = '✓ Complete Selected (' + active + ')';
+  $('fComplete').disabled = active === 0;
+  $('fUncomplete').textContent = '↩ Un-complete (' + done + ')';
+  $('fUncomplete').disabled = done === 0;
+}
+
+async function completeSelected(undo){
+  const sel = new Set(selectedIds());
+  // Only act on entries in the relevant state (active→complete, done→un-complete).
+  const ids = ENTRIES.filter(e => sel.has(e.id) && (undo ? e.completed : !e.completed))
+                     .map(e => e.id);
+  if(!ids.length) return;
+  const verb = undo ? '완료 해제' : '완료 처리';
+  if(!confirm(ids.length + '건을 ' + verb + '할까요?' +
+      (undo ? '' : '\n(완료 항목은 기본 목록·Sync·Mapping에서 제외되고 Drive Completed 폴더로 이동됩니다)'))) return;
+  const r = await fetch('/cardconv/ledger/complete', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ids: ids, undo: !!undo})
+  });
+  const d = await r.json().catch(() => ({}));
+  if(d && d.moved!=null && !undo && d.moved < ids.length){
+    // Some Drive moves may not apply (e.g. multi-receipt page partially completed).
+  }
+  load();
 }
 
 function deleteSelected(){
@@ -4446,18 +4859,25 @@ document.addEventListener('keydown', e => { if(e.key==='Escape') closePanel(); }
 $('fFrom').addEventListener('change', () => { CUR_PAGE=1; load(); });
 $('fTo').addEventListener('change', () => { CUR_PAGE=1; load(); });
 $('fStatus').addEventListener('change', () => { CUR_PAGE=1; load(); });
-$('fReset').addEventListener('click', () => { $('fStatus').value='all'; setDefaultDates(); CUR_PAGE=1; load(); });
+$('fCard').addEventListener('change', () => { CUR_PAGE=1; load(); });
+$('fUsage').addEventListener('change', () => { CUR_PAGE=1; load(); });
+$('fCompleted').addEventListener('change', () => { CUR_PAGE=1; load(); });
+$('fReset').addEventListener('click', () => {
+  $('fStatus').value='all'; $('fCard').value='all'; $('fUsage').value='all';
+  $('fCompleted').value='hide'; setDefaultDates(); CUR_PAGE=1; load();
+});
+// Both downloads respect the currently applied filters.
 $('fDownload').addEventListener('click', () => {
-  // Download respects the currently applied filters (status + date range).
-  const p = new URLSearchParams();
-  if($('fFrom').value) p.set('from', $('fFrom').value);
-  if($('fTo').value)   p.set('to', $('fTo').value);
-  p.set('status', $('fStatus').value);
-  window.location = '/cardconv/ledger/download.pdf?' + p.toString();
+  window.location = '/cardconv/ledger/download.pdf?' + filterParams().toString();
+});
+$('fDownloadXlsx').addEventListener('click', () => {
+  window.location = '/cardconv/ledger/download.xlsx?' + filterParams().toString();
 });
 $('pPrev').addEventListener('click', () => { if(CUR_PAGE>1){CUR_PAGE--; load();} });
 $('pNext').addEventListener('click', () => { if(CUR_PAGE<window._pages){CUR_PAGE++; load();} });
 $('fDelete').addEventListener('click', deleteSelected);
+$('fComplete').addEventListener('click', () => completeSelected(false));
+$('fUncomplete').addEventListener('click', () => completeSelected(true));
 $('checkAll').addEventListener('change', () => {
   document.querySelectorAll('.sel').forEach(c => { c.checked = $('checkAll').checked; });
   updateDeleteBtn();
