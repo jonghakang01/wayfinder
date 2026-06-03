@@ -47,7 +47,12 @@ def handle(method, path, body, ctx=None):
     if method == "POST" and path == "/admin/delete_user":
         target = body.get("username", [""])[0].strip()
         if target and target != user:
-            auth.delete_user(target)
+            try:
+                from services import cardconv as _cc
+                _cc.purge_user_data(target)   # Drive token + cardconv data
+            except Exception:
+                pass
+            auth.delete_user(target)          # login + data dir
         return ("redirect", "/admin")
 
     if method == "POST" and path == "/admin/toggle_service":

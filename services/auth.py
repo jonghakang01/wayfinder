@@ -264,6 +264,10 @@ def delete_user(username):
             if uname == username:
                 del SESSIONS[token]
         _save_sessions()
+        # Remove the per-user data dir (todo/habits) and any tester request.
+        if username:
+            shutil.rmtree(os.path.join(DATA_ROOT, username), ignore_errors=True)
+        remove_tester_request(username)
 
 
 def set_role(username, role):

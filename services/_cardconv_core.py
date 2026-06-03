@@ -1335,6 +1335,52 @@ def _handle_ledger_delete(username: str, body: dict):
     return ("json", {"ok": True, "removed": len(removed_entries), "trashed": trashed})
 
 
+def _revoke_drive_token(username: str) -> None:
+    """Best-effort: ask Google to revoke the stored OAuth token before deletion."""
+    token_file = TOKENS_DIR / f"{username}.json"
+    if not token_file.exists():
+        return
+    try:
+        import urllib.parse as _up, urllib.request as _ur
+        data = json.loads(token_file.read_text())
+        tok = data.get("refresh_token") or data.get("token")
+        if not tok:
+            return
+        req = _ur.Request(
+            "https://oauth2.googleapis.com/revoke",
+            data=_up.urlencode({"token": tok}).encode(),
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        _ur.urlopen(req, timeout=5)
+    except Exception:
+        pass
+
+
+def purge_user_data(username: str) -> None:
+    """Delete ALL cardconv data for a user (Drive token + connection, ledger,
+    receipts, uploads, settings, push subs). Called when an admin deletes the
+    account so nothing — especially the Google Drive token — is left behind."""
+    import shutil
+    _revoke_drive_token(username)
+    for f in [
+        TOKENS_DIR / f"{username}.json",
+        _drive_meta_file(username),
+        _receipts_file(username),
+        _review_file(username),
+        _ocr_staging_file(username),
+        _user_settings_file(username),
+        _uploads_index_file(username),
+        _push_subs_file(username),
+    ]:
+        try:
+            Path(f).unlink()
+        except FileNotFoundError:
+            pass
+        except Exception:
+            pass
+    shutil.rmtree(_uploads_dir(username), ignore_errors=True)
+
+
 def _get_completed_folder_id(service, username: str) -> str:
     """Drive folder ID for Wayfinder/Receipts/Completed/, created on demand."""
     receipts_id = _get_receipts_folder_id(service, username)
