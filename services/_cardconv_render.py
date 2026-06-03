@@ -66,6 +66,47 @@ def _render_drive_connect(username: str, auth_url: str, requested: bool = False)
 </body></html>'''
 
 
+def _render_drive_connected(folder_url: str = "") -> str:
+    from server import CSS_VER
+    folder_cta = (
+        f'<a href="{folder_url}" target="_blank" class="btn btn-primary" style="width:fit-content">'
+        f'📂 Open your Receipts folder</a>'
+        if folder_url else ''
+    )
+    return f'''<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>✅ Google Drive Connected · Wayfinder</title>
+<link rel="stylesheet" href="/static/style.css?v={CSS_VER}">
+</head><body>
+<nav>
+  <span class="nav-brand">✅ Google Drive Connected</span>
+  <span class="nav-user"><a href="/cardconv/ledger" class="nav-back">← Back to Ledger</a></span>
+</nav>
+<div class="container" style="max-width:640px">
+  <div class="notepad-card">
+    <div class="notepad-header">
+      <span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--accent)">You're all set</span>
+    </div>
+    <div class="notepad-body" style="padding:28px;display:flex;flex-direction:column;gap:18px">
+      <p style="font-size:1rem;color:var(--text);line-height:1.6">
+        🎉 Your <b>Wayfinder &rsaquo; Receipts</b> folder is ready on Google Drive.
+      </p>
+      <ol style="color:var(--text-muted);font-size:.9rem;line-height:2;padding-left:22px">
+        <li>Drop your receipt images or PDFs into the <b style="color:var(--text)">Receipts</b> folder</li>
+        <li>Come back here and click <b style="color:var(--text)">Sync</b> to import &amp; OCR them</li>
+        <li>Review the results and add them to your Ledger</li>
+      </ol>
+      <div style="display:flex;gap:12px;flex-wrap:wrap">
+        {folder_cta}
+        <a href="/cardconv/ledger" class="btn btn-accent" style="width:fit-content">Go to Ledger &amp; Sync →</a>
+      </div>
+    </div>
+  </div>
+</div>
+</body></html>'''
+
+
 # ── Shared tab bar ───────────────────────────────────────────────────────────
 
 _CC_TAB_CSS = (

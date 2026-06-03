@@ -2080,7 +2080,18 @@ def _handle_drive_auth(username: str, body):
     except Exception as e:
         return ("html", f"<p style='padding:20px;color:var(--danger)'>Auth error: {e} "
                         f"<a href='/cardconv/ledger' style='color:var(--accent)'>Back</a></p>")
-    return ("redirect", "/cardconv/ledger")
+    # Eagerly create Wayfinder/Receipts so the user has a place to drop files,
+    # and land them on a CTA page instead of straight back to the ledger.
+    folder_url = ""
+    try:
+        service = _get_drive_service(username)
+        if service:
+            rid = _get_receipts_folder_id(service, username)
+            folder_url = f"https://drive.google.com/drive/folders/{rid}"
+    except Exception:
+        pass
+    from services._cardconv_render import _render_drive_connected
+    return ("html", _render_drive_connected(folder_url))
 
 
 import threading as _threading, uuid as _uuid
