@@ -367,8 +367,10 @@ def _handle_ocr_staging_confirm(username: str, body: dict):
 
     # Build a correction map from the JSON payload.
     confirmed_list = body.get("confirmed", [])
-    if isinstance(confirmed_list, list) and confirmed_list and isinstance(confirmed_list[0], dict):
-        # JSON path: each item has id + corrected fields
+    is_ajax = (isinstance(confirmed_list, list) and confirmed_list
+               and isinstance(confirmed_list[0], dict))
+    if is_ajax:
+        # JSON path (modal fetch): each item has id + corrected fields
         corrections = {item["id"]: item for item in confirmed_list if "id" in item}
         confirmed_ids = set(corrections.keys())
     else:
@@ -407,7 +409,11 @@ def _handle_ocr_staging_confirm(username: str, body: dict):
         _save_receipts(username, receipts)
 
     _clear_ocr_staging(username)
-    return ("json", {"ok": True, "added": len(confirmed)})
+    # Native form (staging page) submissions navigate the browser, so send them
+    # back to the Ledger; the modal's fetch path keeps getting JSON.
+    if is_ajax:
+        return ("json", {"ok": True, "added": len(confirmed)})
+    return ("redirect", "/cardconv/ledger")
 
 
 # ── User settings: card member names ──────────────────────────────────────────
