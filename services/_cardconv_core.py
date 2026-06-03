@@ -545,17 +545,17 @@ def _get_or_create_folder(service, name: str, parent_id: str = None) -> str:
     return service.files().create(body=meta, fields='id').execute()['id']
 
 
-def _get_receipts_folder_ids(service, username: str) -> tuple:
-    """Return (receipts_folder_id, matched_folder_id), creating folders if needed."""
+def _get_receipts_folder_id(service, username: str) -> str:
+    """Return the Wayfinder/Receipts/ folder id, creating it if needed.
+    (The legacy Matched/ subfolder is no longer created or used.)"""
     wayfinder_id = _get_or_create_folder(service, 'Wayfinder')
     receipts_id  = _get_or_create_folder(service, 'Receipts', wayfinder_id)
-    matched_id   = _get_or_create_folder(service, 'Matched', receipts_id)
     # Cache receipts folder ID for UI link
     meta = _load_drive_meta(username)
     if meta.get('receipts_folder_id') != receipts_id:
         meta['receipts_folder_id'] = receipts_id
         _save_drive_meta(username, meta)
-    return receipts_id, matched_id
+    return receipts_id
 
 
 def _upload_file_to_drive(username: str, file_bytes: bytes, filename: str,
@@ -565,7 +565,7 @@ def _upload_file_to_drive(username: str, file_bytes: bytes, filename: str,
     service = _get_drive_service(username)
     if not service:
         return None, None
-    receipts_id, _ = _get_receipts_folder_ids(service, username)
+    receipts_id = _get_receipts_folder_id(service, username)
     media  = MediaIoBaseUpload(io.BytesIO(file_bytes), mimetype=mime_type)
     result = service.files().create(
         body={'name': filename, 'parents': [receipts_id]},
@@ -575,27 +575,6 @@ def _upload_file_to_drive(username: str, file_bytes: bytes, filename: str,
     fid = result.get('id')
     url = result.get('webViewLink') or f'https://drive.google.com/file/d/{fid}/view'
     return fid, url
-
-
-def _move_to_matched_folder(username: str, file_id: str) -> bool:
-    """DEPRECATED — no longer called. Drive is a plain store and the ledger is the
-    single source of truth, so receipts are never auto-moved to Matched/ anymore.
-    Kept for backward compatibility; Sync scans both Receipts/ and Matched/.
-    Move receipt file from Wayfinder/Receipts/ to Wayfinder/Receipts/Matched/."""
-    try:
-        service = _get_drive_service(username)
-        if not service:
-            return False
-        receipts_id, matched_id = _get_receipts_folder_ids(service, username)
-        service.files().update(
-            fileId=file_id,
-            addParents=matched_id,
-            removeParents=receipts_id,
-            fields='id,parents'
-        ).execute()
-        return True
-    except Exception:
-        return False
 
 
 # ── OCR ───────────────────────────────────────────────────────────────────────
@@ -1006,7 +985,7 @@ def convert(csv_bytes: bytes, filename: str, username: str = None) -> tuple:
         ws.cell(start, 25).value = None
         ws.cell(start, 26).value = amount
 
-        # Receipt match in column 27; move matched receipts to Matched folder
+        # Receipt match in column 27
         inv_date_str = inv_dt.strftime("%Y-%m-%d") if inv_dt else None
         amt_rounded  = round(amount, 2)
         receipt_match = None
@@ -1135,11 +1114,9 @@ def _run_batch_ocr(username: str) -> dict:
     if not service:
         return {"error": "drive not connected"}
     try:
-        # Scan both Receipts/ and legacy Matched/ (back-compat + safety): the
-        # auto-move is deprecated, but old setups may still have files in Matched/.
-        receipts_id, matched_id = _get_receipts_folder_ids(service, username)
+        receipts_id = _get_receipts_folder_id(service, username)
         results = service.files().list(
-            q=(f"('{receipts_id}' in parents or '{matched_id}' in parents) "
+            q=(f"'{receipts_id}' in parents "
                f"and trashed=false and mimeType!='application/vnd.google-apps.folder'"),
             fields="files(id,name,mimeType,webViewLink)"
         ).execute()
@@ -1360,7 +1337,7 @@ def _handle_ledger_delete(username: str, body: dict):
 
 def _get_completed_folder_id(service, username: str) -> str:
     """Drive folder ID for Wayfinder/Receipts/Completed/, created on demand."""
-    receipts_id, _ = _get_receipts_folder_ids(service, username)
+    receipts_id = _get_receipts_folder_id(service, username)
     return _get_or_create_folder(service, 'Completed', receipts_id)
 
 
@@ -1377,7 +1354,7 @@ def _archive_to_completed(username: str, file_ids: set) -> int:
         return 0
     try:
         completed_id = _get_completed_folder_id(service, username)
-        receipts_id, matched_id = _get_receipts_folder_ids(service, username)
+        receipts_id = _get_receipts_folder_id(service, username)
     except Exception:
         return 0
     moved = 0
@@ -1385,10 +1362,10 @@ def _archive_to_completed(username: str, file_ids: set) -> int:
         if not fid:
             continue
         try:
-            # Drop both possible source parents; addParents is idempotent.
+            # Drop the source parent; addParents is idempotent.
             cur = service.files().get(fileId=fid, fields='parents').execute()
             parents = set(cur.get('parents', []))
-            remove = ",".join(parents & {receipts_id, matched_id}) or None
+            remove = ",".join(parents & {receipts_id}) or None
             service.files().update(
                 fileId=fid, addParents=completed_id,
                 removeParents=remove, fields='id,parents'
@@ -1408,7 +1385,7 @@ def _restore_from_completed(username: str, file_ids: set) -> int:
         return 0
     try:
         completed_id = _get_completed_folder_id(service, username)
-        receipts_id, _ = _get_receipts_folder_ids(service, username)
+        receipts_id = _get_receipts_folder_id(service, username)
     except Exception:
         return 0
     moved = 0
@@ -2072,9 +2049,9 @@ def _do_drive_sync_work(username: str, job_id: str):
             _sync_jobs[job_id] = {"status": "error", "staged": 0, "error": "Drive not connected"}
             return
 
-        receipts_id, matched_id = _get_receipts_folder_ids(service, username)
+        receipts_id = _get_receipts_folder_id(service, username)
         results = service.files().list(
-            q=(f"('{receipts_id}' in parents or '{matched_id}' in parents) "
+            q=(f"'{receipts_id}' in parents "
                f"and trashed=false and mimeType!='application/vnd.google-apps.folder'"),
             fields="files(id,name,mimeType,webViewLink)"
         ).execute()
