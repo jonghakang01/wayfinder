@@ -71,6 +71,13 @@ def save_settings(settings):
         json.dump(settings, f, ensure_ascii=False, indent=2)
 
 
+def live_services():
+    """Services the admin has marked live (selectable in the bare-signup picker).
+    Admin toggles these via /admin → 전역 서비스 제어 (settings.available_services)."""
+    avail = load_settings().get("available_services", [])
+    return [s for s in avail if s in CONTROLLED_SERVICES]
+
+
 def _migrate_format(data):
     changed = False
     for k, v in list(data.items()):
@@ -259,9 +266,13 @@ def handle(method, path, body, ctx=None):
                 return ("html", render_login(
                     register_error="이미 가입된 이메일입니다. 로그인하세요.", app=app))
             role = "admin" if email == ADMIN_EMAIL else "user"
-            # All signups are auto-approved (open); the app link scopes access to
-            # exactly that one service. A bare signup (no app) starts with none.
-            services_list = [app] if app else []
+            # All signups are auto-approved (open). An app link fixes the one
+            # service; a bare signup grants whichever live services were ticked.
+            if app:
+                services_list = [app]
+            else:
+                picked = body.get("svc", [])
+                services_list = [s for s in picked if s in live_services()]
             key = email  # new accounts are keyed by their email
             users[key] = {
                 "pw": pw_hash, "role": role,
@@ -307,8 +318,20 @@ def render_login(error="", register_error="", app=""):
         signup_title = f"{app_label} 가입"
         app_hidden = f'<input type="hidden" name="app" value="{app}">'
     else:
-        svc_html = ('<div class="app-scope" style="color:#6e7681">'
-                    '서비스별 가입 링크로 들어오면 해당 서비스 권한이 부여됩니다.</div>')
+        # Bare signup: let the user pick which live service(s) to join.
+        # Live set is admin-controlled (/admin → 전역 서비스 제어).
+        live = live_services()
+        if live:
+            checks = "".join(
+                f'<label class="svc-check"><input type="checkbox" name="svc" '
+                f'value="{s}" checked> {svc_labels.get(s, s)}</label>'
+                for s in live
+            )
+            svc_html = ('<label style="margin-top:6px">가입할 서비스</label>'
+                        f'<div class="svc-checks">{checks}</div>')
+        else:
+            svc_html = ('<div class="app-scope" style="color:#6e7681">'
+                        '서비스별 가입 링크로 들어오면 해당 서비스 권한이 부여됩니다.</div>')
         signup_title = "새 계정 만들기"
         app_hidden = ""
 
