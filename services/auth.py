@@ -4,6 +4,7 @@ DATA_ROOT     = os.path.expanduser("~/.appdata")
 USERS_FILE    = os.path.join(DATA_ROOT, "users.json")
 SESSIONS_FILE = os.path.join(DATA_ROOT, "sessions.json")
 SETTINGS_FILE = os.path.join(DATA_ROOT, "settings.json")
+TESTER_REQUESTS_FILE = os.path.join(DATA_ROOT, "tester_requests.json")
 SESSIONS = {}  # token -> username  (persisted to SESSIONS_FILE)
 
 # Identity model: users are keyed by an internal id ("data_key") that also names
@@ -76,6 +77,46 @@ def live_services():
     Admin toggles these via /admin → 전역 서비스 제어 (settings.available_services)."""
     avail = load_settings().get("available_services", [])
     return [s for s in avail if s in CONTROLLED_SERVICES]
+
+
+# --- Google OAuth tester waitlist ---------------------------------------------
+# Google has no API to add OAuth test users, so we only collect the emails here;
+# the admin still pastes them into the Cloud Console (/admin → 테스터 대기열).
+
+def load_tester_requests():
+    try:
+        with open(TESTER_REQUESTS_FILE) as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return []
+
+
+def save_tester_requests(reqs):
+    os.makedirs(DATA_ROOT, exist_ok=True)
+    with open(TESTER_REQUESTS_FILE, "w") as f:
+        json.dump(reqs, f, ensure_ascii=False, indent=2)
+
+
+def add_tester_request(email, requested_by=""):
+    from datetime import datetime, timezone
+    email = (email or "").strip().lower()
+    if "@" not in email:
+        return False
+    reqs = load_tester_requests()
+    if any(r.get("email") == email for r in reqs):
+        return False  # already queued
+    reqs.append({
+        "email": email,
+        "requested_by": requested_by,
+        "requested_at": datetime.now(timezone.utc).astimezone().isoformat(),
+    })
+    save_tester_requests(reqs)
+    return True
+
+
+def remove_tester_request(email):
+    email = (email or "").strip().lower()
+    save_tester_requests([r for r in load_tester_requests() if r.get("email") != email])
 
 
 def _migrate_format(data):

@@ -79,9 +79,13 @@ def handle(method, path, body, ctx=None):
 
     # Drive OAuth
     if method == "GET" and path == "/cardconv/drive/connect":
-        return _handle_drive_connect(user)
+        return _handle_drive_connect(user, body)
     if method == "POST" and path == "/cardconv/drive/auth":
         return _handle_drive_auth(user, body)
+    if method == "POST" and path == "/cardconv/drive/request-tester":
+        from services import auth as _auth
+        _auth.add_tester_request(body.get("tester_email", [""])[0], requested_by=user)
+        return ("redirect", "/cardconv/drive/connect?requested=1")
 
     # Drive sync (background)
     if method == "POST" and path == "/cardconv/drive/sync":
@@ -190,7 +194,8 @@ def handle(method, path, body, ctx=None):
     return ("redirect", "/cardconv/ledger")
 
 
-def _handle_drive_connect(username: str):
+def _handle_drive_connect(username: str, body=None):
+    requested = bool(body and body.get("requested"))
     if not CREDS_FILE.exists():
         return ("html", f"<p style='padding:20px;color:var(--danger)'>Credentials file not found: {CREDS_FILE}</p>")
     try:
@@ -205,7 +210,7 @@ def _handle_drive_connect(username: str):
             "prompt":        "consent",
         }
         auth_url = "https://accounts.google.com/o/oauth2/v2/auth?" + _up.urlencode(params)
-        return ("html", _render_drive_connect(username, auth_url))
+        return ("html", _render_drive_connect(username, auth_url, requested=requested))
     except Exception as e:
         return ("html", f"<p style='padding:20px;color:var(--danger)'>Drive connect error: {e}</p>")
 

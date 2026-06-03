@@ -2,8 +2,14 @@
 # Split out of cardconv.py so logic edits don't re-read ~2,800 render lines.
 from services._cardconv_core import *  # noqa: F401,F403
 
-def _render_drive_connect(username: str, auth_url: str) -> str:
+def _render_drive_connect(username: str, auth_url: str, requested: bool = False) -> str:
     from server import CSS_VER
+    requested_banner = (
+        '<div style="background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.4);'
+        'color:#16a34a;border-radius:8px;padding:10px 14px;font-size:.85rem">'
+        '✅ 테스터 등록을 요청했습니다. 관리자 승인 후 다시 시도하세요.</div>'
+        if requested else ''
+    )
     return f'''<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -20,6 +26,7 @@ def _render_drive_connect(username: str, auth_url: str) -> str:
       <span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--accent)">Authorize Google Drive Access</span>
     </div>
     <div class="notepad-body" style="padding:28px;display:flex;flex-direction:column;gap:20px">
+      {requested_banner}
       <ol style="color:var(--text-muted);font-size:.88rem;line-height:2.2;padding-left:22px">
         <li>Click the button below to open Google authorization page</li>
         <li>Sign in and grant <b style="color:var(--text)">Drive file access</b></li>
@@ -37,6 +44,22 @@ def _render_drive_connect(username: str, auth_url: str) -> str:
         </div>
         <button type="submit" class="btn btn-accent" style="width:fit-content">✅ Confirm &amp; Connect</button>
       </form>
+      <details style="border-top:1px solid var(--border);padding-top:16px">
+        <summary style="cursor:pointer;font-size:.82rem;color:var(--text-muted)">
+          🚫 "Access blocked / has not completed verification" 오류가 뜨나요?
+        </summary>
+        <div style="margin-top:12px;display:flex;flex-direction:column;gap:10px">
+          <p style="font-size:.82rem;color:var(--text-muted);line-height:1.7">
+            이 앱은 테스트 중이라 등록된 Google 계정만 연동됩니다.
+            연동하려는 <b style="color:var(--text)">Google 이메일</b>을 남기면 관리자가 테스터로 등록합니다.
+          </p>
+          <form method="POST" action="/cardconv/drive/request-tester" style="display:flex;gap:8px;flex-wrap:wrap">
+            <input type="email" name="tester_email" required placeholder="you@gmail.com"
+              style="flex:1;min-width:200px;padding:10px 14px;border:1px solid var(--border);border-radius:8px;background:var(--surface-2);color:var(--text);font-size:.88rem;outline:none">
+            <button type="submit" class="btn btn-primary" style="width:fit-content">📩 테스터 등록 요청</button>
+          </form>
+        </div>
+      </details>
     </div>
   </div>
 </div>

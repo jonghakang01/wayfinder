@@ -63,6 +63,12 @@ def handle(method, path, body, ctx=None):
             auth.save_settings(settings)
         return ("redirect", "/admin")
 
+    if method == "POST" and path == "/admin/tester/done":
+        email = body.get("email", [""])[0].strip()
+        if email:
+            auth.remove_tester_request(email)
+        return ("redirect", "/admin")
+
     if method == "POST" and path == "/admin/notify":
         subject = body.get("subject", [""])[0].strip()
         body_text = body.get("body", [""])[0].strip()
@@ -236,6 +242,45 @@ def render_admin(current_user, notify_result=""):
           <button type="submit" class="gtoggle-btn {btn_cls}">{btn_txt}</button>
         </form>'''
 
+    # 테스터 대기열 (Google OAuth 테스트 사용자 등록 대기)
+    tester_reqs = auth.load_tester_requests()
+    if tester_reqs:
+        tester_rows = ""
+        for r in tester_reqs:
+            email = r.get("email", "")
+            by    = r.get("requested_by", "") or "—"
+            when  = (r.get("requested_at", "") or "")[:10]
+            tester_rows += f'''
+            <tr>
+              <td class="tq-email">{email}</td>
+              <td class="tq-meta">{by}</td>
+              <td class="tq-meta">{when}</td>
+              <td>
+                <form method="POST" action="/admin/tester/done" style="display:inline">
+                  <input type="hidden" name="email" value="{email}">
+                  <button type="submit" class="action-btn unblock-btn">✅ 등록완료</button>
+                </form>
+              </td>
+            </tr>'''
+        all_emails = ", ".join(r.get("email", "") for r in tester_reqs)
+        tester_section = f'''
+  <div class="section-card">
+    <h2>🧪 테스터 대기열 <span style="font-size:13px;color:#64748b;font-weight:500">({len(tester_reqs)}명)</span></h2>
+    <p class="sec-desc">Google은 테스트 사용자 추가 API가 없습니다. 아래 이메일을
+      <a href="https://console.cloud.google.com/auth/audience" target="_blank" style="color:#3b82f6">OAuth 동의 화면 → Test users</a>
+      에 붙여넣고 등록한 뒤 "등록완료"를 누르세요.</p>
+    <button type="button" class="notify-send-btn" style="margin-bottom:14px"
+      onclick="navigator.clipboard.writeText('{all_emails}').then(()=>{{this.textContent='✅ 복사됨';setTimeout(()=>this.textContent='📋 전체 이메일 복사',1500)}})">📋 전체 이메일 복사</button>
+    <div class="tbl-wrap" style="margin-bottom:0">
+      <table>
+        <thead><tr><th>Google 이메일</th><th>요청자</th><th>요청일</th><th>처리</th></tr></thead>
+        <tbody>{tester_rows}</tbody>
+      </table>
+    </div>
+  </div>'''
+    else:
+        tester_section = ""
+
     notify_msg = f'<div class="notify-result">{notify_result}</div>' if notify_result else ""
 
     return f'''<!DOCTYPE html>
@@ -300,6 +345,8 @@ tr.row-self{{background:#f0f9ff}}
 .delete-btn:hover{{background:#fca5a5}}
 .col-action{{display:flex;gap:6px;align-items:center;flex-wrap:wrap}}
 tr.row-blocked td{{opacity:.65;background:#fff5f5}}
+.tq-email{{font-size:13px;font-weight:600;color:#1e293b}}
+.tq-meta{{font-size:12px;color:#64748b;white-space:nowrap}}
 </style>
 </head><body>
 <nav>
@@ -336,7 +383,7 @@ tr.row-blocked td{{opacity:.65;background:#fff5f5}}
     <p class="sec-desc">신규 가입 폼에서 선택 가능한 서비스를 제어합니다.</p>
     {global_toggles}
   </div>
-
+{tester_section}
   <div class="section-card">
     <h2>📢 전체 공지 발송</h2>
     <p class="sec-desc">이메일이 등록된 모든 사용자에게 발송됩니다.</p>
