@@ -7,6 +7,7 @@ META = {
     "path": "/workspace",
     "icon": "🖥️",
     "description": "터미널 + 파일 업로드",
+    "hidden": True,
 }
 
 UPLOAD_DIR = os.path.expanduser("~/uploads")

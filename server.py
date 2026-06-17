@@ -97,15 +97,21 @@ h1 { font-size: 1.75rem; color: var(--text); margin-bottom: 6px; font-weight: 80
 .app-entry-card:hover { box-shadow:var(--shadow-lg); transform:translateY(-3px); border-color:var(--accent); }
 .app-entry-icon { font-size:2.5rem; filter:drop-shadow(0 2px 6px rgba(0,0,0,0.1)); }
 .app-entry-text { flex:1; }
-.app-entry-name { font-size:1.1rem; font-weight:800; color:var(--slate-900); margin-bottom:4px; letter-spacing:-.02em; }
+.app-entry-name { font-size:1.1rem; font-weight:800; color:var(--text); margin-bottom:4px; letter-spacing:-.02em; }
 .app-entry-tabs { font-size:0.8rem; color:var(--slate-400); font-weight:500; }
-.app-entry-arrow { font-size:1.4rem; color:var(--slate-300); transition:.2s; }
-.app-entry-card:hover .app-entry-arrow { color:var(--blue-500); transform:translateX(4px); }
+.app-entry-arrow { font-size:1.4rem; color:var(--slate-400); transition:.2s; }
+.app-entry-card:hover .app-entry-arrow { color:var(--accent); transform:translateX(4px); }
 @media(max-width:600px) { .app-entry-card { padding:18px 20px; gap:14px; } .app-entry-icon { font-size:2rem; } }
 
 /* Category */
 .category-section { margin-bottom: 40px; }
-.category-title { font-size: 0.7rem; font-weight: 700; color: var(--slate-400); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 14px; padding-left: 2px; }
+.category-title { display:flex; align-items:center; gap:8px; font-size:var(--text-sm); font-weight:var(--fw-bold); color:var(--text); text-transform:none; letter-spacing:.01em; margin-bottom:14px; padding-left:2px; }
+.category-title::before { content:""; width:4px; height:1em; border-radius:var(--radius-full); background:var(--slate-500); flex-shrink:0; }
+.cat-c1::before { background:var(--group-1); }
+.cat-c2::before { background:var(--group-2); }
+.cat-c3::before { background:var(--group-3); }
+.cat-c4::before { background:var(--group-4); }
+.cat-c5::before { background:var(--group-5); }
 
 /* Wayfinder cards */
 .service-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(185px, 1fr)); gap: 14px; }
@@ -328,10 +334,10 @@ WAYFINDER_BACK = (
 )
 
 CATEGORIES = {
-    "Productivity": [],
-    "Team Tools": ["/terminals", "/workspace"],
-    "Analytics": ["/aeo", "/llm-check"],
-    "Admin": ["/admin"],
+    "💼 업무":    ["/cardconv", "/aeo", "/llm-check"],
+    "🏠 개인":    ["/dashboard", "/todo", "/habit", "/pov"],
+    "🛠 팀 도구": ["/terminals"],
+    "⚙️ 관리":    ["/admin"],
 }
 
 def wayfinder(user):
@@ -379,25 +385,19 @@ def wayfinder(user):
                 f'<div class="service-desc">{m["description"]}</div>'
                 f'</a>')
 
-    if user_is_admin:
-        # Admin: 카테고리별 전체 서비스 렌더링
-        sections_html = ""
-        rendered = set()
-        for cat_name, paths in CATEGORIES.items():
-            cards = "".join(_svc_card(svc_map[p]) for p in paths if p in svc_map)
-            if cards:
-                sections_html += f'<div class="category-section"><div class="category-title">{cat_name}</div><div class="service-grid">{cards}</div></div>'
-                rendered.update(p for p in paths if p in svc_map)
-        extra = "".join(_svc_card(m) for p, m in svc_map.items() if p not in rendered)
-        if extra:
-            sections_html += f'<div class="category-section"><div class="category-title">Other</div><div class="service-grid">{extra}</div></div>'
-    else:
-        # 일반 유저: 권한 있는 서비스만 하나의 그리드로
-        cards = "".join(_svc_card(m) for m in svc_map.values())
+    # 2-Track 그룹 렌더링 (admin·일반 공통 — svc_map이 이미 권한 필터링함)
+    sections_html = ""
+    rendered = set()
+    for i, (cat_name, paths) in enumerate(CATEGORIES.items(), start=1):
+        cards = "".join(_svc_card(svc_map[p]) for p in paths if p in svc_map)
         if cards:
-            sections_html = f'<div class="category-section"><div class="category-title">My Services</div><div class="service-grid">{cards}</div></div>'
-        else:
-            sections_html = '<div style="padding:40px;text-align:center;color:var(--text-muted)">접근 가능한 서비스가 없습니다. 관리자에게 문의하세요.</div>'
+            sections_html += f'<div class="category-section"><div class="category-title cat-c{i}">{cat_name}</div><div class="service-grid">{cards}</div></div>'
+            rendered.update(p for p in paths if p in svc_map)
+    extra = "".join(_svc_card(m) for p, m in svc_map.items() if p not in rendered)
+    if extra:
+        sections_html += f'<div class="category-section"><div class="category-title cat-c5">기타</div><div class="service-grid">{extra}</div></div>'
+    if not sections_html:
+        sections_html = '<div style="padding:40px;text-align:center;color:var(--text-muted)">접근 가능한 서비스가 없습니다. 관리자에게 문의하세요.</div>'
 
     # Projects section (admin only)
     projects_html = ""
@@ -484,8 +484,6 @@ def wayfinder(user):
   }})();
   </script>
 
-  {'<a href="/todo" class="app-entry-card"><div class="app-entry-icon">🧭</div><div class="app-entry-text"><div class="app-entry-name">My Productivity App</div><div class="app-entry-tabs">✅ Tasks &nbsp;·&nbsp; 🏃 Habits &nbsp;·&nbsp; 📊 Overview</div></div><div class="app-entry-arrow">→</div></a>' if has_todo else ''}
-
   <div id="pwa-banner" class="pwa-banner">
     <div class="pwa-icon">📱</div>
     <div class="pwa-text">
@@ -494,7 +492,9 @@ def wayfinder(user):
     </div>
     <button class="pwa-close" onclick="closePwaBanner()">×</button>
   </div>
-  
+
+  {'<a href="/todo" class="app-entry-card"><div class="app-entry-icon">🧭</div><div class="app-entry-text"><div class="app-entry-name">My Productivity App</div><div class="app-entry-tabs">✅ Tasks &nbsp;·&nbsp; 🏃 Habits &nbsp;·&nbsp; 📊 Overview</div></div><div class="app-entry-arrow">→</div></a>' if has_todo else ''}
+
   {sections_html}
   {projects_html}
 </div>

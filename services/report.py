@@ -10,6 +10,7 @@ META = {
     "path": "/report",
     "icon": "📓",
     "description": "Daily development report",
+    "hidden": True,
 }
 
 
