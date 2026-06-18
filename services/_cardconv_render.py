@@ -110,11 +110,10 @@ def _render_drive_connected(folder_url: str = "") -> str:
 # ── Shared tab bar ───────────────────────────────────────────────────────────
 
 _CC_TAB_CSS = (
-    ".cc-tabs{display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:20px;flex-wrap:wrap}"
-    ".cc-tab{padding:10px 20px;font-size:.82rem;font-weight:600;color:var(--text-muted);"
-    "border-bottom:2px solid transparent;text-decoration:none;transition:color .15s,border-color .15s}"
+    ".cc-tabs{display:inline-flex;align-items:center;gap:2px;padding:3px;margin-bottom:20px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md);flex-wrap:wrap;max-width:100%}"
+    ".cc-tab{display:inline-flex;align-items:center;padding:7px 16px;font-size:.82rem;font-weight:600;color:var(--text-muted);border-radius:var(--radius-sm);text-decoration:none;transition:background .15s,color .15s}"
     ".cc-tab:hover{color:var(--text)}"
-    ".cc-tab.active{color:var(--accent);border-bottom-color:var(--accent)}"
+    ".cc-tab.active{background:var(--accent);color:#080d14}"
     ".tab-badge{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;"
     "background:#ef4444;border-radius:8px;font-size:.62rem;font-weight:700;color:#fff;padding:0 4px;"
     "margin-left:5px;vertical-align:middle}"
@@ -1418,7 +1417,16 @@ __TABCSS__
 .pagination button{background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);
   padding:4px 12px;font-size:.8rem;cursor:pointer}
 .pagination button:disabled{opacity:.4;cursor:default}
-@media(max-width:600px){.detail-panel{width:100vw}.stat-grid{grid-template-columns:1fr 1fr}}
+.fb-advanced{display:none}
+.fb-advanced.open{display:flex}
+.fb-more-btn{background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:.78rem;font-weight:600;padding:5px 11px;cursor:pointer;display:inline-flex;align-items:center;gap:5px}
+.fb-more-btn:hover{border-color:var(--accent);color:var(--text)}
+.fb-more-btn .chev{transition:transform .18s}
+.fb-more-btn.open .chev{transform:rotate(180deg)}
+.fb-selbar{display:none;align-items:center;gap:10px;padding:9px 16px;background:rgba(129,140,248,.08);border:1px solid rgba(129,140,248,.25);border-radius:var(--radius-md);margin-bottom:8px}
+.fb-selbar.show{display:flex}
+.fb-selcount{font-size:.8rem;font-weight:700;color:var(--text)}
+@media(max-width:640px){.detail-panel{width:100vw}.stat-grid{grid-template-columns:1fr 1fr}.filter-bar{gap:8px;padding:9px 12px}.filter-bar .fb-field{flex-wrap:wrap}.preset-btn{padding:7px 12px}.row-check,.del-check input{width:20px;height:20px}.usage-sel,.card-sel{padding:6px 8px;max-width:none}.ledger-table,.ledger-table tbody,.ledger-table tr,.ledger-table td{display:block;width:100%}.ledger-table thead{display:none}.ledger-table tr{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md);margin-bottom:10px;padding:10px 12px;position:relative}.ledger-table tr:hover td{background:transparent}.ledger-table td{border-bottom:none!important;padding:5px 0;display:flex;justify-content:space-between;align-items:center;gap:10px;text-align:right}.ledger-table td::before{content:attr(data-label);font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);text-align:left}.ledger-table td[data-label=Select]{position:absolute;top:8px;right:10px;padding:0}.ledger-table td[data-label=Select]::before{display:none}.ledger-table td[data-label=Date]{font-weight:700;font-size:.95rem;padding-right:34px}}
 </style>
 </head><body>
 <nav>
@@ -1439,6 +1447,7 @@ __TABCSS__
   </div>
 
   <!-- Row 1 · date range + quick presets (kept together as one period control) -->
+  <!-- Row A · 항상 노출: 자주 쓰는 필터 -->
   <div class="filter-bar">
     <div class="fb-field">
       <span>📅 Date</span>
@@ -1451,10 +1460,6 @@ __TABCSS__
       <button class="preset-btn" data-preset="ytd">YTD</button>
       <button class="preset-btn" data-preset="all">All time</button>
     </div>
-  </div>
-
-  <!-- Row 2 · attribute filters (label+control bundled so they never split) -->
-  <div class="filter-bar">
     <div class="fb-field"><span>Status</span>
       <select id="fStatus">
         <option value="all">All</option>
@@ -1463,6 +1468,15 @@ __TABCSS__
         <option value="pending_match">Pending Match</option>
       </select>
     </div>
+    <button class="fb-more-btn fb-spacer" id="fMore" aria-expanded="false">More filters <span class="chev">▾</span></button>
+    <div class="fb-group">
+      <button class="btn btn-secondary btn-sm" id="fDownloadXlsx">⬇ xlsx</button>
+      <button class="btn btn-ghost btn-sm" id="fDownload">📄 PDF</button>
+    </div>
+  </div>
+
+  <!-- Row B · 고급 필터 (기본 접힘) -->
+  <div class="filter-bar fb-advanced" id="fAdvanced">
     <div class="fb-field"><span>Card</span>
       <select id="fCard">
         <option value="all">All</option>
@@ -1482,19 +1496,16 @@ __TABCSS__
         <option value="all">All</option>
       </select>
     </div>
-    <button class="btn btn-ghost btn-sm fb-spacer" id="fReset">↺ Reset</button>
-  </div>
-
-  <!-- Row 3 · view + export (left) · bulk actions on selection (right) -->
-  <div class="filter-bar">
     <div class="fb-group">
       <button class="preset-btn" id="viewToggle" title="Collapse duplicate receipts into one row">🔁 Group Duplicates</button>
       <span class="cc-info-wrap"><span class="cc-info" onclick="ccTipToggle(this)">ℹ</span><span class="cc-tip">같은 영수증이 여러 장 인식된 경우 그룹으로 묶어 표시합니다. 불필요한 중복은 삭제하세요.</span></span>
     </div>
-    <div class="fb-group">
-      <button class="btn btn-secondary btn-sm" id="fDownloadXlsx">⬇ xlsx</button>
-      <button class="btn btn-ghost btn-sm" id="fDownload">📄 PDF</button>
-    </div>
+    <button class="btn btn-ghost btn-sm fb-spacer" id="fReset">↺ Reset</button>
+  </div>
+
+  <!-- 선택 시에만 등장하는 일괄작업 바 -->
+  <div class="fb-selbar" id="fSelBar">
+    <span class="fb-selcount" id="fSelCount">0 selected</span>
     <div class="fb-group fb-spacer" role="group" aria-label="Selection actions">
       <button class="btn btn-sm fb-act-complete" id="fComplete" disabled>✓ Complete (0)</button>
       <button class="btn btn-sm fb-act-uncomplete" id="fUncomplete" disabled>↩ Un-complete (0)</button>
@@ -1791,19 +1802,19 @@ function rowHtml(e, i, opts){
   if(e.completed) cls += ' completed-row';
   const compTag = e.completed ? '<span class="comp-tag">✓ Done</span>' : '';
   return '<tr data-i="' + i + '"' + (cls?(' class="'+cls.trim()+'"'):'') + '>' +
-    checkCell +
-    '<td>' + (e.ocr_date||'–') + dupTag + compTag + '</td>' +
-    '<td style="color:var(--text-muted)">' + fmtAmt(e.ocr_printed_amount) + '</td>' +
-    handCell +
-    '<td style="font-weight:700">' + fmtAmt(e.ocr_amount) + '</td>' +
-    '<td>' + (e.ocr_merchant||'–') + '</td>' +
-    '<td>' + cardCell(e) + '</td>' +
-    '<td>' + usageCell(e) + '</td>' +
-    '<td>' + thumb(e) + '</td>' +
-    '<td><span class="status-badge status-' + (e.match_status||'unmatched') + '">' +
+    checkCell.replace('<td>','<td data-label="Select">') +
+    '<td data-label="Date">' + (e.ocr_date||'–') + dupTag + compTag + '</td>' +
+    '<td data-label="Printed" style="color:var(--text-muted)">' + fmtAmt(e.ocr_printed_amount) + '</td>' +
+    handCell.replace('<td','<td data-label="Handwritten"') +
+    '<td data-label="Final" style="font-weight:700">' + fmtAmt(e.ocr_amount) + '</td>' +
+    '<td data-label="Merchant">' + (e.ocr_merchant||'–') + '</td>' +
+    '<td data-label="Card">' + cardCell(e) + '</td>' +
+    '<td data-label="Usage">' + usageCell(e) + '</td>' +
+    '<td data-label="Receipt">' + thumb(e) + '</td>' +
+    '<td data-label="Status"><span class="status-badge status-' + (e.match_status||'unmatched') + '">' +
       (STATUS_LABEL[e.match_status]||e.match_status||'–') + '</span>' + matchInfo(e) + '</td>' +
-    '<td>' + aiBadge(e.ocr_model) + '</td>' +
-    actionCell +
+    '<td data-label="AI">' + aiBadge(e.ocr_model) + '</td>' +
+    actionCell.replace('<td>','<td data-label="Action">') +
   '</tr>';
 }
 
@@ -2198,6 +2209,8 @@ function updateDeleteBtn(){
   $('fComplete').disabled = active === 0;
   $('fUncomplete').textContent = '↩ Un-complete (' + done + ')';
   $('fUncomplete').disabled = done === 0;
+  const sb = $('fSelBar'); if(sb) sb.classList.toggle('show', n > 0);
+  const sc = $('fSelCount'); if(sc) sc.textContent = n + ' selected';
 }
 
 async function completeSelected(undo){
@@ -2285,6 +2298,11 @@ $('fStatus').addEventListener('change', () => { CUR_PAGE=1; load(); });
 $('fCard').addEventListener('change', () => { CUR_PAGE=1; load(); });
 $('fUsage').addEventListener('change', () => { CUR_PAGE=1; load(); });
 $('fCompleted').addEventListener('change', () => { CUR_PAGE=1; load(); });
+$('fMore').addEventListener('click', () => {
+  const adv = $('fAdvanced'), open = adv.classList.toggle('open');
+  $('fMore').classList.toggle('open', open);
+  $('fMore').setAttribute('aria-expanded', open);
+});
 $('fReset').addEventListener('click', () => {
   $('fStatus').value='all'; $('fCard').value='all'; $('fUsage').value='all';
   $('fCompleted').value='hide'; setDefaultDates(); CUR_PAGE=1; load();
