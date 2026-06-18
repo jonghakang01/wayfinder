@@ -172,10 +172,12 @@ def render(user):
             else:
                 week_status.append("empty")
         habit_rows.append({
+            "id": h.get("id"),
             "icon": h.get("icon", "✅"),
             "name": h.get("name", ""),
             "streak": streak,
             "week": week_status,
+            "checked": _day_total(checkins, today_str) >= target,
         })
 
     # Render todo bar chart
@@ -218,7 +220,7 @@ def render(user):
     )
 
     from server import app_tabs
-    tabs_html = app_tabs("/dashboard")
+    tabs_html = app_tabs("/dashboard", user)
 
     # Projects section (admin only)
     projects_html = ""
@@ -318,6 +320,109 @@ def render(user):
     else:
         greeting = "Good evening"
 
+    # ── Adaptive Today Hub ──────────────────────────────────────
+    max_streak = max((r["streak"] for r in habit_rows), default=0)
+    engagement = total_active + total_habits
+
+    def _todo_item(t):
+        done = t.get("done")
+        cls = "wf-today-item wf-done" if done else "wf-today-item"
+        action = "/todo/undone" if done else "/todo/done"
+        check = ('<button type="submit" class="wf-check wf-check--on" aria-label="되돌리기">✓</button>'
+                 if done else '<button type="submit" class="wf-check" aria-label="완료"></button>')
+        return (f'<form method="POST" action="{action}" class="{cls}">'
+                f'<input type="hidden" name="id" value="{t["id"]}">'
+                f'<input type="hidden" name="next" value="/dashboard">'
+                f'{check}<span class="wf-today-text">{t.get("title","")}</span></form>')
+
+    def _habit_item(r):
+        done = r["checked"]
+        cls = "wf-today-item wf-done" if done else "wf-today-item"
+        check = ('<button type="submit" class="wf-check wf-check--on" aria-label="체크 해제">✓</button>'
+                 if done else '<button type="submit" class="wf-check" aria-label="습관 체크"></button>')
+        chip = f'<span class="wf-streak-chip">🔥 {r["streak"]}d</span>' if r["streak"] >= 1 else ""
+        return (f'<form method="POST" action="/habit/{r["id"]}/checkin" class="{cls}">'
+                f'<input type="hidden" name="toggle" value="1">'
+                f'<input type="hidden" name="next" value="/dashboard">'
+                f'{check}<span class="wf-today-text">{r["icon"]} {r["name"]}</span>{chip}</form>')
+
+    active_todos = [t for t in todos if not t.get("done")]
+    done_todos_today = [t for t in todos if t.get("done") and (t.get("done_at") or "").startswith(today_str)]
+
+    if total_active == 0 and total_habits == 0 and len(todos) == 0:
+        stage = "empty"
+    elif engagement <= 5:
+        stage = "light"
+    else:
+        stage = "heavy"
+
+    if stage == "empty":
+        body_html = '''<div class="wf-home-empty">
+  <div class="notepad-card wf-empty-card">
+    <div class="wf-empty-icon">✅</div>
+    <div class="wf-empty-title">첫 할일 추가</div>
+    <form method="POST" action="/todo/add" class="wf-empty-form">
+      <input type="hidden" name="next" value="/dashboard">
+      <input type="text" name="title" placeholder="예: 이메일 정리하기" required class="wf-empty-input">
+      <button type="submit" class="btn btn-primary">추가</button>
+    </form>
+  </div>
+  <div class="notepad-card wf-empty-card">
+    <div class="wf-empty-icon">🔄</div>
+    <div class="wf-empty-title">첫 습관 추가</div>
+    <form method="POST" action="/habit/add" class="wf-empty-form">
+      <input type="text" name="name" placeholder="예: 물 2L 마시기" required class="wf-empty-input">
+      <input type="hidden" name="freq" value="daily">
+      <input type="hidden" name="target" value="1">
+      <button type="submit" class="btn btn-primary">추가</button>
+    </form>
+  </div>
+</div>'''
+    elif stage == "light":
+        items = "".join(_todo_item(t) for t in active_todos)
+        items += "".join(_habit_item(r) for r in habit_rows if not r["checked"])
+        items += "".join(_todo_item(t) for t in done_todos_today)
+        items += "".join(_habit_item(r) for r in habit_rows if r["checked"])
+        if not items:
+            items = '<div class="wf-next-cta">오늘 할 일이 비었어요 — 위 탭에서 할일이나 습관을 추가해볼까요?</div>'
+        body_html = f'''<div class="notepad-card" style="padding:18px 20px;margin-bottom:24px">
+  <div class="wf-today-head">
+    <span class="wf-today-title">☀️ 오늘 할 것</span>
+    <span class="badge">{done_today + done_habits_today} 완료</span>
+  </div>
+  <div class="wf-today-list">{items}</div>
+</div>'''
+    else:  # heavy
+        unchecked_habits = [r for r in habit_rows if not r["checked"]]
+        focus = ("".join(_todo_item(t) for t in active_todos[:3])
+                 + "".join(_habit_item(r) for r in unchecked_habits[:3]))
+        if not focus:
+            focus = '<div class="wf-next-cta">오늘 할 일을 다 했어요! 🎉</div>'
+        body_html = f'''<div class="wf-stat-grid">
+  <div class="wf-stat"><div class="wf-stat-value">{total_active}</div><div class="wf-stat-label">남은 할일</div></div>
+  <div class="wf-stat"><div class="wf-stat-value">{done_today}</div><div class="wf-stat-label">오늘 완료</div></div>
+  <div class="wf-stat"><div class="wf-stat-value">{done_habits_today}<span class="wf-stat-sub">/{total_habits}</span></div><div class="wf-stat-label">오늘 습관</div></div>
+  <div class="wf-stat"><div class="wf-stat-value">🔥{max_streak}<span class="wf-stat-sub">d</span></div><div class="wf-stat-label">최장 연속</div></div>
+</div>
+<div class="notepad-card" style="padding:18px 20px;margin-bottom:20px">
+  <div class="wf-today-head">
+    <span class="wf-today-title">🎯 오늘 포커스</span>
+    <a href="/todo" class="btn btn-ghost btn-sm">전체 보기 →</a>
+  </div>
+  <div class="wf-today-list">{focus}</div>
+</div>
+<div class="notepad-card" style="margin-bottom:20px">
+<div class="notepad-header"><div class="notepad-title-row"><span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--slate-400)">Tasks This Week</span></div></div>
+  <div class="notepad-body"><div class="bar-chart">{todo_bars}</div></div>
+</div>
+<div class="notepad-card" style="margin-bottom:28px">
+<div class="notepad-header"><div class="notepad-title-row"><span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--slate-400)">Habits This Week</span></div></div>
+  <div class="notepad-body">
+    <div class="week-labels"><div style="flex:1"></div>{week_label_html}</div>
+    {habit_grid_html}
+  </div>
+</div>'''
+
     return f'''<!DOCTYPE html>
 <html lang="ko"><head>
 <meta charset="UTF-8">
@@ -376,39 +481,7 @@ def render(user):
     <p>{today.strftime("%B %d, %Y")} &nbsp;·&nbsp; Today at a glance</p>
   </div>
 
-  <div class="db-grid">
-    <div class="notepad-card">
-<div class="notepad-header"><div class="notepad-title-row"><span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--slate-400)">Tasks Today</span></div></div>
-      <div class="notepad-body">
-        <div class="big-num">{done_today}<span>/ {done_today + total_active}</span></div>
-        <div class="rate-bar"><div class="rate-fill" style="width:{todo_rate}%"></div></div>
-        <div class="rate-label">{todo_rate}% complete &nbsp;·&nbsp; {total_active} remaining</div>
-      </div>
-    </div>
-    <div class="notepad-card">
-<div class="notepad-header"><div class="notepad-title-row"><span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--slate-400)">Habits Today</span></div></div>
-      <div class="notepad-body">
-        <div class="big-num">{done_habits_today}<span>/ {total_habits}</span></div>
-        <div class="rate-bar"><div class="rate-fill" style="width:{habit_rate}%"></div></div>
-        <div class="rate-label">{habit_rate}% done &nbsp;·&nbsp; {total_habits} total</div>
-      </div>
-    </div>
-  </div>
-
-  <div class="notepad-card" style="margin-bottom:20px">
-<div class="notepad-header"><div class="notepad-title-row"><span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--slate-400)">Tasks This Week</span></div></div>
-    <div class="notepad-body">
-      <div class="bar-chart">{todo_bars}</div>
-    </div>
-  </div>
-
-  <div class="notepad-card" style="margin-bottom:28px">
-<div class="notepad-header"><div class="notepad-title-row"><span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--slate-400)">Habits This Week</span></div></div>
-    <div class="notepad-body">
-      <div class="week-labels"><div style="flex:1"></div>{week_label_html}</div>
-      {habit_grid_html}
-    </div>
-  </div>
+  {body_html}
 
   {projects_html}
 

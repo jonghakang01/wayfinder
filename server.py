@@ -206,6 +206,38 @@ h1 { font-size: 1.75rem; color: var(--text); margin-bottom: 6px; font-weight: 80
   .service-grid { grid-template-columns: 1fr 1fr; }
   .dashboard-stats { gap: 8px; }
 }
+
+/* === Adaptive Today Hub (dashboard) === */
+.wf-stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px}
+.wf-stat{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:20px 18px;box-shadow:var(--shadow-sm)}
+.wf-stat-value{font-size:2.2rem;font-weight:800;letter-spacing:-.03em;line-height:1;color:var(--text)}
+.wf-stat-sub{font-size:1rem;font-weight:500;color:var(--text-muted);margin-left:2px}
+.wf-stat-label{font-size:.78rem;color:var(--text-muted);font-weight:600;margin-top:8px;text-transform:uppercase;letter-spacing:.05em}
+.wf-today-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.wf-today-title{font-size:1rem;font-weight:800;color:var(--text)}
+.wf-today-list{display:flex;flex-direction:column;gap:8px}
+.wf-today-item{display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md);transition:.15s;margin:0}
+.wf-today-item:hover{border-color:var(--accent);background:var(--surface-3)}
+.wf-today-item.wf-done{opacity:.5}
+.wf-today-text{flex:1;font-size:.92rem;font-weight:600;color:var(--text);text-align:left}
+.wf-today-item.wf-done .wf-today-text{text-decoration:line-through;color:var(--text-muted)}
+.wf-check{width:26px;height:26px;flex-shrink:0;border-radius:50%;border:2px solid var(--border);background:transparent;cursor:pointer;color:#080d14;font-size:.85rem;font-weight:800;display:flex;align-items:center;justify-content:center;transition:.15s;padding:0}
+.wf-check:hover{border-color:var(--accent)}
+.wf-check--on{background:linear-gradient(135deg,var(--accent),var(--info));border-color:transparent}
+.wf-streak-chip{font-size:.72rem;color:var(--warn);font-weight:700;white-space:nowrap;background:rgba(251,191,36,.1);padding:2px 8px;border-radius:var(--radius-full);border:1px solid rgba(251,191,36,.3)}
+.wf-next-cta{display:flex;align-items:center;gap:10px;margin-top:14px;padding:12px 14px;border:1px dashed var(--border);border-radius:var(--radius-md);color:var(--text-muted);font-size:.86rem}
+.wf-home-empty{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.wf-empty-card{padding:28px 24px;text-align:center}
+.wf-empty-icon{font-size:2.4rem;margin-bottom:10px}
+.wf-empty-title{font-size:1rem;font-weight:800;color:var(--text);margin-bottom:14px}
+.wf-empty-form{display:flex;flex-direction:column;gap:10px}
+.wf-empty-input{padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface-2);color:var(--text);font-size:.9rem}
+.wf-empty-input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-glow)}
+@media(max-width:600px){
+  .wf-stat-grid{grid-template-columns:1fr 1fr;gap:10px}
+  .wf-stat{padding:14px 12px}.wf-stat-value{font-size:1.7rem}
+  .wf-home-empty{grid-template-columns:1fr}
+}
 """
 
 CSS_VER = hashlib.md5(STYLE.encode()).hexdigest()[:8]
@@ -294,18 +326,29 @@ APP_TAB_CSS = """
 .app-tab-icon{font-size:1.3rem;line-height:1;transition:transform 0.2s}
 .app-tab.active .app-tab-icon{filter:drop-shadow(0 0 8px rgba(56,189,248,0.7));transform:translateY(-2px)}
 body{padding-bottom:calc(72px + env(safe-area-inset-bottom,0px))!important}
+@media(min-width:768px){
+  .app-tabs{position:sticky!important;top:0!important;bottom:auto!important;height:auto;flex-direction:row;justify-content:center;gap:6px;background:var(--surface);border-top:none;border-bottom:1px solid var(--border);padding:10px 16px;box-shadow:var(--shadow-sm)}
+  .app-tab{flex:0 0 auto;flex-direction:row;gap:8px;padding:8px 18px;border-radius:var(--radius-full);font-size:.82rem;text-transform:none;letter-spacing:0}
+  .app-tab-icon{font-size:1.05rem}
+  .app-tab.active{background:var(--accent);color:#080d14}
+  .app-tab.active .app-tab-icon{transform:none;filter:none}
+  body{padding-bottom:0!important;padding-top:0!important}
+}
 </style>
 """
 
-def app_tabs(active):
+def app_tabs(active, user=None):
+    import services.auth as auth
     tabs = [
         ("/todo",      "✅", "Tasks"),
         ("/habit",     "🏃", "Habits"),
         ("/dashboard", "📊", "Overview"),
         ("/pov",       "🗞", "POV"),
     ]
+    is_admin = auth.is_admin(user)
+    visible = [t for t in tabs if is_admin or auth.has_service_access(user, t[0])]
     html = APP_TAB_CSS + '<nav class="app-tabs">'
-    for path, icon, label in tabs:
+    for path, icon, label in visible:
         cls = "app-tab active" if active == path else "app-tab"
         html += f'<a href="{path}" class="{cls}"><span class="app-tab-icon">{icon}</span>{label}</a>'
     html += "</nav>"

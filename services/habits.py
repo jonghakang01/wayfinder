@@ -849,7 +849,7 @@ def render_list(habits, user, readonly=False):
     )
 
     from server import app_tabs
-    tabs_html = app_tabs("/habit")
+    tabs_html = app_tabs("/habit", user)
 
     add_group_card = "" if readonly else (
         '<div id="addGroupCard" style="display:none;background:white;border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:12px">'

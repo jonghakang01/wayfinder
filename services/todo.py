@@ -229,7 +229,10 @@ def handle(method, path, body, ctx=None):
                 if t["id"] == tid:
                     t["group"] = g
             save(todos, user)
-        return ("redirect", "/todo")
+        next_url = (body.get("next") or ["/todo"])[0]
+        if not next_url.startswith("/"):
+            next_url = "/todo"
+        return ("redirect", next_url)
 
     return ("html", render(load(user), load_habits(user), user))
 
@@ -512,7 +515,7 @@ def render(todos, habits, user, readonly=False):
     add_form = ""
 
     from server import app_tabs
-    tabs_html = app_tabs("/todo")
+    tabs_html = app_tabs("/todo", user)
 
     todo_add_group_card = "" if readonly else (
         '<div id="addGroupCard" style="display:none;background:var(--surface);border:1px solid var(--border);'
