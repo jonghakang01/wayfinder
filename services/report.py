@@ -1,7 +1,7 @@
 import json, os, subprocess
 from datetime import date, timedelta, datetime
 
-DATA_ROOT = os.path.expanduser("~/.appdata")
+from services._paths import DATA_ROOT
 REPO_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ALLOWED_USER = "jongha.kang"
 

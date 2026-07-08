@@ -40,3 +40,26 @@ jobs:
             systemctl restart wayfinder
             sleep 2 && curl -sf http://localhost:8080/health && echo "Health OK"
             echo "Deployed at $(date)"
+
+  staging:
+    # Every push to main deploys to staging (no [deploy] tag needed).
+    # Manual workflow_dispatch targets prod only, so staging is skipped there.
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to staging via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            if [ ! -d ~/webapp-staging/.git ]; then
+              echo "staging not provisioned yet — run deploy/setup-staging.sh on the server first. Skipping."
+              exit 0
+            fi
+            cd ~/webapp-staging && git pull origin main
+            pip3 install openpyxl anthropic google-genai google-auth google-auth-oauthlib google-api-python-client fpdf2 Pillow --break-system-packages -q 2>/dev/null || true
+            systemctl restart wayfinder-staging
+            sleep 2 && curl -sf http://localhost:8081/health && echo "Staging Health OK"
+            echo "Staged at $(date)"

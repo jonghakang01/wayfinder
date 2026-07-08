@@ -50,7 +50,8 @@ def _send_push_notification(username: str, title: str, body: str, url: str = "/c
     except Exception:
         pass
 
-DATA_DIR   = Path(os.path.expanduser("~/.appdata/cardconv"))
+from services._paths import DATA_ROOT
+DATA_DIR   = Path(DATA_ROOT) / "cardconv"
 KW_FILE    = DATA_DIR / "keywords.json"
 HIST_FILE  = DATA_DIR / "history.json"
 OUT_DIR    = DATA_DIR / "outputs"

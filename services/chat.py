@@ -9,7 +9,7 @@ META = {
     "hidden": True,
 }
 
-DATA_ROOT = os.path.expanduser("~/.appdata")
+from services._paths import DATA_ROOT
 
 SYSTEM_PROMPT = """당신은 쭌입니다. AI 개발팀의 팀장으로, 사용자의 요청을 분석하고 실행 방향을 안내합니다.
 - 한국어로 응답

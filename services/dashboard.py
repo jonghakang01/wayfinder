@@ -2,7 +2,8 @@ import json, os
 from datetime import date, timedelta, datetime
 
 ADMIN_USER = "jongha.kang"
-PROJECTS_FILE = os.path.join(os.path.expanduser("~/.appdata"), "projects.json")
+from services._paths import DATA_ROOT
+PROJECTS_FILE = os.path.join(DATA_ROOT, "projects.json")
 
 STATUS_META = {
     "active":   {"label": "Active",    "color": "#34d399", "bg": "rgba(52,211,153,0.12)",  "border": "rgba(52,211,153,0.3)"},
@@ -33,8 +34,6 @@ def _save_projects(projects):
 
 def _next_proj_id(projects):
     return max((p["id"] for p in projects), default=0) + 1
-
-DATA_ROOT = os.path.expanduser("~/.appdata")
 
 META = {
     "name": "Overview",

@@ -1,7 +1,7 @@
 import json, os
 from datetime import datetime, date, timedelta
 
-DATA_ROOT = os.path.expanduser("~/.appdata")
+from services._paths import DATA_ROOT
 
 META = {
     "name": "Tasks",

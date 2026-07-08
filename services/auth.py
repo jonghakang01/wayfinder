@@ -1,6 +1,6 @@
 import hashlib, json, os, secrets, shutil
 
-DATA_ROOT     = os.path.expanduser("~/.appdata")
+from services._paths import DATA_ROOT
 USERS_FILE    = os.path.join(DATA_ROOT, "users.json")
 SESSIONS_FILE = os.path.join(DATA_ROOT, "sessions.json")
 SETTINGS_FILE = os.path.join(DATA_ROOT, "settings.json")
