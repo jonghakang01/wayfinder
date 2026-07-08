@@ -1652,6 +1652,18 @@ const STATUS_LABEL = {matched:'✅ Matched', unmatched:'❌ Unmatched', pending_
 
 function fmtAmt(a){ return (a===null||a===undefined) ? '–' : '$' + Number(a).toFixed(2); }
 
+// Foreign-currency display: "₩45,000 → ~$33.10" (falls back to fmtAmt for USD).
+const FX_SYM = {KRW:'₩', INR:'₹', EUR:'€', JPY:'¥'};
+function fmtAmtFx(e, a){
+  if(a===null||a===undefined) return '–';
+  const cur = e && e.ocr_currency;
+  if(!cur || cur === 'USD') return fmtAmt(a);
+  const sym = FX_SYM[cur] || (cur + ' ');
+  const noDec = (cur === 'KRW' || cur === 'JPY');
+  const orig = sym + Number(a).toLocaleString(undefined, {maximumFractionDigits: noDec ? 0 : 2});
+  return e.usd_estimate != null ? orig + ' → ~$' + Number(e.usd_estimate).toFixed(2) : orig;
+}
+
 function thumb(e){
   if(!e.file_id) return '<div class="receipt-thumb-placeholder">🧾</div>';
   const proxy = '/cardconv/receipts/image/' + e.file_id;
@@ -1806,7 +1818,7 @@ function rowHtml(e, i, opts){
     '<td data-label="Date">' + (e.ocr_date||'–') + dupTag + compTag + '</td>' +
     '<td data-label="Printed" style="color:var(--text-muted)">' + fmtAmt(e.ocr_printed_amount) + '</td>' +
     handCell.replace('<td','<td data-label="Handwritten"') +
-    '<td data-label="Final" style="font-weight:700">' + fmtAmt(e.ocr_amount) + '</td>' +
+    '<td data-label="Final" style="font-weight:700">' + fmtAmtFx(e, e.ocr_amount) + '</td>' +
     '<td data-label="Merchant">' + (e.ocr_merchant||'–') + '</td>' +
     '<td data-label="Card">' + cardCell(e) + '</td>' +
     '<td data-label="Usage">' + usageCell(e) + '</td>' +
@@ -1991,8 +2003,8 @@ function openPanel(e){
   CUR_ID = e.id;
   CUR_FILE_ID = e.file_id || null;
   $('dDate').textContent = e.ocr_date || '–';
-  $('dAmount').textContent = fmtAmt(e.ocr_amount);
-  $('dPrinted').textContent = fmtAmt(e.ocr_printed_amount);
+  $('dAmount').textContent = fmtAmtFx(e, e.ocr_amount);
+  $('dPrinted').textContent = fmtAmtFx(e, e.ocr_printed_amount);
   const hand = (e.ocr_handwritten_amount===null||e.ocr_handwritten_amount===undefined);
   $('dHand').textContent = hand ? '–' : (fmtAmt(e.ocr_handwritten_amount) + ' ✍️');
   $('dHand').style.color = hand ? '' : '#f59e0b';

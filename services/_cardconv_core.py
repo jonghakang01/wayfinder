@@ -222,6 +222,11 @@ def _migrate_entry(e: dict) -> dict:
     # moved to a "Completed" folder).
     e.setdefault("card_brand", None)
     e.setdefault("usage", "Regular")
+    # v2.4: foreign-currency receipts (KRW/INR business trips) — OCR currency +
+    # USD estimate for band-matching against the USD AMEX statement.
+    e.setdefault("ocr_currency", None)
+    e.setdefault("usd_estimate", None)
+    e.setdefault("fx_rate", None)
     e.setdefault("completed", False)
     e.setdefault("completed_at", None)
     e.setdefault("archived_drive", False)
@@ -604,12 +609,17 @@ _OCR_PROMPT = (
     '-> "visa"; starting with 2 or 5 -> "other". If (a) and (b) disagree, prefer the '
     'explicit brand text. AMEX receipts often show "AMEX", "AETC", or a 15-digit / '
     '3-prefixed card number — treat any of these as "amex". '
+    '6) currency: the ISO 4217 code of the amounts on the receipt. Infer from '
+    'currency symbols, wording and locale: "$"/"USD" -> "USD"; "₩"/"원"/"KRW"/Korean '
+    'receipt text -> "KRW"; "₹"/"Rs"/"INR"/Indian receipt (GST, rupees) -> "INR"; '
+    'other clear signals -> that ISO code (e.g. "EUR", "JPY"). Use "USD" only when '
+    'the receipt is clearly US-based or shows "$" with English/US formatting. '
     'For each receipt, ALSO return its bounding box in the image as bbox: '
     '[ymin, xmin, ymax, xmax] using a 0-1000 normalized coordinate system '
     '(0=top/left, 1000=bottom/right). '
     'Return a JSON ARRAY ONLY, one object per receipt: '
     '[{"date":"YYYY-MM-DD","merchant":"name","printed_amount":0.00,"handwritten_amount":null,'
-    '"card_brand":"amex","bbox":[100,50,800,950]}]. '
+    '"card_brand":"amex","currency":"USD","bbox":[100,50,800,950]}]. '
     'If only one receipt is visible, return an array with a single element.'
 )
 
@@ -643,7 +653,72 @@ def _normalize_ocr(result: dict) -> dict:
     # bbox: [ymin, xmin, ymax, xmax] in 0-1000 normalized coords (None if absent/invalid).
     result["bbox"] = _coerce_bbox(result.get("bbox"))
     result["card_brand"] = _coerce_card_brand(result.get("card_brand"))
+    result["currency"] = _coerce_currency(result.get("currency"))
     return result
+
+
+def _coerce_currency(v):
+    """Normalize a model's currency string to an ISO 4217 code (None if unknown)."""
+    if not v:
+        return None
+    s = str(v).strip().upper()
+    if s in ("NULL", "NONE", "UNKNOWN", ""):
+        return None
+    aliases = {"₩": "KRW", "원": "KRW", "WON": "KRW", "₹": "INR", "RS": "INR",
+               "RUPEE": "INR", "RUPEES": "INR", "$": "USD", "US$": "USD"}
+    s = aliases.get(s, s)
+    return s if (len(s) == 3 and s.isalpha()) else None
+
+
+# ── FX conversion (foreign-currency receipts → USD estimate) ─────────────────
+# Card networks settle at their own rate (spread + AMEX FX fee ~2.5%), so the
+# USD estimate is matched against statement amounts with a tolerance band.
+
+FX_TOLERANCE = 0.05          # ±5% band around the ECB reference conversion
+_FX_CACHE_FILE = DATA_DIR / "fx_cache.json"
+_FX_FALLBACK = {"KRW": 1510.0, "INR": 94.0, "EUR": 0.86, "JPY": 146.0}  # offline approx (2026-07)
+
+
+def _fx_rate(currency: str, date_str: str = None):
+    """Units of `currency` per 1 USD on `date_str` (YYYY-MM-DD, default latest).
+
+    ECB reference rates via frankfurter.app (free, no key), cached on disk.
+    Weekends/holidays resolve to the previous business day server-side.
+    Returns None for unknown currencies with no fallback.
+    """
+    if not currency or currency == "USD":
+        return 1.0
+    key = f"{currency}:{date_str or 'latest'}"
+    cache = {}
+    try:
+        cache = json.loads(_FX_CACHE_FILE.read_text())
+        if key in cache:
+            return cache[key]
+    except Exception:
+        cache = {}
+    try:
+        import urllib.request
+        url = f"https://api.frankfurter.dev/v1/{date_str or 'latest'}?base=USD&symbols={currency}"
+        # NB: frankfurter.dev returns 403 for the default Python-urllib UA.
+        req = urllib.request.Request(url, headers={"User-Agent": "wayfinder-cardconv/1.0"})
+        with urllib.request.urlopen(req, timeout=6) as resp:
+            rate = json.load(resp)["rates"][currency]
+        cache[key] = rate
+        _ensure_dirs()
+        _FX_CACHE_FILE.write_text(json.dumps(cache))
+        return rate
+    except Exception:
+        return _FX_FALLBACK.get(currency)
+
+
+def _fx_usd_estimate(amount, currency: str, date_str: str = None):
+    """(usd_estimate, rate) for a foreign amount; (None, None) if not convertible."""
+    if amount is None or not currency or currency == "USD":
+        return None, None
+    rate = _fx_rate(currency, date_str)
+    if not rate:
+        return None, None
+    return round(float(amount) / rate, 2), rate
 
 
 def _coerce_card_brand(v):
@@ -800,6 +875,8 @@ def _ocr_entry_fields(ocr: dict) -> dict:
     if ocr_date == "YYYY-MM-DD":  # treat placeholder as missing
         ocr_date = None
     has_ocr = ocr.get("amount") is not None
+    currency = ocr.get("currency")
+    usd_est, fx_rate = _fx_usd_estimate(ocr.get("amount"), currency, ocr_date)
     return {
         "ocr_status":             "done" if has_ocr else "failed",
         "ocr_date":               ocr_date,
@@ -810,6 +887,9 @@ def _ocr_entry_fields(ocr: dict) -> dict:
         "ocr_model":              ocr.get("_model"),
         "ocr_bbox":               ocr.get("bbox"),
         "card_brand":             ocr.get("card_brand"),
+        "ocr_currency":           currency,
+        "usd_estimate":           usd_est,
+        "fx_rate":                fx_rate,
     }
 
 
@@ -920,6 +1000,7 @@ def convert(csv_bytes: bytes, filename: str, username: str = None) -> tuple:
     # Build receipt lookup: (date_str, rounded_amount) → receipt record
     receipts      = []
     receipts_map  = {}
+    fx_receipts   = []   # foreign-currency receipts: (date_str, usd_estimate, record)
     receipts_dirty = False
     if username:
         receipts = _load_receipts(username)
@@ -933,7 +1014,19 @@ def convert(csv_bytes: bytes, filename: str, username: str = None) -> tuple:
             hw = r.get("ocr_handwritten_amount")
             pr = r.get("ocr_printed_amount") or r.get("ocr_amount")
             ramount = hw if hw is not None else pr
-            if ramount is not None:
+            cur = r.get("ocr_currency")
+            if cur and cur != "USD":
+                # Foreign receipt: match on the USD estimate with a ±FX_TOLERANCE
+                # band (card settlement rate differs from the ECB reference).
+                usd_est = r.get("usd_estimate")
+                if usd_est is None:
+                    usd_est, fx = _fx_usd_estimate(ramount, cur, rdate)
+                    if usd_est is not None:
+                        r["usd_estimate"], r["fx_rate"] = usd_est, fx
+                        receipts_dirty = True
+                if usd_est is not None:
+                    fx_receipts.append((rdate, usd_est, r))
+            elif ramount is not None:
                 try:
                     key = (rdate, round(float(ramount), 2))
                     receipts_map[key] = r
@@ -990,7 +1083,7 @@ def convert(csv_bytes: bytes, filename: str, username: str = None) -> tuple:
         inv_date_str = inv_dt.strftime("%Y-%m-%d") if inv_dt else None
         amt_rounded  = round(amount, 2)
         receipt_match = None
-        if receipts_map:
+        if receipts_map or fx_receipts:
             receipt_match = receipts_map.get((inv_date_str, amt_rounded))
             if not receipt_match:
                 for (rdate, ramt), r in receipts_map.items():
@@ -1008,6 +1101,28 @@ def convert(csv_bytes: bytes, filename: str, username: str = None) -> tuple:
                             rd = date.fromisoformat(rdate)
                             id_ = date.fromisoformat(inv_date_str) if inv_date_str else None
                             date_match = id_ is not None and abs((rd - id_).days) <= 1
+                        except Exception:
+                            date_match = False
+                    if date_match:
+                        receipt_match = r
+                        break
+            if not receipt_match and fx_receipts:
+                # Foreign-currency receipts (KRW/INR …): match when the USD
+                # statement amount falls within ±FX_TOLERANCE of the receipt's
+                # USD estimate. Card settlement rate ≠ ECB reference, and
+                # international transactions can post late → date window ±3d.
+                for rdate, usd_est, r in fx_receipts:
+                    if r.get('matched') or not usd_est:
+                        continue
+                    if abs(amt_rounded - usd_est) > usd_est * FX_TOLERANCE:
+                        continue
+                    if rdate is None or rdate == inv_date_str:
+                        date_match = True
+                    else:
+                        try:
+                            rd  = date.fromisoformat(rdate)
+                            id_ = date.fromisoformat(inv_date_str) if inv_date_str else None
+                            date_match = id_ is not None and abs((rd - id_).days) <= 3
                         except Exception:
                             date_match = False
                     if date_match:
@@ -1613,6 +1728,17 @@ def _handle_rematch(username: str, entry_id: str):
     except (ValueError, TypeError):
         return ("json", {"error": "invalid amount"}, 400)
 
+    # Foreign-currency receipt: compare statement USD amounts against the USD
+    # estimate with a ±FX_TOLERANCE band instead of exact cents.
+    fx_cur = entry.get("ocr_currency")
+    fx_usd = None
+    if fx_cur and fx_cur != "USD":
+        fx_usd = entry.get("usd_estimate")
+        if fx_usd is None:
+            fx_usd, _fxr = _fx_usd_estimate(ramount, fx_cur, rdate)
+            if fx_usd is not None:
+                entry["usd_estimate"], entry["fx_rate"] = fx_usd, _fxr
+
     uploads = _load_uploads(username)
     uploads_dir_path = _uploads_dir(username)
     target_names = set(_get_card_member_names(username))
@@ -1636,7 +1762,10 @@ def _handle_rematch(username: str, entry_id: str):
                 amount = round(float(row.get("Amount", 0)), 2)
             except ValueError:
                 continue
-            if abs(amount - ramount) > 0.01:
+            if fx_usd:
+                if abs(amount - fx_usd) > fx_usd * FX_TOLERANCE:
+                    continue
+            elif abs(amount - ramount) > 0.01:
                 continue
 
             inv_dt = _parse_date(row.get("Date", ""))
