@@ -1001,7 +1001,7 @@ def render_form(error=""):
 </style></head><body>
 <nav>
   <a href="/" style="color:white;font-weight:600;text-decoration:none">🧭 Wayfinder</a>
-  <a href="/workspace">← Workspace</a>
+  <a href="/">← Home</a>
 </nav>
 
 <div class="hero">

@@ -1199,7 +1199,7 @@ def render_form(error=""):
 </style></head><body>
 <nav>
   <a href="/" style="color:white;font-weight:600;text-decoration:none">🧭 Wayfinder</a>
-  <a href="/workspace">← 워크스페이스</a>
+  <a href="/">← 홈</a>
 </nav>
 
 <div class="hero">
