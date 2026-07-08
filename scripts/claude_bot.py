@@ -9,7 +9,7 @@ Commands:
   /model gemini — switch to Gemini
   /clear        — clear conversation history
 """
-import asyncio, os, subprocess, logging
+import asyncio, json, os, subprocess, logging, time
 from telegram import Update
 from telegram.ext import Application, MessageHandler, CommandHandler, filters, ContextTypes
 import anthropic
@@ -150,6 +150,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     state = get_state(AUTHORIZED_ID)
     user_text = update.message.text
+
+    # Bridge: @cc/​/cc prefixed messages go to the local Claude CLI (쭌) via queue.
+    # Local bridge-watcher polls this file over SSH and replies via Telegram API.
+    stripped = (user_text or "").strip()
+    if stripped.lower().startswith(("@cc", "/cc")):
+        os.makedirs("/root/bridge", exist_ok=True)
+        with open("/root/bridge/queue.jsonl", "a") as f:
+            f.write(json.dumps({
+                "chat_id": update.message.chat_id,
+                "text": stripped,
+                "ts": time.time(),
+            }, ensure_ascii=False) + "\n")
+        await update.message.reply_text("🔗 Delivered to Claude CLI. Reply will arrive shortly.")
+        return
+
     await update.message.chat.send_action("typing")
     try:
         if state["model"] == "gemini" and GEMINI_KEY:
