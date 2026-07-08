@@ -35,6 +35,24 @@ You can:
 Use the bash tool only when the user asks to do something on the server.
 Respond in Korean. Be warm and concise."""
 
+# 쭌(Claude CLI 팀장)의 메모리 인덱스가 로컬 PC에서 주기 동기화됨.
+# 있으면 시스템 프롬프트에 덧붙여 사용자·프로젝트 맥락을 공유한다.
+CONTEXT_FILE = "/root/bridge/context.md"
+
+def build_system() -> str:
+    try:
+        with open(CONTEXT_FILE) as f:
+            ctx = f.read().strip()[:8000]
+    except Exception:
+        ctx = ""
+    if not ctx:
+        return SYSTEM
+    return (SYSTEM
+            + "\n\n# 사용자·프로젝트 컨텍스트 (쭌의 메모리 인덱스, 자동 동기화)\n"
+            + "너는 쭌이 아니다. 실행 작업 지시는 '@cc'로 쭌에게 전달된다. "
+            + "아래는 사용자가 누구이고 무엇을 진행 중인지 파악하기 위한 참고 정보다.\n\n"
+            + ctx)
+
 TOOLS_ANTHROPIC = [{
     "name": "bash",
     "description": "Run a shell command on the production server.",
@@ -72,7 +90,7 @@ def chat_claude(history: list, user_message: str) -> str:
         response = client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=1024,
-            system=SYSTEM,
+            system=build_system(),
             tools=TOOLS_ANTHROPIC,
             messages=messages,
         )
@@ -112,7 +130,7 @@ def chat_gemini(history: list, user_message: str) -> str:
         }]}
         model = genai.GenerativeModel(
             model_name="gemini-1.5-flash",
-            system_instruction=SYSTEM,
+            system_instruction=build_system(),
             tools=[tool_def]
         )
         # Convert neutral history to Gemini format
