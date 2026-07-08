@@ -1653,7 +1653,7 @@ const STATUS_LABEL = {matched:'✅ Matched', unmatched:'❌ Unmatched', pending_
 function fmtAmt(a){ return (a===null||a===undefined) ? '–' : '$' + Number(a).toFixed(2); }
 
 // Foreign-currency display: "₩45,000 → ~$33.10" (falls back to fmtAmt for USD).
-const FX_SYM = {KRW:'₩', INR:'₹', EUR:'€', JPY:'¥'};
+const FX_SYM = {KRW:'₩', INR:'₹', HKD:'HK$', EUR:'€', JPY:'¥'};
 function fmtAmtFx(e, a){
   if(a===null||a===undefined) return '–';
   const cur = e && e.ocr_currency;

@@ -612,8 +612,10 @@ _OCR_PROMPT = (
     '6) currency: the ISO 4217 code of the amounts on the receipt. Infer from '
     'currency symbols, wording and locale: "$"/"USD" -> "USD"; "₩"/"원"/"KRW"/Korean '
     'receipt text -> "KRW"; "₹"/"Rs"/"INR"/Indian receipt (GST, rupees) -> "INR"; '
+    '"HK$"/"HKD"/Hong Kong receipt (Chinese text, HK addresses) -> "HKD"; '
     'other clear signals -> that ISO code (e.g. "EUR", "JPY"). Use "USD" only when '
-    'the receipt is clearly US-based or shows "$" with English/US formatting. '
+    'the receipt is clearly US-based or shows "$" with English/US formatting; a bare '
+    '"$" on a Hong Kong receipt means HKD, not USD. '
     'For each receipt, ALSO return its bounding box in the image as bbox: '
     '[ymin, xmin, ymax, xmax] using a 0-1000 normalized coordinate system '
     '(0=top/left, 1000=bottom/right). '
@@ -665,7 +667,7 @@ def _coerce_currency(v):
     if s in ("NULL", "NONE", "UNKNOWN", ""):
         return None
     aliases = {"₩": "KRW", "원": "KRW", "WON": "KRW", "₹": "INR", "RS": "INR",
-               "RUPEE": "INR", "RUPEES": "INR", "$": "USD", "US$": "USD"}
+               "RUPEE": "INR", "RUPEES": "INR", "$": "USD", "US$": "USD", "HK$": "HKD"}
     s = aliases.get(s, s)
     return s if (len(s) == 3 and s.isalpha()) else None
 
@@ -676,7 +678,7 @@ def _coerce_currency(v):
 
 FX_TOLERANCE = 0.05          # ±5% band around the ECB reference conversion
 _FX_CACHE_FILE = DATA_DIR / "fx_cache.json"
-_FX_FALLBACK = {"KRW": 1510.0, "INR": 94.0, "EUR": 0.86, "JPY": 146.0}  # offline approx (2026-07)
+_FX_FALLBACK = {"KRW": 1510.0, "INR": 94.0, "HKD": 7.8, "EUR": 0.86, "JPY": 146.0}  # offline approx (2026-07; HKD is USD-pegged)
 
 
 def _fx_rate(currency: str, date_str: str = None):
