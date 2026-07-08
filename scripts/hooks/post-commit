@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Auto-record direct git commits as 쭌(W0) team activity.
+# Keeps status.json fresh so session briefing doesn't show 쭌 as "inactive"
+# when work was committed directly (without inbox/dispatch).
+
+STATUS_FILE="/home/jongha_kang/.claude/inbox/status.json"
+
+SUBJECT=$(git log -1 --format='%s' 2>/dev/null)
+HASH=$(git log -1 --format='%h' 2>/dev/null)
+[ -z "$HASH" ] && exit 0
+
+python3 - "$STATUS_FILE" "$HASH" "$SUBJECT" <<'PY' 2>/dev/null || true
+import json, os, sys
+from datetime import datetime, timezone
+
+path, h, subject = sys.argv[1], sys.argv[2], sys.argv[3]
+try:
+    with open(path) as f:
+        status = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError):
+    status = {}
+
+status["W0"] = {
+    "status": "active",
+    "task": f"commit {h}: {subject}",
+    "updated_at": datetime.now(timezone.utc).astimezone().isoformat(),
+}
+
+os.makedirs(os.path.dirname(path), exist_ok=True)
+with open(path, "w") as f:
+    json.dump(status, f, ensure_ascii=False, indent=2)
+PY
+
+exit 0

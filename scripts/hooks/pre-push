@@ -1,0 +1,36 @@
+#!/bin/bash
+# Pre-push hook: unit tests + smoke test must pass before push is allowed.
+
+cd "$(dirname "$0")/../.."
+
+# 1. Unit tests (service contract + per-app tests)
+if [ -d tests ]; then
+    echo "🧪 Running unit tests (pytest)..."
+    if ! python3 -m pytest tests/ -q; then
+        echo ""
+        echo "❌ Unit tests FAILED — push blocked."
+        echo "   Fix the failing tests above, then try again."
+        exit 1
+    fi
+    echo "✅ Unit tests passed."
+fi
+
+# 2. Smoke test (live HTTP)
+echo "🔥 Running smoke test before push..."
+
+# Ensure server is running
+if ! curl -sf http://localhost:8080/health > /dev/null 2>&1; then
+    echo "⚠️  Local server not running. Starting..."
+    bash scripts/dev-restart.sh
+fi
+
+# Run smoke test
+if bash scripts/smoke-test.sh http://localhost:8080; then
+    echo "✅ Smoke test passed — push allowed."
+    exit 0
+else
+    echo ""
+    echo "❌ Smoke test FAILED — push blocked."
+    echo "   Fix the issues above, then try again."
+    exit 1
+fi
