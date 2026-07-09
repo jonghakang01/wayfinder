@@ -2588,10 +2588,25 @@ function _imgLbKey(e){ if(e.key==='Escape') closeImgLb(); }
       var eid = e.id;
       var amtVal = (e.ocr_amount != null) ? e.ocr_amount : '';
       var hwVal  = (e.ocr_handwritten_amount != null) ? e.ocr_handwritten_amount : '';
+      var cur = e.ocr_currency;
+      var isFx = cur && cur !== 'USD';
+      var curLabel = isFx ? cur : '$';
+      var curChip = isFx
+        ? '<span style="font-size:.62rem;font-weight:700;padding:2px 6px;border-radius:8px;background:rgba(59,130,246,.15);color:#3b82f6">' + cur + '</span>'
+        : '';
+      var fxRow = '';
+      if (isFx && e.ocr_amount != null) {
+        var rateTxt = (e.fx_rate != null)
+          ? ' <span style="color:var(--text-muted);font-weight:400">(1 USD ≈ ' + (FX_SYM[cur] || '') + Number(e.fx_rate).toLocaleString(undefined, {maximumFractionDigits: 2}) + ')</span>'
+          : ' <span style="color:var(--text-muted);font-weight:400">환율 조회 실패</span>';
+        fxRow = '<div style="font-size:.76rem;padding:5px 8px;border-radius:4px;'
+          + 'background:rgba(245,158,11,.12);color:#f59e0b;font-weight:600">💱 '
+          + fmtAmtFx(e, e.ocr_amount) + rateTxt + '</div>';
+      }
       return '<div class="ocr-card" data-id="' + eid + '" style="border:1px solid var(--border);border-radius:var(--radius-md);overflow:hidden;background:var(--surface-2)">'
         + '<label style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--border);cursor:pointer;background:var(--surface)">'
         + '<input type="checkbox" class="ocr-cb" data-id="' + eid + '" ' + (ocrOk ? 'checked' : '') + ' style="width:15px;height:15px;accent-color:var(--accent);cursor:pointer">'
-        + '<span style="font-size:.8rem;font-weight:600">Include</span>' + badge
+        + '<span style="font-size:.8rem;font-weight:600">Include</span>' + badge + curChip
         + '</label>'
         + '<div style="background:#000;display:flex;align-items:center;justify-content:center;min-height:120px">' + imgHtml + '</div>'
         + '<div style="padding:10px;display:flex;flex-direction:column;gap:7px">'
@@ -2601,11 +2616,12 @@ function _imgLbKey(e){ if(e.key==='Escape') closeImgLb(); }
         + '<div><label style="' + LABEL_STYLE + '">Merchant</label>'
         +   '<input class="ocr-field" data-field="ocr_merchant" data-id="' + eid + '" type="text" value="' + ((e.ocr_merchant || '')).replace(/"/g,'&quot;') + '" placeholder="–" style="' + INPUT_STYLE + '"></div>'
         + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">'
-        +   '<div><label style="' + LABEL_STYLE + '">Printed $</label>'
+        +   '<div><label style="' + LABEL_STYLE + '">Printed ' + curLabel + '</label>'
         +     '<input class="ocr-field" data-field="ocr_amount" data-id="' + eid + '" type="number" step="0.01" value="' + amtVal + '" placeholder="–" style="' + INPUT_STYLE + '"></div>'
-        +   '<div><label style="' + LABEL_STYLE + '">Handwritten $</label>'
+        +   '<div><label style="' + LABEL_STYLE + '">Handwritten ' + curLabel + '</label>'
         +     '<input class="ocr-field" data-field="ocr_handwritten_amount" data-id="' + eid + '" type="number" step="0.01" value="' + hwVal + '" placeholder="–" style="' + INPUT_STYLE + '"></div>'
         + '</div>'
+        + fxRow
         + '</div></div>';
     }).join('');
   }
@@ -2626,7 +2642,7 @@ function _imgLbKey(e){ if(e.key==='Escape') closeImgLb(); }
   };
 
   function clearOcrBadge() {
-    var badge = document.querySelector('a[href="/cardconv/receipts/review"] .tab-badge');
+    var badge = document.querySelector('a[href="/cardconv/ledger"] .tab-badge[style*="f59e0b"]');
     if (badge) badge.remove();
   }
 
