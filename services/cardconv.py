@@ -92,6 +92,8 @@ def handle(method, path, body, ctx=None):
         return _handle_drive_sync(user)
     if method == "GET" and path == "/cardconv/drive/sync/status":
         return _handle_drive_sync_status(user, body)  # GET passes query as body
+    if method == "GET" and path == "/cardconv/drive/newcount":
+        return _handle_drive_newcount(user)
 
     # Receipt upload
     if method == "POST" and path == "/cardconv/receipts/upload":

@@ -313,6 +313,11 @@ def _register_section(user: str) -> str:
         'Links to your Wayfinder/Receipts/ folder in Google Drive. '
         'After connecting, click Sync to automatically OCR all receipts in that folder.')
     return f'''
+  <div id="driveNewBanner" style="display:none;align-items:center;gap:10px;padding:10px 14px;margin-bottom:14px;border:1px solid rgba(245,158,11,.35);background:rgba(245,158,11,.08);border-radius:var(--radius-md)">
+    <span style="font-size:1.1rem">🧾</span>
+    <span style="font-size:.85rem;color:var(--text)">New receipts in Drive: <b id="driveNewCount" style="color:#f59e0b">0</b> file(s) waiting to be synced</span>
+    <button class="btn btn-primary btn-sm" style="margin-left:auto;flex-shrink:0" onclick="startDriveSync(this)">🔄 Sync now</button>
+  </div>
   <div class="notepad-card" style="margin-bottom:20px">
     <div class="notepad-header">
       <span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--slate-400)">Google Drive</span>{drive_tip}
@@ -2488,7 +2493,9 @@ function pollSync(jobId) {
         if (d.status === 'running') { pollSync(jobId); return; }
         document.getElementById('syncOverlay').style.display = 'none';
         if (d.status === 'error') { alert('Sync error: ' + (d.error || 'unknown')); load(); return; }
-        // done
+        // done — pending files are now staged, banner no longer applies
+        var nb = document.getElementById('driveNewBanner');
+        if (nb) nb.style.display = 'none';
         if (d.staged > 0) {
           openOcrModal();
         } else {
@@ -2503,6 +2510,20 @@ function syncFail(msg) {
   document.getElementById('syncOverlay').style.display = 'none';
   alert('Sync failed: ' + msg);
 }
+
+// New-receipts banner: cheap Drive listing on page load (count only, no OCR).
+(function() {
+  var banner = document.getElementById('driveNewBanner');
+  if (!banner) return;
+  fetch('/cardconv/drive/newcount')
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (!d.connected || !d.new) return;
+      document.getElementById('driveNewCount').textContent = d.new;
+      banner.style.display = 'flex';
+    })
+    .catch(function() {});
+})();
 </script>
 
 <!-- Image Lightbox -->

@@ -2230,6 +2230,41 @@ import threading as _threading, uuid as _uuid
 
 _sync_jobs: dict = {}   # job_id → {"status": "running"|"done"|"error", "staged": int, "error": str}
 
+def _list_new_drive_files(username: str, service=None):
+    """Drive files in Receipts not yet OCR-done in ledger nor staged (listing only,
+    no download/OCR). None if Drive is not connected."""
+    service = service or _get_drive_service(username)
+    if not service:
+        return None
+    receipts_id = _get_receipts_folder_id(service, username)
+    results = service.files().list(
+        q=(f"'{receipts_id}' in parents "
+           f"and trashed=false and mimeType!='application/vnd.google-apps.folder'"),
+        fields="files(id,name,mimeType,webViewLink)"
+    ).execute()
+    existing = _load_receipts(username)
+    done_fids = {r.get('file_id') for r in existing
+                 if (r.get('multi_ocr') and r.get('ocr_amount') is not None)
+                 or r.get('matched')}
+    # Skip files already in the staging queue.
+    staged_fids = {e.get("file_id") for e in _load_ocr_staging(username).get("entries", [])}
+    skip_fids = done_fids | staged_fids
+    supported = {'image/jpeg', 'image/png', 'application/pdf', 'image/gif', 'image/webp'}
+    return [f for f in results.get('files', [])
+            if f.get('mimeType', '') in supported and f.get('id') not in skip_fids]
+
+
+def _handle_drive_newcount(username: str):
+    """GET /cardconv/drive/newcount — pending Drive file count for the Ledger banner."""
+    try:
+        files = _list_new_drive_files(username)
+    except Exception:
+        files = None
+    if files is None:
+        return ("json", {"connected": False, "new": 0})
+    return ("json", {"connected": True, "new": len(files)})
+
+
 def _do_drive_sync_work(username: str, job_id: str):
     """Background worker: scans Drive, OCRs new files, stages for review."""
     try:
@@ -2238,35 +2273,16 @@ def _do_drive_sync_work(username: str, job_id: str):
             _sync_jobs[job_id] = {"status": "error", "staged": 0, "error": "Drive not connected"}
             return
 
-        receipts_id = _get_receipts_folder_id(service, username)
-        results = service.files().list(
-            q=(f"'{receipts_id}' in parents "
-               f"and trashed=false and mimeType!='application/vnd.google-apps.folder'"),
-            fields="files(id,name,mimeType,webViewLink)"
-        ).execute()
-        drive_files = results.get('files', [])
-
-        existing = _load_receipts(username)
-        done_fids = {r.get('file_id') for r in existing
-                     if (r.get('multi_ocr') and r.get('ocr_amount') is not None)
-                     or r.get('matched')}
-        # Skip files already in the staging queue.
+        new_files = _list_new_drive_files(username, service)
         staging = _load_ocr_staging(username)
-        staged_fids = {e.get("file_id") for e in staging.get("entries", [])}
-        skip_fids = done_fids | staged_fids
-        supported = {'image/jpeg', 'image/png', 'application/pdf', 'image/gif', 'image/webp'}
 
         new_staged = []
         now_disp = datetime.now().strftime("%Y-%m-%d %H:%M")
         now_iso  = datetime.now().isoformat()
 
-        for f in drive_files:
+        for f in new_files:
             fid = f.get('id')
             mime = f.get('mimeType', '')
-            if mime not in supported:
-                continue
-            if fid in skip_fids:
-                continue
             content  = service.files().get_media(fileId=fid).execute()
             ocr_list = _ocr_receipt_auto(content, mime) or [{}]
             url      = f.get('webViewLink') or f'https://drive.google.com/file/d/{fid}/view'
