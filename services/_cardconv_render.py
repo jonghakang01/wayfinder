@@ -1173,6 +1173,20 @@ def _render_ocr_staging_review(user: str) -> str:
     def money(a):
         return f'${a:,.2f}' if isinstance(a, (int, float)) else (_esc(str(a)) if a else '–')
 
+    _FX_SYM = {"KRW": "₩", "INR": "₹", "HKD": "HK$", "EUR": "€", "JPY": "¥"}
+
+    def money_fx(e, a):
+        """Foreign receipts show the conversion up-front: '₩45,000 → ~$29.72'."""
+        if not isinstance(a, (int, float)):
+            return _esc(str(a)) if a else '–'
+        cur = e.get("ocr_currency")
+        if not cur or cur == "USD":
+            return f'${a:,.2f}'
+        sym  = _FX_SYM.get(cur, cur + ' ')
+        orig = f'{sym}{a:,.0f}' if cur in ("KRW", "JPY") else f'{sym}{a:,.2f}'
+        usd  = e.get("usd_estimate")
+        return f'{orig} → ~${usd:,.2f}' if isinstance(usd, (int, float)) else orig
+
     cards = []
     for e in entries:
         eid     = _esc(e.get("id", ""))
@@ -1181,9 +1195,21 @@ def _render_ocr_staging_review(user: str) -> str:
         fn      = _esc(e.get("filename", ""))
         date_v  = _esc(e.get("ocr_date") or '–')
         merch_v = _esc(e.get("ocr_merchant") or '–')
-        amt_v   = money(e.get("ocr_amount"))
-        hw_v    = money(e.get("ocr_handwritten_amount"))
+        amt_v   = money_fx(e, e.get("ocr_amount"))
+        hw_v    = money_fx(e, e.get("ocr_handwritten_amount"))
         status  = _esc(e.get("ocr_status", ""))
+        # Foreign currency: FX badge + rate row so the conversion is visible
+        # before the user confirms the staged receipts into the Ledger.
+        fx_cur  = e.get("ocr_currency")
+        fx_rate = e.get("fx_rate")
+        if fx_cur and fx_cur != "USD":
+            fx_badge = f'<span class="stg-badge fx">{_esc(fx_cur)}</span>'
+            rate_txt = (f'1 USD ≈ {_FX_SYM.get(fx_cur, "")}{fx_rate:,.2f} (ECB, {date_v})'
+                        if isinstance(fx_rate, (int, float)) else '환율 조회 실패 — rerun OCR')
+            fx_row = (f'<div class="stg-row"><span class="stg-lbl">FX</span>'
+                      f'<span class="stg-val" style="color:var(--warn)">{rate_txt}</span></div>')
+        else:
+            fx_badge, fx_row = '', ''
 
         img_html = (f'<img src="{proxy}" class="stg-thumb" loading="lazy" '
                     f'onerror="this.style.display=\'none\'">'
@@ -1201,11 +1227,12 @@ def _render_ocr_staging_review(user: str) -> str:
   </label>
   <div class="stg-img-wrap">{img_html}</div>
   <div class="stg-info">
-    <div class="stg-filename">{fn} {badge}</div>
+    <div class="stg-filename">{fn} {badge} {fx_badge}</div>
     <div class="stg-row"><span class="stg-lbl">Date</span><span class="stg-val">{date_v}</span></div>
     <div class="stg-row"><span class="stg-lbl">Merchant</span><span class="stg-val">{merch_v}</span></div>
     <div class="stg-row"><span class="stg-lbl">Printed</span><span class="stg-val">{amt_v}</span></div>
     <div class="stg-row"><span class="stg-lbl">Handwritten</span><span class="stg-val">{hw_v}</span></div>
+    {fx_row}
   </div>
 </div>''')
 
@@ -1245,6 +1272,7 @@ def _render_ocr_staging_review(user: str) -> str:
 .stg-val{{font-weight:600}}
 .stg-badge{{font-size:.65rem;font-weight:700;padding:2px 7px;border-radius:10px}}
 .stg-badge.ok{{background:rgba(34,197,94,.15);color:#22c55e}}
+.stg-badge.fx{{background:rgba(251,191,36,.15);color:#fbbf24}}
 .stg-badge.warn{{background:rgba(245,158,11,.15);color:#f59e0b}}
 .stg-empty{{text-align:center;color:var(--text-muted);padding:60px 20px}}
 </style>
