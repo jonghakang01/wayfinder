@@ -36,6 +36,8 @@ def handle(method, path, body, ctx=None):
         return _handle_review_reason(user, body)
     if method == "POST" and path == "/cardconv/review/match":
         return _handle_review_manual_match(user, body)
+    if method == "POST" and path == "/cardconv/review/complete":
+        return _handle_review_complete(user, body)
     if method == "GET" and path == "/cardconv/review/download":
         return _handle_review_download(user, body)  # GET passes query dict as body
 

@@ -522,26 +522,6 @@ def _tx_key(row: dict):
     )
 
 
-def _prior_tx_counter(username: str, exclude_id: str = None) -> Counter:
-    """Multiset of transaction keys across previously uploaded CSVs."""
-    counts = Counter()
-    d = _uploads_dir(username)
-    for entry in _load_uploads(username):
-        if exclude_id and entry.get('id') == exclude_id:
-            continue
-        p = d / entry.get('stored_name', '')
-        if not p.exists():
-            continue
-        try:
-            reader = csv.DictReader(
-                io.TextIOWrapper(io.BytesIO(p.read_bytes()), encoding='utf-8-sig', newline=''))
-            for row in reader:
-                counts[_tx_key(row)] += 1
-        except Exception:
-            continue  # unreadable CSV must not block conversion
-    return counts
-
-
 def _dedup_rows(rows: list, prior: Counter) -> tuple:
     """(kept_rows, skipped_count). Multiset semantics: N prior occurrences
     absorb at most N new ones, so legitimate same-day/same-amount repeats
@@ -558,6 +538,312 @@ def _dedup_rows(rows: list, prior: Counter) -> tuple:
         else:
             kept.append(r)
     return kept, skipped
+
+
+# ── Transaction pool ──────────────────────────────────────────────────────────
+# Uploaded CSVs are merged into one persistent pool (duplicates ingested once).
+# Review shows every "open" transaction across uploads until the user marks it
+# completed; the xlsx download is built from the open set on demand.
+
+def _tx_pool_file(username: str) -> Path:
+    return DATA_DIR / f"transactions_{username}.json"
+
+
+def _save_tx_pool(username: str, pool: dict):
+    _ensure_dirs()
+    _tx_pool_file(username).write_text(json.dumps(pool, ensure_ascii=False, indent=2))
+
+
+def _parse_member_rows(csv_bytes: bytes, username: str) -> list:
+    """CSV rows filtered to the user's card member names."""
+    target = set(_get_card_member_names(username))
+    reader = csv.DictReader(io.TextIOWrapper(io.BytesIO(csv_bytes), encoding='utf-8-sig', newline=''))
+    return [r for r in reader if r.get("Card Member Name", "").strip().upper() in target]
+
+
+def _row_to_entry(row: dict, rules: dict, source: str) -> dict:
+    merchant = row.get("Merchant Name", "").strip()
+    dba      = row.get("Merchant Doing Business As", "").strip()
+    vendor   = dba if (dba and dba != merchant) else merchant
+    try:
+        amount = float(row.get("Amount", 0))
+    except ValueError:
+        amount = 0.0
+    inv_dt = _parse_date(row.get("Date", ""))
+    gl, ser, purpose = _classify(vendor, rules)
+    if gl is None:
+        gl, ser, purpose = _classify(merchant, rules)
+    kw_unmatched = gl is None
+    if gl is None:
+        gl, ser, purpose = 53410177, "160", "Coffee, Snack and meal"
+    return {
+        "id":           "tx_" + uuid.uuid4().hex[:8],
+        "status":       "open",
+        "key":          list(_tx_key(row)),
+        "date":         inv_dt.strftime("%Y-%m-%d") if inv_dt else None,
+        "merchant":     vendor,
+        "amount":       round(amount, 2),
+        "gl":           gl,
+        "ser":          ser,
+        "purpose":      purpose,
+        "kw_unmatched": kw_unmatched,
+        "account":      row.get("Account Number", ""),
+        "member":       row.get("Card Member Name", ""),
+        "matched":      False,
+        "receipt":      None,
+        "loss_reason":  "",
+        "source":       source,
+        "added_at":     datetime.now().isoformat(),
+        "completed_at": None,
+    }
+
+
+def _load_tx_pool(username: str) -> dict:
+    """Load the pool; on first use migrate from the CSVs stored in History.
+
+    Migration: transactions from every upload except the most recent start as
+    completed (assumed already settled); the most recent upload starts open and
+    inherits matched/receipt info from the legacy review snapshot."""
+    f = _tx_pool_file(username)
+    if f.exists():
+        try:
+            return json.loads(f.read_text())
+        except Exception:
+            return {"entries": []}
+
+    pool = {"entries": [], "migrated_at": datetime.now().isoformat()}
+    uploads = _load_uploads(username)  # newest first
+    if uploads:
+        rules = _load_kw()
+        seen = Counter()
+        newest_id = uploads[0].get("id")
+        d = _uploads_dir(username)
+        for up in reversed(uploads):  # oldest → newest
+            p = d / up.get("stored_name", "")
+            if not p.exists():
+                continue
+            try:
+                rows = _parse_member_rows(p.read_bytes(), username)
+            except Exception:
+                continue
+            fresh, _ = _dedup_rows(rows, seen)
+            for row in fresh:
+                seen[_tx_key(row)] += 1
+                e = _row_to_entry(row, rules, up.get("filename", ""))
+                if up.get("id") != newest_id:
+                    e["status"] = "completed"
+                    e["completed_at"] = pool["migrated_at"]
+                pool["entries"].append(e)
+
+        # Enrich the open batch from the legacy review snapshot (match info).
+        legacy = {}
+        for r in _load_review(username).get("rows", []):
+            legacy.setdefault((r.get("date"), r.get("amount"), r.get("merchant")), []).append(r)
+        for e in pool["entries"]:
+            if e["status"] != "open":
+                continue
+            cands = legacy.get((e["date"], e["amount"], e["merchant"]))
+            if cands:
+                r = cands.pop(0)
+                e["matched"] = bool(r.get("matched"))
+                e["receipt"] = r.get("receipt")
+                e["loss_reason"] = r.get("loss_reason", "")
+    _save_tx_pool(username, pool)
+    return pool
+
+
+def _build_receipt_index(receipts: list, username: str):
+    """(receipts_map, fx_receipts, dirty) — same matching inputs convert used."""
+    receipts_map, fx_receipts, dirty = {}, [], False
+    for r in receipts:
+        if r.get("completed"):
+            continue
+        rdate = r.get("ocr_date")
+        if rdate == "YYYY-MM-DD":
+            rdate = None
+        hw = r.get("ocr_handwritten_amount")
+        pr = r.get("ocr_printed_amount") or r.get("ocr_amount")
+        ramount = hw if hw is not None else pr
+        cur = r.get("ocr_currency")
+        if cur and cur != "USD":
+            usd_est = r.get("usd_estimate")
+            if usd_est is None:
+                usd_est, fx = _fx_usd_estimate(ramount, cur, rdate)
+                if usd_est is not None:
+                    r["usd_estimate"], r["fx_rate"] = usd_est, fx
+                    dirty = True
+            if usd_est is not None:
+                fx_receipts.append((rdate, usd_est, r))
+        elif ramount is not None:
+            try:
+                receipts_map[(rdate, round(float(ramount), 2))] = r
+            except (ValueError, TypeError):
+                pass
+    return receipts_map, fx_receipts, dirty
+
+
+def _find_receipt_match(inv_date_str, amt_rounded, receipts_map, fx_receipts):
+    match = receipts_map.get((inv_date_str, amt_rounded))
+    if match:
+        return match
+    for (rdate, ramt), r in receipts_map.items():
+        if abs(ramt - amt_rounded) > 0.01:
+            continue
+        if rdate is None or rdate == inv_date_str:
+            return r
+        try:  # ±1 day posting-date skew
+            rd  = date.fromisoformat(rdate)
+            id_ = date.fromisoformat(inv_date_str) if inv_date_str else None
+            if id_ is not None and abs((rd - id_).days) <= 1:
+                return r
+        except Exception:
+            pass
+    for rdate, usd_est, r in fx_receipts:
+        # Foreign receipts: ±FX_TOLERANCE USD band, ±3d (late intl posting).
+        if r.get('matched') or not usd_est:
+            continue
+        if abs(amt_rounded - usd_est) > usd_est * FX_TOLERANCE:
+            continue
+        if rdate is None or rdate == inv_date_str:
+            return r
+        try:
+            rd  = date.fromisoformat(rdate)
+            id_ = date.fromisoformat(inv_date_str) if inv_date_str else None
+            if id_ is not None and abs((rd - id_).days) <= 3:
+                return r
+        except Exception:
+            pass
+    return None
+
+
+def _apply_receipt_match(entry: dict, receipt: dict, receipts: list):
+    """Flag the ledger receipt + attach match info to the pool entry."""
+    if not receipt.get('matched'):
+        receipt['matched'] = True
+        receipt['match_status'] = 'matched'
+        receipt['matched_at'] = datetime.now().isoformat()
+        receipt['matched_transaction'] = {
+            'date': entry["date"], 'amount': entry["amount"], 'vendor': entry["merchant"],
+        }
+        if not receipt.get('card_brand'):
+            receipt['card_brand'] = 'amex'  # CSV = AMEX statement
+        if receipt.get('ocr_date') in (None, '', 'unknown') and entry["date"]:
+            receipt['ocr_date_original'] = receipt.get('ocr_date')
+            receipt['ocr_date'] = entry["date"]
+    mfid = receipt.get("file_id")
+    siblings = [
+        {"id": s.get("id"), "ocr_bbox": s.get("ocr_bbox")}
+        for s in receipts
+        if mfid and s.get("file_id") == mfid and s.get("ocr_bbox")
+    ]
+    entry["matched"] = True
+    entry["receipt"] = {
+        "file_id":      mfid,
+        "id":           receipt.get("id"),
+        "filename":     receipt.get("filename"),
+        "drive_url":    receipt.get("drive_url"),
+        "ocr_amount":   receipt.get("ocr_amount"),
+        "ocr_date":     receipt.get("ocr_date"),
+        "ocr_merchant": receipt.get("ocr_merchant"),
+        "ocr_bbox":     receipt.get("ocr_bbox"),
+        "siblings":     siblings if len(siblings) > 1 else [],
+    }
+
+
+def _ingest_csv(username: str, csv_bytes: bytes, filename: str) -> dict:
+    """Merge a CSV into the pool. Returns {"added", "dup_skipped", "matched"}."""
+    pool = _load_tx_pool(username)
+    rows = _parse_member_rows(csv_bytes, username)
+    existing = Counter(tuple(e.get("key", [])) for e in pool["entries"])
+    fresh, dup_skipped = _dedup_rows(rows, existing)
+
+    rules = _load_kw()
+    receipts = _load_receipts(username)
+    receipts_map, fx_receipts, dirty = _build_receipt_index(receipts, username)
+
+    added, matched = 0, 0
+    for row in fresh:
+        e = _row_to_entry(row, rules, filename)
+        r = _find_receipt_match(e["date"], e["amount"], receipts_map, fx_receipts)
+        if r is not None:
+            _apply_receipt_match(e, r, receipts)
+            matched += 1
+            dirty = True
+        pool["entries"].append(e)
+        added += 1
+
+    pool["last_ingest"] = {
+        "filename": filename, "added": added, "dup_skipped": dup_skipped,
+        "at": datetime.now().isoformat(),
+    }
+    _save_tx_pool(username, pool)
+    if dirty:
+        _save_receipts(username, receipts)
+    return {"added": added, "dup_skipped": dup_skipped, "matched": matched}
+
+
+def _build_xlsx_from_entries(entries: list) -> tuple:
+    """(xlsx_bytes, out_filename) from pool entries via the SAP template."""
+    if TEMPLATE.exists():
+        template_path = TEMPLATE
+    elif TEMPLATE_FALLBACK.exists():
+        template_path = TEMPLATE_FALLBACK
+    else:
+        raise FileNotFoundError("Template file not found. Please upload 'for upload.xlsx' to ~/.appdata/cardconv/template.xlsx")
+
+    today  = date.today()
+    out_fn = f"for_upload_{today.strftime('%Y-%m-%d')}.xlsx"
+    wb = openpyxl.load_workbook(template_path)
+    ws = wb["sheetMst"]
+    start = 2
+    while ws.cell(start, 1).value is not None:
+        start += 1
+    posting_dt = datetime(today.year, today.month, today.day)
+
+    for e in entries:
+        inv_dt = None
+        if e.get("date"):
+            try:
+                d_ = date.fromisoformat(e["date"])
+                inv_dt = datetime(d_.year, d_.month, d_.day)
+            except ValueError:
+                pass
+        masked, supp = _fmt_card(e.get("account", ""))
+        last, first  = _name_parts(e.get("member", ""))
+        amount = e.get("amount", 0)
+
+        ws.cell(start,  1).value = FIXED["receipt_type"]
+        ws.cell(start,  2).value = FIXED["employee_id"]
+        ws.cell(start,  3).value = FIXED["payee"]
+        ws.cell(start,  5).value = inv_dt
+        ws.cell(start,  6).value = FIXED["domestic"]
+        ws.cell(start,  7).value = e.get("merchant", "")
+        ws.cell(start,  8).value = posting_dt
+        ws.cell(start,  9).value = e.get("gl")
+        ws.cell(start, 10).value = e.get("ser")
+        ws.cell(start, 11).value = FIXED["currency"]
+        ws.cell(start, 12).value = FIXED["tax_code"]
+        ws.cell(start, 14).value = amount
+        ws.cell(start, 15).value = FIXED["cost_center"]
+        ws.cell(start, 18).value = e.get("purpose")
+        ws.cell(start, 20).value = masked
+        ws.cell(start, 21).value = last
+        ws.cell(start, 22).value = first
+        ws.cell(start, 23).value = supp
+        ws.cell(start, 26).value = amount
+        rc = e.get("receipt") or {}
+        if e.get("matched") and rc:
+            fn, url = rc.get('filename', ''), rc.get('drive_url', '')
+            ws.cell(start, 27).value = f"✅ {fn} ({url})" if url else f"✅ {fn}"
+        else:
+            ws.cell(start, 27).value = "❌ Missing"
+        start += 1
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    xlsx_bytes = buf.getvalue()
+    (OUT_DIR / out_fn).write_bytes(xlsx_bytes)
+    return xlsx_bytes, out_fn
 
 
 # ── Drive OAuth helpers ───────────────────────────────────────────────────────
@@ -1024,269 +1310,6 @@ def _parse_date(s: str):
         except ValueError:
             pass
     return None
-
-
-def convert(csv_bytes: bytes, filename: str, username: str = None,
-            exclude_upload_id: str = None) -> tuple:
-    """Returns (xlsx_bytes, out_filename, total_rows, unmatched_count, dup_skipped).
-
-    exclude_upload_id: skip that History entry when building the duplicate
-    filter — required for re-runs so a CSV isn't deduped against itself."""
-    rules  = _load_kw()
-    today  = date.today()
-    m      = re.search(r'(\d{4}-\d{2}-\d{2})', filename)
-    tag    = m.group(1) if m else today.strftime("%Y-%m-%d")
-    out_fn = f"for_upload_{tag}.xlsx"
-
-    if TEMPLATE.exists():
-        template_path = TEMPLATE
-    elif TEMPLATE_FALLBACK.exists():
-        template_path = TEMPLATE_FALLBACK
-    else:
-        raise FileNotFoundError("Template file not found. Please upload 'for upload.xlsx' to ~/.appdata/cardconv/template.xlsx")
-
-    target_names = set(_get_card_member_names(username))
-    reader = csv.DictReader(io.TextIOWrapper(io.BytesIO(csv_bytes), encoding='utf-8-sig', newline=''))
-    rows   = [r for r in reader if r.get("Card Member Name","").strip().upper() in target_names]
-
-    # Drop transactions already converted in a previous upload (overlapping periods).
-    dup_skipped = 0
-    if username:
-        rows, dup_skipped = _dedup_rows(rows, _prior_tx_counter(username, exclude_id=exclude_upload_id))
-
-    wb = openpyxl.load_workbook(template_path)
-    ws = wb["sheetMst"]
-
-    start = 2
-    while ws.cell(start, 1).value is not None:
-        start += 1
-
-    posting_dt = datetime(today.year, today.month, today.day)
-    unmatched  = 0
-    review_rows     = []   # per-transaction rows for the Review page
-    receipt_matched = 0    # transactions with a matched receipt
-
-    # Build receipt lookup: (date_str, rounded_amount) → receipt record
-    receipts      = []
-    receipts_map  = {}
-    fx_receipts   = []   # foreign-currency receipts: (date_str, usd_estimate, record)
-    receipts_dirty = False
-    if username:
-        receipts = _load_receipts(username)
-        for r in receipts:
-            if r.get("completed"):
-                continue  # completed receipts are archived — excluded from mapping
-            rdate = r.get("ocr_date")
-            if rdate == "YYYY-MM-DD":
-                rdate = None
-            # Handwritten amount takes priority as the final match target.
-            hw = r.get("ocr_handwritten_amount")
-            pr = r.get("ocr_printed_amount") or r.get("ocr_amount")
-            ramount = hw if hw is not None else pr
-            cur = r.get("ocr_currency")
-            if cur and cur != "USD":
-                # Foreign receipt: match on the USD estimate with a ±FX_TOLERANCE
-                # band (card settlement rate differs from the ECB reference).
-                usd_est = r.get("usd_estimate")
-                if usd_est is None:
-                    usd_est, fx = _fx_usd_estimate(ramount, cur, rdate)
-                    if usd_est is not None:
-                        r["usd_estimate"], r["fx_rate"] = usd_est, fx
-                        receipts_dirty = True
-                if usd_est is not None:
-                    fx_receipts.append((rdate, usd_est, r))
-            elif ramount is not None:
-                try:
-                    key = (rdate, round(float(ramount), 2))
-                    receipts_map[key] = r
-                except (ValueError, TypeError):
-                    pass
-
-    for row in rows:
-        merchant = row.get("Merchant Name", "").strip()
-        dba      = row.get("Merchant Doing Business As", "").strip()
-        vendor   = dba if (dba and dba != merchant) else merchant
-        try:
-            amount = float(row.get("Amount", 0))
-        except ValueError:
-            amount = 0.0
-        inv_dt       = _parse_date(row.get("Date", ""))
-        masked, supp = _fmt_card(row.get("Account Number", ""))
-        last, first  = _name_parts(row.get("Card Member Name", ""))
-
-        gl, ser, purpose = _classify(vendor, rules)
-        if gl is None:
-            gl, ser, purpose = _classify(merchant, rules)
-        if gl is None:
-            unmatched += 1
-            gl, ser, purpose = 53410177, "160", "Coffee, Snack and meal"
-
-        ws.cell(start,  1).value = FIXED["receipt_type"]
-        ws.cell(start,  2).value = FIXED["employee_id"]
-        ws.cell(start,  3).value = FIXED["payee"]
-        ws.cell(start,  4).value = None
-        ws.cell(start,  5).value = inv_dt
-        ws.cell(start,  6).value = FIXED["domestic"]
-        ws.cell(start,  7).value = vendor
-        ws.cell(start,  8).value = posting_dt
-        ws.cell(start,  9).value = gl
-        ws.cell(start, 10).value = ser
-        ws.cell(start, 11).value = FIXED["currency"]
-        ws.cell(start, 12).value = FIXED["tax_code"]
-        ws.cell(start, 13).value = None
-        ws.cell(start, 14).value = amount
-        ws.cell(start, 15).value = FIXED["cost_center"]
-        ws.cell(start, 16).value = None
-        ws.cell(start, 17).value = None
-        ws.cell(start, 18).value = purpose
-        ws.cell(start, 19).value = None
-        ws.cell(start, 20).value = masked
-        ws.cell(start, 21).value = last
-        ws.cell(start, 22).value = first
-        ws.cell(start, 23).value = supp
-        ws.cell(start, 24).value = None
-        ws.cell(start, 25).value = None
-        ws.cell(start, 26).value = amount
-
-        # Receipt match in column 27
-        inv_date_str = inv_dt.strftime("%Y-%m-%d") if inv_dt else None
-        amt_rounded  = round(amount, 2)
-        receipt_match = None
-        if receipts_map or fx_receipts:
-            receipt_match = receipts_map.get((inv_date_str, amt_rounded))
-            if not receipt_match:
-                for (rdate, ramt), r in receipts_map.items():
-                    amt_match = abs(ramt - amt_rounded) <= 0.01
-                    if not amt_match:
-                        continue
-                    if rdate is None:
-                        date_match = True
-                    elif rdate == inv_date_str:
-                        date_match = True
-                    else:
-                        # Allow ±1 day for card posting date vs transaction date skew
-                        try:
-                            from datetime import timedelta
-                            rd = date.fromisoformat(rdate)
-                            id_ = date.fromisoformat(inv_date_str) if inv_date_str else None
-                            date_match = id_ is not None and abs((rd - id_).days) <= 1
-                        except Exception:
-                            date_match = False
-                    if date_match:
-                        receipt_match = r
-                        break
-            if not receipt_match and fx_receipts:
-                # Foreign-currency receipts (KRW/INR …): match when the USD
-                # statement amount falls within ±FX_TOLERANCE of the receipt's
-                # USD estimate. Card settlement rate ≠ ECB reference, and
-                # international transactions can post late → date window ±3d.
-                for rdate, usd_est, r in fx_receipts:
-                    if r.get('matched') or not usd_est:
-                        continue
-                    if abs(amt_rounded - usd_est) > usd_est * FX_TOLERANCE:
-                        continue
-                    if rdate is None or rdate == inv_date_str:
-                        date_match = True
-                    else:
-                        try:
-                            rd  = date.fromisoformat(rdate)
-                            id_ = date.fromisoformat(inv_date_str) if inv_date_str else None
-                            date_match = id_ is not None and abs((rd - id_).days) <= 3
-                        except Exception:
-                            date_match = False
-                    if date_match:
-                        receipt_match = r
-                        break
-            if receipt_match:
-                fn  = receipt_match.get('filename', '')
-                url = receipt_match.get('drive_url', '')
-                ws.cell(start, 27).value = f"✅ {fn} ({url})" if url else f"✅ {fn}"
-                # Update match metadata always (even if Drive folder move fails).
-                if not receipt_match.get('matched'):
-                    receipt_match['matched'] = True
-                    receipt_match['match_status'] = 'matched'
-                    receipt_match['matched_at'] = datetime.now().isoformat()
-                    receipt_match['matched_transaction'] = {
-                        'date':   inv_date_str,
-                        'amount': amt_rounded,
-                        'vendor': vendor,
-                    }
-                    # The CSV is an AMEX statement, so a matched receipt is an AMEX
-                    # transaction — fill the brand when OCR left it unknown (don't
-                    # override an explicit OCR reading).
-                    if not receipt_match.get('card_brand'):
-                        receipt_match['card_brand'] = 'amex'
-                    # Backfill OCR date from the matched CSV transaction when OCR
-                    # failed to read it. Keep the original in ocr_date_original.
-                    if receipt_match.get('ocr_date') in (None, '', 'unknown') and inv_date_str:
-                        receipt_match['ocr_date_original'] = receipt_match.get('ocr_date')
-                        receipt_match['ocr_date'] = inv_date_str
-                    receipts_dirty = True
-                    # NOTE: Drive folder auto-move is deprecated. Drive is a plain
-                    # store; the Wayfinder ledger is the single source of truth.
-            else:
-                ws.cell(start, 27).value = "❌ Missing"
-
-        # Collect a Review row for this transaction
-        rcpt_info = None
-        if receipt_match:
-            receipt_matched += 1
-            mfid = receipt_match.get("file_id")
-            # Sibling receipts sharing the same source image (multi-receipt page).
-            # Used to draw every bbox in the lightbox and highlight the matched one.
-            siblings = [
-                {"id": s.get("id"), "ocr_bbox": s.get("ocr_bbox")}
-                for s in receipts
-                if mfid and s.get("file_id") == mfid and s.get("ocr_bbox")
-            ]
-            rcpt_info = {
-                "file_id":      mfid,
-                "id":           receipt_match.get("id"),
-                "filename":     receipt_match.get("filename"),
-                "drive_url":    receipt_match.get("drive_url"),
-                "ocr_amount":   receipt_match.get("ocr_amount"),
-                "ocr_date":     receipt_match.get("ocr_date"),
-                "ocr_merchant": receipt_match.get("ocr_merchant"),
-                "ocr_bbox":     receipt_match.get("ocr_bbox"),
-                "siblings":     siblings if len(siblings) > 1 else [],
-            }
-        review_rows.append({
-            "id":          "rv_" + uuid.uuid4().hex[:8],
-            "date":        inv_date_str,
-            "merchant":    vendor,
-            "amount":      amt_rounded,
-            "gl":          gl,
-            "ser":         ser,
-            "purpose":     purpose,
-            "matched":     bool(receipt_match),
-            "receipt":     rcpt_info,
-            "loss_reason": "",
-        })
-
-        start += 1
-
-    if receipts_dirty and username:
-        _save_receipts(username, receipts)
-
-    # Persist Review snapshot for the Review page
-    if username:
-        _save_review(username, {
-            "generated_at": datetime.now().isoformat(),
-            "source":       filename,
-            "out_filename": out_fn,
-            "total":        len(rows),
-            "matched":      receipt_matched,
-            "unmatched":    len(rows) - receipt_matched,
-            "kw_unmatched": unmatched,
-            "dup_skipped":  dup_skipped,
-            "rows":         review_rows,
-        })
-
-    buf = io.BytesIO()
-    wb.save(buf)
-    xlsx_bytes = buf.getvalue()
-    (OUT_DIR / out_fn).write_bytes(xlsx_bytes)
-    return xlsx_bytes, out_fn, len(rows), unmatched, dup_skipped
 
 
 # ── Ledger ──────────────────────────────────────────────────────────────────
@@ -2538,28 +2561,29 @@ def _handle_upload(body, user=None):
     if not csv_bytes:
         return ("redirect", "/cardconv/ledger")
 
+    if not user:
+        return ("redirect", "/cardconv/ledger")
     try:
-        xlsx_bytes, out_fn, total, unmatched, dup_skipped = convert(csv_bytes, csv_name, username=user)
+        stats = _ingest_csv(user, csv_bytes, csv_name)
+        _save_uploaded_csv(user, csv_bytes, csv_name, stats["added"], "")
         _add_hist({
-            "type":        "conversion",
-            "filename":    out_fn,
+            "type":        "ingest",
             "source":      csv_name,
-            "rows":        total,
-            "unmatched":   unmatched,
-            "dup_skipped": dup_skipped,
+            "rows":        stats["added"],
+            "dup_skipped": stats["dup_skipped"],
+            "matched":     stats["matched"],
             "date":        datetime.now().strftime("%Y-%m-%d %H:%M"),
-            "user":        user or "",
+            "user":        user,
         })
-        if user:
-            _save_uploaded_csv(user, csv_bytes, csv_name, total, out_fn)
-        # Conversion result is staged in review_{user}.json; review before download.
+        # New transactions join the pool; Review shows every open one.
         return ("redirect", "/cardconv/review")
     except Exception as e:
         return ("html", f"<p style='color:red;padding:20px'>Error: {e}</p>")
 
 
 def _handle_upload_rerun(username: str, uid: str):
-    """Re-run conversion (re-match receipts) from a previously uploaded CSV."""
+    """Re-ingest a stored CSV — pulls in any transactions missing from the pool
+    (e.g. after pool entries were removed); duplicates are skipped as usual."""
     items = _load_uploads(username)
     entry = next((i for i in items if i.get("id") == uid), None)
     if not entry:
@@ -2568,21 +2592,17 @@ def _handle_upload_rerun(username: str, uid: str):
     if not stored.exists():
         return ("redirect", "/cardconv/convert")
     try:
-        csv_bytes = stored.read_bytes()
         fn = entry.get("filename", "upload.csv")
-        xlsx_bytes, out_fn, total, unmatched, dup_skipped = convert(
-            csv_bytes, fn, username=username, exclude_upload_id=uid)
+        stats = _ingest_csv(username, stored.read_bytes(), fn)
         _add_hist({
-            "filename":    out_fn,
+            "type":        "ingest",
             "source":      fn,
-            "rows":        total,
-            "unmatched":   unmatched,
-            "dup_skipped": dup_skipped,
+            "rows":        stats["added"],
+            "dup_skipped": stats["dup_skipped"],
+            "matched":     stats["matched"],
             "date":        datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "user":        username,
         })
-        entry["rows"] = total
-        entry["out_filename"] = out_fn
-        _save_uploads(username, items)
         return ("redirect", "/cardconv/review")
     except Exception as e:
         return ("html", f"<p style='color:red;padding:20px'>Error: {e}</p>")
@@ -2648,7 +2668,7 @@ def _handle_ledger_update(username: str, entry_id: str, body: dict):
 
 
 def _handle_review_manual_match(username: str, body: dict):
-    """POST /cardconv/review/match — manually link an unmatched review row to a receipt."""
+    """POST /cardconv/review/match — manually link an open transaction to a receipt."""
     def val(k):
         v = body.get(k, "")
         return (v[0] if isinstance(v, list) else str(v)).strip()
@@ -2657,51 +2677,24 @@ def _handle_review_manual_match(username: str, body: dict):
     if not row_id or not rcpt_id:
         return ("json", {"error": "missing params"}, 400)
 
-    # Find the receipt in the ledger
     receipts = _load_receipts(username)
     receipt  = next((r for r in receipts if r.get("id") == rcpt_id), None)
     if not receipt:
         return ("json", {"error": "receipt not found"}, 404)
 
-    # Update review row
-    review = _load_review(username)
-    matched_row = None
-    for r in review.get("rows", []):
-        if r.get("id") == row_id:
-            r["matched"] = True
-            r["receipt"] = {
-                "id":           receipt.get("id"),
-                "file_id":      receipt.get("file_id"),
-                "drive_url":    receipt.get("drive_url"),
-                "ocr_date":     receipt.get("ocr_date"),
-                "ocr_merchant": receipt.get("ocr_merchant"),
-                "ocr_amount":   receipt.get("ocr_amount"),
-                "filename":     receipt.get("filename"),
-            }
-            matched_row = r
-            break
-    if not matched_row:
+    pool = _load_tx_pool(username)
+    entry = next((e for e in pool["entries"] if e.get("id") == row_id), None)
+    if not entry:
         return ("json", {"error": "row not found"}, 404)
 
-    # Mark receipt as matched in ledger
-    receipt["matched"] = True
-    receipt["match_status"] = "matched"
-    receipt["matched_at"] = datetime.now().isoformat()
-    receipt["matched_transaction"] = {
-        "date":   matched_row.get("date"),
-        "amount": matched_row.get("amount"),
-        "vendor": matched_row.get("merchant"),
-    }
-    # Matched ⇒ AMEX transaction; fill brand only when unknown.
-    if not receipt.get("card_brand"):
-        receipt["card_brand"] = "amex"
+    _apply_receipt_match(entry, receipt, receipts)
     _save_receipts(username, receipts)
-    _save_review(username, review)
-    return ("json", {"ok": True, "receipt": matched_row["receipt"]})
+    _save_tx_pool(username, pool)
+    return ("json", {"ok": True, "receipt": entry["receipt"]})
 
 
 def _handle_review_reason(username: str, body: dict):
-    """POST /cardconv/review/reason — save a loss reason for an unmatched row."""
+    """POST /cardconv/review/reason — save a loss reason for an unmatched transaction."""
     def _val(k):
         v = body.get(k, "")
         return (v[0] if isinstance(v, list) else str(v))
@@ -2709,59 +2702,56 @@ def _handle_review_reason(username: str, body: dict):
     reason = _val("reason")
     if not rid:
         return ("json", {"error": "missing id"}, 400)
-    review = _load_review(username)
-    for r in review.get("rows", []):
-        if r.get("id") == rid:
-            r["loss_reason"] = reason
-            _save_review(username, review)
+    pool = _load_tx_pool(username)
+    for e in pool["entries"]:
+        if e.get("id") == rid:
+            e["loss_reason"] = reason
+            _save_tx_pool(username, pool)
             return ("json", {"ok": True})
     return ("json", {"error": "not found"}, 404)
 
 
+def _handle_review_complete(username: str, body: dict):
+    """POST /cardconv/review/complete — mark transactions completed (or undo).
+
+    Body: {"ids": [...], "undo": bool}. Completed transactions leave the default
+    Review view and the xlsx export; git-style history lives in the pool file."""
+    raw = body.get("ids", [])
+    ids = {str(i) for i in (raw if isinstance(raw, list) else [raw]) if i}
+    if not ids:
+        return ("json", {"error": "no ids"}, 400)
+    undo = bool(body.get("undo"))
+    pool = _load_tx_pool(username)
+    now = datetime.now().isoformat()
+    touched = 0
+    for e in pool["entries"]:
+        if e.get("id") in ids:
+            e["status"] = "open" if undo else "completed"
+            e["completed_at"] = None if undo else now
+            touched += 1
+    _save_tx_pool(username, pool)
+    return ("json", {"ok": True, "touched": touched, "undo": undo})
+
+
 def _handle_review_download(username: str, query: dict):
-    """GET /cardconv/review/download — staged xlsx filtered to a date range.
-
-    from/to are 'YYYY-MM-DD' query params. Rows are filtered by their invoice
-    date (column 5). Rows without an invoice date are always kept, matching the
-    Ledger/Review filter convention. No range → full file.
-    """
-    review = _load_review(username)
-    out_fn = review.get("out_filename") or ""
-    src    = OUT_DIR / out_fn
-    if not out_fn or not src.exists():
-        return ("html", "<h2 style='padding:40px'>No staged conversion to download.</h2>", 404)
-
+    """GET /cardconv/review/download — xlsx of the OPEN transactions, built on
+    demand from the pool. from/to (YYYY-MM-DD) filter by transaction date;
+    dateless rows are always kept, matching the Ledger/Review convention."""
     dfrom = (query.get("from", [""]) or [""])[0]
     dto   = (query.get("to", [""]) or [""])[0]
-    if not dfrom and not dto:
-        # Unfiltered — serve the original file untouched.
-        return ("file", str(src),
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", out_fn)
-
-    wb = openpyxl.load_workbook(src)
-    ws = wb["sheetMst"]
-
-    def _row_date_str(v):
-        if isinstance(v, datetime):
-            return v.strftime("%Y-%m-%d")
-        if isinstance(v, date):
-            return v.strftime("%Y-%m-%d")
-        return str(v)[:10] if v else ""
-
-    drop = []
-    r = 2
-    while ws.cell(r, 1).value is not None:
-        d = _row_date_str(ws.cell(r, 5).value)
-        keep = (not d) or ((not dfrom or d >= dfrom) and (not dto or d <= dto))
-        if not keep:
-            drop.append(r)
-        r += 1
-    for idx in reversed(drop):
-        ws.delete_rows(idx, 1)
-
-    buf = io.BytesIO()
-    wb.save(buf)
-    return ("file_inline", buf.getvalue(),
+    pool = _load_tx_pool(username)
+    entries = [e for e in pool["entries"] if e.get("status") != "completed"]
+    if dfrom or dto:
+        entries = [e for e in entries
+                   if not e.get("date")
+                   or ((not dfrom or e["date"] >= dfrom) and (not dto or e["date"] <= dto))]
+    if not entries:
+        return ("html", "<h2 style='padding:40px'>No open transactions to download.</h2>", 404)
+    try:
+        xlsx_bytes, out_fn = _build_xlsx_from_entries(entries)
+    except FileNotFoundError as e:
+        return ("html", f"<h2 style='padding:40px'>{e}</h2>", 404)
+    return ("file_inline", xlsx_bytes,
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", out_fn)
 
 

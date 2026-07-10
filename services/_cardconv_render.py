@@ -563,11 +563,23 @@ def _render_history(user: str) -> str:
         hid   = _esc(h.get("id", ""))
         htype = h.get("type", "conversion")
         hdate = _esc(h.get("date", ""))
-        icon  = "📤" if htype == "conversion" else "📥"
-        type_label = "Conversion" if htype == "conversion" else "PDF Download"
-        type_color = "color:#38bdf8" if htype == "conversion" else "color:#a78bfa"
+        icon  = {"conversion": "📤", "ingest": "🧾"}.get(htype, "📥")
+        type_label = {"conversion": "Conversion", "ingest": "Upload"}.get(htype, "PDF Download")
+        type_color = ("color:#38bdf8" if htype == "conversion"
+                      else "color:#22c55e" if htype == "ingest" else "color:#a78bfa")
 
-        if htype == "conversion":
+        if htype == "ingest":
+            src   = _esc(h.get("source", ""))
+            added = h.get("rows", 0)
+            dup   = h.get("dup_skipped", 0)
+            mtc   = h.get("matched", 0)
+            dl    = ""
+            detail = (f'<span style="font-size:.8rem;color:var(--text);font-weight:600">{src}</span>'
+                      f'<span style="font-size:.74rem;color:var(--success)">+{added} new</span>'
+                      f'<span style="font-size:.74rem;color:var(--text-muted)">{mtc} matched</span>')
+            if dup:
+                detail += f'<span style="font-size:.72rem;color:#38bdf8">{dup} duplicates skipped</span>'
+        elif htype == "conversion":
             src  = _esc(h.get("source", ""))
             fn   = _esc(h.get("filename", ""))
             rows = h.get("rows", 0)
@@ -747,15 +759,18 @@ def _render_keywords(user: str) -> str:
 
 def _render_review(user: str) -> str:
     from server import CSS_VER
-    review    = _load_review(user)
-    rows      = review.get("rows", [])
-    total     = review.get("total", len(rows))
-    matched   = review.get("matched", 0)
-    unmatched = review.get("unmatched", 0)
-    out_fn    = review.get("out_filename", "")
-    source    = review.get("source", "")
-    gen_at    = (review.get("generated_at", "") or "")[:19].replace("T", " ")
-    dup_skipped = review.get("dup_skipped", 0)
+    pool    = _load_tx_pool(user)
+    # Newest transactions first; dateless rows sink to the bottom.
+    rows    = sorted(pool.get("entries", []),
+                     key=lambda e: (e.get("date") or "0000-00-00", e.get("added_at") or ""),
+                     reverse=True)
+    open_rows   = [e for e in rows if e.get("status") != "completed"]
+    total       = len(open_rows)
+    matched     = sum(1 for e in open_rows if e.get("matched"))
+    unmatched   = total - matched
+    completed_n = len(rows) - total
+    li          = pool.get("last_ingest") or {}
+    dup_skipped = li.get("dup_skipped", 0)
 
     def _money(a):
         return f'${a:,.2f}' if isinstance(a, (int, float)) else (_esc(a) or '–')
@@ -768,12 +783,17 @@ def _render_review(user: str) -> str:
         items = []
         for r in rows:
             is_matched = r.get("matched")
+            is_open    = r.get("status") != "completed"
             rc = r.get("receipt") or {}
+            done_badge = ('' if is_open else
+                          '<span style="font-size:.62rem;font-weight:700;padding:2px 6px;border-radius:8px;'
+                          'background:rgba(34,197,94,.15);color:#22c55e">✔ COMPLETED</span>')
             # Transaction (CSV line item) header
             txn = (
+                f'<label class="rv-cb-wrap"><input type="checkbox" class="rv-cb" data-id="{_esc(r.get("id",""))}"></label>'
                 '<div class="rv-txn">'
                   '<div class="rv-txn-main">'
-                    f'<span class="rv-date">{_esc(r.get("date")) or "–"}</span>'
+                    f'<span class="rv-date">{_esc(r.get("date")) or "–"} {done_badge}</span>'
                     f'<span class="rv-merchant">{_esc(r.get("merchant"))}</span>'
                   '</div>'
                   '<div class="rv-txn-meta">'
@@ -811,39 +831,48 @@ def _render_review(user: str) -> str:
                       '</div>'
                     '</div>')
             else:
-                row_id_esc = _esc(r.get("id", ""))
                 txn_json   = _esc(json.dumps({
                     "id": r.get("id",""), "date": r.get("date",""),
                     "merchant": r.get("merchant",""), "amount": r.get("amount"),
                 }, ensure_ascii=False))
+                match_btn = ''
+                if is_open:
+                    match_btn = (
+                        f'<button type="button" '
+                        f'onclick="rvOpenMatchPanel(this)" '
+                        f'data-txn="{txn_json}" '
+                        f'class="btn btn-ghost btn-sm" '
+                        f'style="margin-top:6px;font-size:.74rem;color:var(--accent);width:100%">'
+                        f'🔗 Match manually</button>')
                 receipt_block = (
                     '<div class="rv-receipt unmatched">'
                       '<div class="rv-nomatch">❌ No receipt matched</div>'
-                      f'<button type="button" '
-                      f'onclick="rvOpenMatchPanel(this)" '
-                      f'data-txn="{txn_json}" '
-                      f'class="btn btn-ghost btn-sm" '
-                      f'style="margin-top:6px;font-size:.74rem;color:var(--accent);width:100%">'
-                      f'🔗 Match manually</button>'
+                      f'{match_btn}'
                     '</div>')
-            item_cls = 'rv-item' + ('' if is_matched else ' unmatched')
+            item_cls = 'rv-item' + ('' if is_matched else ' unmatched') + ('' if is_open else ' done')
             row_date = _esc(r.get("date")) or ""
             items.append(
                 f'<div class="{item_cls}" data-date="{row_date}" '
+                f'data-status="{"open" if is_open else "completed"}" '
                 f'data-matched="{"1" if is_matched else "0"}">{txn}{receipt_block}</div>')
         body_html = "".join(items)
 
-    download_btn = ('<button id="rvDownload" class="btn btn-primary">⬇ Download xlsx</button>'
-                    if out_fn else '')
-    meta_line = f'{_esc(source)} &nbsp;·&nbsp; {gen_at}' if source else 'No conversion staged'
+    download_btn = ('<button id="rvDownload" class="btn btn-primary">⬇ Download xlsx (open)</button>'
+                    if total else '')
+    if li:
+        li_at = (li.get("at", "") or "")[:16].replace("T", " ")
+        meta_line = (f'Last upload: {_esc(li.get("filename",""))} &nbsp;·&nbsp; '
+                     f'+{li.get("added",0)} new &nbsp;·&nbsp; {li_at}')
+    else:
+        meta_line = 'No uploads yet'
     dup_notice = ''
     if dup_skipped:
         dup_notice = (
             '<div style="display:flex;align-items:center;gap:8px;padding:9px 14px;margin-bottom:14px;'
             'border:1px solid rgba(59,130,246,.35);background:rgba(59,130,246,.08);'
             'border-radius:var(--radius-md);font-size:.84rem;color:var(--text)">'
-            f'⏭ <b>{dup_skipped}</b>&nbsp;transaction(s) already converted in earlier uploads were skipped '
-            '<span style="color:var(--text-muted)">(overlapping statement period — delete the old upload in History to re-include them)</span></div>')
+            f'⏭ Last upload: <b>{dup_skipped}</b>&nbsp;duplicate transaction(s) were already in the pool and skipped '
+            '<span style="color:var(--text-muted)">(overlapping statement period)</span></div>')
 
     return f'''<!DOCTYPE html>
 <html lang="en"><head>
@@ -867,6 +896,9 @@ def _render_review(user: str) -> str:
 .rv-list{{display:flex;flex-direction:column;gap:10px}}
 .rv-item{{display:flex;gap:14px;align-items:stretch;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md);padding:12px 14px}}
 .rv-item.unmatched{{border-color:rgba(239,68,68,.35);background:rgba(239,68,68,.06)}}
+.rv-item.done{{opacity:.65}}
+.rv-cb-wrap{{display:flex;align-items:center;padding-right:2px;cursor:pointer}}
+.rv-cb{{width:16px;height:16px;accent-color:var(--accent);cursor:pointer}}
 .rv-txn{{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;gap:6px}}
 .rv-txn-main{{display:flex;flex-direction:column;gap:2px}}
 .rv-date{{font-size:.74rem;color:var(--text-muted)}}
@@ -915,9 +947,18 @@ def _render_review(user: str) -> str:
 
   {dup_notice}
   <div class="stat-grid">
-    <div class="stat-card"><div class="stat-value" id="rvTotal">{total}</div><div class="stat-label">Total</div></div>
+    <div class="stat-card"><div class="stat-value" id="rvTotal">{total}</div><div class="stat-label">Open</div></div>
     <div class="stat-card"><div class="stat-value" id="rvMatched" style="color:#22c55e">{matched}</div><div class="stat-label">Matched</div></div>
     <div class="stat-card"><div class="stat-value" id="rvUnmatched" style="color:#ef4444">{unmatched}</div><div class="stat-label">Unmatched</div></div>
+  </div>
+
+  <div class="filter-bar" style="gap:10px">
+    <label style="display:flex;align-items:center;gap:6px;font-size:.8rem;color:var(--text-muted);cursor:pointer">
+      <input type="checkbox" id="rvSelAll" style="width:15px;height:15px;accent-color:var(--accent);cursor:pointer"> Select all
+    </label>
+    <button class="btn btn-primary btn-sm" id="rvBulkBtn">✔ Mark completed</button>
+    <span style="flex:1"></span>
+    <button class="preset-btn" id="rvViewToggle">Show completed ({completed_n})</button>
   </div>
 
   <div class="filter-bar">
@@ -965,14 +1006,18 @@ def _render_review(user: str) -> str:
 const $ = id => document.getElementById(id);
 function iso(d){{ return d.toISOString().slice(0,10); }}
 
-// Date filters keep rows without an invoice date always visible, matching Ledger.
+// View state: 'open' (default) or 'completed'. Date filters keep rows without
+// an invoice date always visible, matching Ledger.
+let rvView = 'open';
 function applyFilter(){{
   const from = $('rvFrom').value, to = $('rvTo').value;
   let total=0, matched=0, unmatched=0;
   document.querySelectorAll('.rv-item').forEach(it => {{
     const d = it.dataset.date || '';
-    const show = (!from || !d || d >= from) && (!to || !d || d <= to);
+    const show = (it.dataset.status === rvView)
+      && (!from || !d || d >= from) && (!to || !d || d <= to);
     it.style.display = show ? '' : 'none';
+    if(!show) it.querySelector('.rv-cb').checked = false;
     if(show){{
       total++;
       if(it.dataset.matched === '1') matched++; else unmatched++;
@@ -981,7 +1026,38 @@ function applyFilter(){{
   $('rvTotal').textContent = total;
   $('rvMatched').textContent = matched;
   $('rvUnmatched').textContent = unmatched;
+  $('rvSelAll').checked = false;
 }}
+
+// ── Complete workflow ────────────────────────────────────────────────────────
+$('rvViewToggle').addEventListener('click', () => {{
+  rvView = (rvView === 'open') ? 'completed' : 'open';
+  $('rvViewToggle').classList.toggle('active', rvView === 'completed');
+  $('rvBulkBtn').textContent = (rvView === 'open') ? '✔ Mark completed' : '↩ Reopen';
+  applyFilter();
+}});
+
+$('rvSelAll').addEventListener('change', () => {{
+  const on = $('rvSelAll').checked;
+  document.querySelectorAll('.rv-item').forEach(it => {{
+    if(it.style.display !== 'none') it.querySelector('.rv-cb').checked = on;
+  }});
+}});
+
+$('rvBulkBtn').addEventListener('click', () => {{
+  const ids = Array.from(document.querySelectorAll('.rv-cb:checked')).map(cb => cb.dataset.id);
+  if(!ids.length){{ alert('Select transactions first.'); return; }}
+  const undo = (rvView === 'completed');
+  if(!confirm((undo ? 'Reopen ' : 'Mark ') + ids.length + ' transaction(s)' + (undo ? '?' : ' as completed?'))) return;
+  fetch('/cardconv/review/complete', {{
+    method: 'POST',
+    headers: {{'Content-Type': 'application/json'}},
+    body: JSON.stringify({{ids: ids, undo: undo}})
+  }}).then(r => r.json()).then(d => {{
+    if(d.error){{ alert('Error: ' + d.error); return; }}
+    location.reload();
+  }}).catch(e => alert('Error: ' + e));
+}});
 
 function applyPreset(p){{
   const now = new Date();
