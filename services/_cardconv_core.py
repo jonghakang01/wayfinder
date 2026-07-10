@@ -615,8 +615,8 @@ def _row_to_entry(row: dict, rules: dict, source: str) -> dict:
 def _load_tx_pool(username: str) -> dict:
     """Load the pool; on first use migrate from the CSVs stored in History.
 
-    Migration: transactions from every upload except the most recent start as
-    completed (assumed already settled); the most recent upload starts open and
+    Migration: every transaction (deduped across uploads) starts open —
+    completion is an explicit user action, never assumed. The open batch
     inherits matched/receipt info from the legacy review snapshot."""
     f = _tx_pool_file(username)
     if f.exists():
@@ -630,7 +630,6 @@ def _load_tx_pool(username: str) -> dict:
     if uploads:
         rules = _load_kw()
         seen = Counter()
-        newest_id = uploads[0].get("id")
         d = _uploads_dir(username)
         for up in reversed(uploads):  # oldest → newest
             p = d / up.get("stored_name", "")
@@ -643,11 +642,7 @@ def _load_tx_pool(username: str) -> dict:
             fresh, _ = _dedup_rows(rows, seen)
             for row in fresh:
                 seen[_tx_key(row)] += 1
-                e = _row_to_entry(row, rules, up.get("filename", ""))
-                if up.get("id") != newest_id:
-                    e["status"] = "completed"
-                    e["completed_at"] = pool["migrated_at"]
-                pool["entries"].append(e)
+                pool["entries"].append(_row_to_entry(row, rules, up.get("filename", "")))
 
         # Enrich the open batch from the legacy review snapshot (match info).
         legacy = {}

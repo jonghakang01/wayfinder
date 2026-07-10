@@ -59,7 +59,9 @@ def test_ingest_dedups_across_uploads(tmp_path, monkeypatch):
     assert pool["last_ingest"]["dup_skipped"] == 2
 
 
-def test_migration_marks_old_uploads_completed(tmp_path, monkeypatch):
+def test_migration_keeps_everything_open(tmp_path, monkeypatch):
+    # Completion is an explicit user action — migration must not assume old
+    # uploads are settled. Duplicates across uploads still ingest once.
     (tmp_path / "csv_old.csv").write_bytes(_csv(_row(date="05/01/2026", merchant="OLD")))
     (tmp_path / "csv_new.csv").write_bytes(
         _csv(_row(date="05/01/2026", merchant="OLD"),          # duplicate of old upload
@@ -77,7 +79,7 @@ def test_migration_marks_old_uploads_completed(tmp_path, monkeypatch):
     pool = core._load_tx_pool("u")
     assert len(pool["entries"]) == 2  # duplicate row ingested once
     by_merchant = {e["merchant"]: e for e in pool["entries"]}
-    assert by_merchant["OLD"]["status"] == "completed"
+    assert by_merchant["OLD"]["status"] == "open"
     assert by_merchant["NEWSHOP"]["status"] == "open"
     # Open batch inherits match info from the legacy review snapshot
     assert by_merchant["NEWSHOP"]["matched"] is True
