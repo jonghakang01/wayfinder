@@ -982,77 +982,141 @@ def _inline_to_shared_strings(xlsx_bytes: bytes) -> bytes:
     return buf.getvalue()
 
 
+SAP_TEMPLATE = _SVC_DIR / "cardconv_sap_template.xlsx"  # SAP-accepted file, styles preserved
+
+# Per-column style ids captured from the accepted file's data rows. SAP reads
+# the workbook against ITS OWN style table, so the output must reuse these
+# exact style indices - rebuilding styles (as openpyxl does) garbles parsing.
+_SAP_COL_STYLE = {
+    "A": "6", "B": "7", "C": "6", "D": "19", "E": "15", "F": "6", "G": "16",
+    "H": "11", "I": "20", "J": "21", "K": "6", "L": "6", "M": "19", "N": "20",
+    "O": "6", "P": "19", "Q": "19", "R": "22", "S": "19", "T": "6",
+    "U": "23", "V": "23", "W": "23", "X": "23", "Y": "8", "Z": "20",
+}
+_SAP_SER_TEXT_STYLE = "29"  # J when Ser. keeps a leading zero (text, @)
+_XLSX_EPOCH = date(1899, 12, 30)
+
+
+def _xesc(s: str) -> str:
+    return (str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            .replace('"', "&quot;"))
+
+
 def _build_xlsx_from_entries(entries: list) -> tuple:
-    """(xlsx_bytes, out_filename) from pool entries via the SAP template."""
-    if TEMPLATE.exists():
-        template_path = TEMPLATE
-    elif TEMPLATE_FALLBACK.exists():
-        template_path = TEMPLATE_FALLBACK
-    else:
-        raise FileNotFoundError("Template file not found. Please upload 'for upload.xlsx' to ~/.appdata/cardconv/template.xlsx")
+    """(xlsx_bytes, out_filename) - surgical row replacement in the SAP-accepted
+    workbook. Everything except sheet rows and sharedStrings stays byte-identical
+    (styles.xml above all), because SAP's parser only understands files shaped
+    exactly like its own template."""
+    if not SAP_TEMPLATE.exists():
+        raise FileNotFoundError("SAP template missing: services/cardconv_sap_template.xlsx")
 
     today  = date.today()
     out_fn = f"for_upload_{today.strftime('%Y-%m-%d')}.xlsx"
-    wb = openpyxl.load_workbook(template_path)
-    ws = wb["sheetMst"]
-    start = 2
-    while ws.cell(start, 1).value is not None:
-        start += 1
-    posting_dt = datetime(today.year, today.month, today.day)
+    posting_serial = (today - _XLSX_EPOCH).days
 
+    src = zipfile.ZipFile(SAP_TEMPLATE)
+    parts = {n: src.read(n) for n in src.namelist()}
+
+    # Shared strings: keep existing entries (ids untouched), append new ones.
+    sst_xml = parts["xl/sharedStrings.xml"].decode()
+    existing = re.findall(r"<si>.*?</si>", sst_xml, re.S)
+    plain = [re.sub(r"<[^>]+>", "", si) for si in existing]
+    s_index = {}
+    for i, t in enumerate(plain):
+        s_index.setdefault(t, i)
+    new_si: list = []
+
+    def sref(text: str) -> str:
+        text = str(text)
+        esc = _xesc(text)
+        if esc not in s_index:
+            s_index[esc] = len(existing) + len(new_si)
+            pre = ' xml:space="preserve"' if text.strip() != text else ""
+            new_si.append(f"<si><t{pre}>{esc}</t></si>")
+        return str(s_index[esc])
+
+    def cell(col, row, value, kind, style=None):
+        s = style or _SAP_COL_STYLE[col]
+        if value is None or value == "":
+            return f'<c r="{col}{row}" s="{s}"/>'
+        if kind == "str":
+            return f'<c r="{col}{row}" s="{s}" t="s"><v>{sref(value)}</v></c>'
+        return f'<c r="{col}{row}" s="{s}"><v>{value}</v></c>'
+
+    rows_xml = []
+    rnum = 2
     for e in entries:
-        inv_dt = None
+        inv_serial = ""
         if e.get("date"):
             try:
-                d_ = date.fromisoformat(e["date"])
-                inv_dt = datetime(d_.year, d_.month, d_.day)
+                inv_serial = (date.fromisoformat(e["date"]) - _XLSX_EPOCH).days
             except ValueError:
                 pass
         masked, supp = _fmt_card(e.get("account", ""))
         last, first  = _name_parts(e.get("member", ""))
-        amount = e.get("amount", 0)
-
-        # Content formats mirror the hand-made 'for upload.xlsx' SAP file:
-        # numeric G/L and Ser. as numbers (leading-zero Ser. stays text),
-        # dates typed with the exact display formats, no extra columns.
-        gl = e.get("gl")
+        amount = round(float(e.get("amount") or 0), 2)
+        merchant = re.sub(r"\s+", " ", str(e.get("merchant") or "")).strip()
         try:
-            gl = int(gl)
+            gl = int(e.get("gl"))
         except (TypeError, ValueError):
-            pass
-        ser = e.get("ser")
-        ser_s = str(ser or "").strip()
+            gl = ""
+        ser_s = str(e.get("ser") or "").strip()
         ser_is_text = ser_s.startswith("0") or not ser_s.isdigit()
-        ser = ser_s if ser_is_text else int(ser_s)
 
-        ws.cell(start,  1).value = FIXED["receipt_type"]
-        ws.cell(start,  2).value = FIXED["employee_id"]
-        ws.cell(start,  3).value = FIXED["payee"]
-        ws.cell(start,  5).value = inv_dt
-        ws.cell(start,  5).number_format = "mm-dd-yy"
-        ws.cell(start,  6).value = FIXED["domestic"]
-        ws.cell(start,  7).value = re.sub(r"\s+", " ", str(e.get("merchant") or "")).strip()
-        ws.cell(start,  8).value = posting_dt
-        ws.cell(start,  8).number_format = "yyyy-mm-dd"
-        ws.cell(start,  9).value = gl
-        ws.cell(start, 10).value = ser
-        if ser_is_text:
-            ws.cell(start, 10).number_format = "@"
-        ws.cell(start, 11).value = FIXED["currency"]
-        ws.cell(start, 12).value = FIXED["tax_code"]
-        ws.cell(start, 14).value = amount
-        ws.cell(start, 15).value = FIXED["cost_center"]
-        ws.cell(start, 18).value = e.get("purpose")
-        ws.cell(start, 20).value = masked
-        ws.cell(start, 21).value = last
-        ws.cell(start, 22).value = first
-        ws.cell(start, 23).value = supp
-        ws.cell(start, 26).value = amount
-        start += 1
+        c = [
+            cell("A", rnum, FIXED["receipt_type"], "str"),
+            cell("B", rnum, FIXED["employee_id"], "num"),
+            cell("C", rnum, FIXED["payee"], "str"),
+            cell("D", rnum, "", "num"),
+            cell("E", rnum, inv_serial, "num"),
+            cell("F", rnum, FIXED["domestic"], "str"),
+            cell("G", rnum, merchant, "str"),
+            cell("H", rnum, posting_serial, "num"),
+            cell("I", rnum, gl, "num"),
+            (cell("J", rnum, ser_s, "str", _SAP_SER_TEXT_STYLE) if ser_is_text
+             else cell("J", rnum, int(ser_s) if ser_s else "", "num")),
+            cell("K", rnum, FIXED["currency"], "str"),
+            cell("L", rnum, FIXED["tax_code"], "str"),
+            cell("M", rnum, "", "num"),
+            cell("N", rnum, amount, "num"),
+            cell("O", rnum, FIXED["cost_center"], "str"),
+            cell("P", rnum, "", "num"),
+            cell("Q", rnum, "", "num"),
+            cell("R", rnum, e.get("purpose") or "", "str"),
+            cell("S", rnum, "", "num"),
+            cell("T", rnum, masked, "str"),
+            cell("U", rnum, last, "str"),
+            cell("V", rnum, first, "str"),
+            cell("W", rnum, supp, "str"),
+            cell("X", rnum, "", "num"),
+            cell("Y", rnum, "", "num"),
+            cell("Z", rnum, amount, "num"),
+        ]
+        rows_xml.append(f'<row r="{rnum}" spans="1:26">' + "".join(c) + "</row>")
+        rnum += 1
+
+    # Sheet: keep row 1 (header) verbatim, replace all data rows with ours.
+    sheet = parts["xl/worksheets/sheet1.xml"].decode()
+    header_row = re.search(r'<row r="1".*?</row>', sheet, re.S).group(0)
+    sheet = re.sub(r"<sheetData>.*</sheetData>",
+                   "<sheetData>" + header_row + "".join(rows_xml) + "</sheetData>",
+                   sheet, flags=re.S)
+    sheet = re.sub(r'<dimension ref="[^"]*"/>',
+                   f'<dimension ref="A1:Z{max(rnum - 1, 1)}"/>', sheet)
+    parts["xl/worksheets/sheet1.xml"] = sheet.encode()
+
+    if new_si:
+        total = len(existing) + len(new_si)
+        sst_xml = re.sub(r'(<sst[^>]*count=")\d+(")', rf"\g<1>{total}\g<2>", sst_xml)
+        sst_xml = re.sub(r'(uniqueCount=")\d+(")', rf"\g<1>{total}\g<2>", sst_xml)
+        sst_xml = sst_xml.replace("</sst>", "".join(new_si) + "</sst>")
+        parts["xl/sharedStrings.xml"] = sst_xml.encode()
 
     buf = io.BytesIO()
-    wb.save(buf)
-    xlsx_bytes = _inline_to_shared_strings(buf.getvalue())
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as out:
+        for name, data in parts.items():
+            out.writestr(name, data)
+    xlsx_bytes = buf.getvalue()
     (OUT_DIR / out_fn).write_bytes(xlsx_bytes)
     return xlsx_bytes, out_fn
 
