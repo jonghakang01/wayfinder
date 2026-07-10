@@ -663,7 +663,38 @@ def _load_tx_pool(username: str) -> dict:
                 e["receipt"] = r.get("receipt")
                 e["loss_reason"] = r.get("loss_reason", "")
     _save_tx_pool(username, pool)
+    # A stale legacy snapshot can leave the open batch unmatched — run live
+    # receipt matching so migration never depends on snapshot freshness.
+    if pool["entries"]:
+        _rematch_pool(username)
+        pool = json.loads(f.read_text())
     return pool
+
+
+def _rematch_pool(username: str) -> dict:
+    """Match every open, unmatched pool transaction against the receipt ledger.
+
+    Same matching as _ingest_csv applies to fresh rows. Returns {"matched": n}.
+    """
+    pool = _load_tx_pool(username)
+    todo = [e for e in pool.get("entries", [])
+            if e.get("status") == "open" and not e.get("matched")]
+    if not todo:
+        return {"matched": 0}
+    receipts = _load_receipts(username)
+    receipts_map, fx_receipts, dirty = _build_receipt_index(receipts, username)
+    matched = 0
+    for e in todo:
+        r = _find_receipt_match(e["date"], e["amount"], receipts_map, fx_receipts)
+        if r is not None:
+            _apply_receipt_match(e, r, receipts)
+            matched += 1
+            dirty = True
+    if matched:
+        _save_tx_pool(username, pool)
+    if dirty:
+        _save_receipts(username, receipts)
+    return {"matched": matched}
 
 
 def _build_receipt_index(receipts: list, username: str):

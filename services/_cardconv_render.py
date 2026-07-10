@@ -541,7 +541,7 @@ function handleCsvFile(input) {{
   csvName.textContent = input.files[0].name;
   csvInfo.style.display = 'flex';
   csvZone.style.display = 'none';
-  if (/\.xlsx$/i.test(input.files[0].name)) return;  // binary — no name suggest
+  if (/[.]xlsx$/i.test(input.files[0].name)) return;  // binary — no name suggest
   const reader = new FileReader();
   reader.onload = e => parseCsvSuggest(e.target.result);
   reader.readAsText(input.files[0]);
@@ -970,6 +970,7 @@ def _render_review(user: str) -> str:
       <input type="checkbox" id="rvSelAll" style="width:15px;height:15px;accent-color:var(--accent);cursor:pointer"> Select all
     </label>
     <button class="btn btn-primary btn-sm" id="rvBulkBtn">✔ Mark completed</button>
+    <button class="btn btn-ghost btn-sm" id="rvRematch" title="Match open transactions against the receipt ledger">↻ Re-match receipts</button>
     <span style="flex:1"></span>
     <button class="preset-btn" id="rvViewToggle">Show completed ({completed_n})</button>
   </div>
@@ -1048,6 +1049,20 @@ $('rvViewToggle').addEventListener('click', () => {{
   $('rvViewToggle').classList.toggle('active', rvView === 'completed');
   $('rvBulkBtn').textContent = (rvView === 'open') ? '✔ Mark completed' : '↩ Reopen';
   applyFilter();
+}});
+
+$('rvRematch').addEventListener('click', async () => {{
+  const btn = $('rvRematch');
+  btn.disabled = true; btn.textContent = '↻ Matching…';
+  try {{
+    const r = await fetch('/cardconv/review/rematch', {{method:'POST'}});
+    const d = await r.json();
+    btn.textContent = '↻ ' + (d.matched || 0) + ' matched';
+    if (d.matched) setTimeout(() => location.reload(), 700);
+    else setTimeout(() => {{ btn.textContent = '↻ Re-match receipts'; btn.disabled = false; }}, 1500);
+  }} catch(e) {{
+    btn.textContent = '↻ Re-match receipts'; btn.disabled = false;
+  }}
 }});
 
 $('rvSelAll').addEventListener('change', () => {{
