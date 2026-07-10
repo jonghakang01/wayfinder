@@ -872,23 +872,19 @@ def _render_review(user: str) -> str:
                 f'data-matched="{"1" if is_matched else "0"}">{txn}{receipt_block}</div>')
         body_html = "".join(items)
 
-    download_btn = (('<button id="rvDownload" class="btn btn-primary">⬇ xlsx</button>'
-                     '<button id="rvDownloadPdf" class="btn btn-secondary">📄 Receipts PDF</button>')
+    download_btn = (('<button id="rvDownload" class="btn btn-secondary btn-sm">⬇ xlsx</button>'
+                     '<button id="rvDownloadPdf" class="btn btn-secondary btn-sm" '
+                     'title="Receipt images of the matched transactions">⬇ PDF</button>')
                     if total else '')
     if li:
         li_at = (li.get("at", "") or "")[:16].replace("T", " ")
         meta_line = (f'Last upload: {_esc(li.get("filename",""))} &nbsp;·&nbsp; '
                      f'+{li.get("added",0)} new &nbsp;·&nbsp; {li_at}')
+        if dup_skipped:
+            meta_line += (f' &nbsp;·&nbsp; <span title="overlapping statement period">'
+                          f'⏭ {dup_skipped} duplicates skipped</span>')
     else:
         meta_line = 'No uploads yet'
-    dup_notice = ''
-    if dup_skipped:
-        dup_notice = (
-            '<div style="display:flex;align-items:center;gap:8px;padding:9px 14px;margin-bottom:14px;'
-            'border:1px solid rgba(59,130,246,.35);background:rgba(59,130,246,.08);'
-            'border-radius:var(--radius-md);font-size:.84rem;color:var(--text)">'
-            f'⏭ Last upload: <b>{dup_skipped}</b>&nbsp;duplicate transaction(s) were already in the pool and skipped '
-            '<span style="color:var(--text-muted)">(overlapping statement period)</span></div>')
 
     return f'''<!DOCTYPE html>
 <html lang="en"><head>
@@ -905,6 +901,7 @@ def _render_review(user: str) -> str:
 .filter-bar input[type=date],.filter-bar input[type=text],.filter-bar select{{background:var(--surface);border:1px solid var(--border);
   border-radius:6px;color:var(--text);font-size:.82rem;padding:5px 8px;outline:none}}
 .filter-bar input[type=date]:focus,.filter-bar input[type=text]:focus,.filter-bar select:focus{{border-color:var(--accent)}}
+.fb-field{{display:inline-flex;align-items:center;gap:6px}}
 .preset-btn{{background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);
   font-size:.76rem;padding:4px 9px;cursor:pointer}}
 .preset-btn:hover{{border-color:var(--accent)}}
@@ -961,11 +958,29 @@ def _render_review(user: str) -> str:
     <span>{meta_line}</span>{_info_icon('Shows converted transactions with receipt matching results. Unmatched rows (red) can be linked via 🔗 Match manually, or carried over to the next billing cycle.', right=True)}
   </div>
 
-  {dup_notice}
   <div class="stat-grid">
     <div class="stat-card"><div class="stat-value" id="rvTotal">{total}</div><div class="stat-label">Open</div></div>
     <div class="stat-card"><div class="stat-value" id="rvMatched" style="color:#22c55e">{matched}</div><div class="stat-label">Matched</div></div>
     <div class="stat-card"><div class="stat-value" id="rvUnmatched" style="color:#ef4444">{unmatched}</div><div class="stat-label">Unmatched</div></div>
+  </div>
+
+  <div class="filter-bar">
+    <span class="fb-field">📅 <input type="date" id="rvFrom"> ~ <input type="date" id="rvTo"></span>
+    <span class="fb-field" role="group" aria-label="Quick range">
+      <button class="preset-btn" data-preset="month">This month</button>
+      <button class="preset-btn" data-preset="30d">30 days</button>
+      <button class="preset-btn" data-preset="3m">3 months</button>
+      <button class="preset-btn" data-preset="ytd">YTD</button>
+      <button class="preset-btn" data-preset="all">All time</button>
+    </span>
+    <span class="fb-field">🔍 <input type="text" id="rvMerchant" placeholder="Merchant..." style="width:130px"></span>
+    <select id="rvSort">
+      <option value="date">Date ↓</option>
+      <option value="merchant">Merchant A→Z</option>
+    </select>
+    <button class="btn btn-ghost btn-sm" id="rvReset">↺ Reset</button>
+    <span style="flex:1"></span>
+    {download_btn}
   </div>
 
   <div class="filter-bar" style="gap:10px">
@@ -976,27 +991,6 @@ def _render_review(user: str) -> str:
     <button class="btn btn-ghost btn-sm" id="rvRematch" title="Match open transactions against the receipt ledger">↻ Re-match receipts</button>
     <span style="flex:1"></span>
     <button class="preset-btn" id="rvViewToggle">Show completed ({completed_n})</button>
-  </div>
-
-  <div class="filter-bar">
-    📅 <input type="date" id="rvFrom"> ~ <input type="date" id="rvTo">
-    🔍 <input type="text" id="rvMerchant" placeholder="Merchant..." style="width:130px">
-    <select id="rvSort">
-      <option value="date">Date ↓</option>
-      <option value="merchant">Merchant A→Z</option>
-    </select>
-    <button class="btn btn-ghost btn-sm" id="rvReset">Reset</button>
-    <span style="flex:1"></span>
-    {download_btn}
-  </div>
-
-  <div class="filter-bar" style="gap:8px">
-    <span style="font-size:.76rem;color:var(--text-muted)">Quick range:</span>
-    <button class="preset-btn" data-preset="month">This month</button>
-    <button class="preset-btn" data-preset="30d">Last 30 days</button>
-    <button class="preset-btn" data-preset="3m">Last 3 months</button>
-    <button class="preset-btn" data-preset="ytd">YTD</button>
-    <button class="preset-btn" data-preset="all">All time</button>
   </div>
 
   <div class="notepad-card">
@@ -1160,7 +1154,7 @@ if(rvDl){{
     if(!e.target.classList || (!e.target.classList.contains('rv-cb') && e.target.id !== 'rvSelAll')) return;
     const n = document.querySelectorAll('.rv-cb:checked').length;
     rvDl.textContent = n ? ('⬇ xlsx (' + n + ' selected)') : '⬇ xlsx';
-    $('rvDownloadPdf').textContent = n ? ('📄 Receipts PDF (' + n + ' selected)') : '📄 Receipts PDF';
+    $('rvDownloadPdf').textContent = n ? ('⬇ PDF (' + n + ' selected)') : '⬇ PDF';
   }});
 }}
 
@@ -1665,7 +1659,7 @@ __TABCSS__
     <button class="fb-more-btn fb-spacer" id="fMore" aria-expanded="false">More filters <span class="chev">▾</span></button>
     <div class="fb-group">
       <button class="btn btn-secondary btn-sm" id="fDownloadXlsx">⬇ xlsx</button>
-      <button class="btn btn-ghost btn-sm" id="fDownload">📄 PDF</button>
+      <button class="btn btn-secondary btn-sm" id="fDownload">⬇ PDF</button>
     </div>
   </div>
 
