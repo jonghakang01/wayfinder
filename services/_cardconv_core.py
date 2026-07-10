@@ -522,16 +522,30 @@ def _tx_key(row: dict):
     )
 
 
+def _key_norm(k) -> tuple:
+    """Cross-source comparison form of a tx key: (date, amount, merchant).
+
+    The account number is dropped — reissued cards give the same transaction
+    a different account across exports — and merchant whitespace is collapsed
+    (the Master xlsx pads fields with space runs that the Posted CSV doesn't).
+    """
+    k = tuple(k)
+    date, amt = k[0], k[1]
+    merchant = re.sub(r"\s+", " ", k[3] if len(k) > 3 else "").strip().upper()
+    return (date, amt, merchant)
+
+
 def _dedup_rows(rows: list, prior: Counter) -> tuple:
     """(kept_rows, skipped_count). Multiset semantics: N prior occurrences
     absorb at most N new ones, so legitimate same-day/same-amount repeats
-    within one statement survive."""
+    within one statement survive. Keys are compared in normalized form so
+    the same transaction dedupes across CSV and Master-xlsx sources."""
     if not prior:
         return rows, 0
     kept, skipped = [], 0
-    remaining = Counter(prior)
+    remaining = Counter(_key_norm(k) for k in prior.elements())
     for r in rows:
-        k = _tx_key(r)
+        k = _key_norm(_tx_key(r))
         if remaining.get(k, 0) > 0:
             remaining[k] -= 1
             skipped += 1
@@ -750,6 +764,79 @@ def _apply_receipt_match(entry: dict, receipt: dict, receipts: list):
     }
 
 
+def _master_xlsx_to_csv_bytes(xlsx_bytes: bytes) -> bytes:
+    """Convert an 'AMEX Master' xlsx into Posted_*.csv-shaped bytes.
+
+    The Master sheet ('I. Jongha' style) is a corporate recon export whose
+    fields map onto the CSV the rest of the pipeline expects. Dates are
+    emitted ISO and account numbers digits-only so _tx_key stays comparable
+    with rows ingested from real Posted CSVs.
+    """
+    wb = openpyxl.load_workbook(io.BytesIO(xlsx_bytes), read_only=True, data_only=True)
+
+    def norm(h):
+        return re.sub(r"\s+", " ", str(h or "")).strip().lower()
+
+    sheet, cols = None, {}
+    for ws in wb.worksheets:
+        header = next(ws.iter_rows(max_row=1, values_only=True), None)
+        if not header:
+            continue
+        idx = {norm(h): i for i, h in enumerate(header) if h}
+        if "desc" in idx and ("t.date" in idx or "transaction date" in idx):
+            sheet, cols = ws, idx
+            break
+    if sheet is None:
+        raise ValueError("Master sheet not found (no 'Desc' + 'T.Date' header row)")
+
+    def cell(row, *names):
+        for n in names:
+            i = cols.get(n)
+            if i is not None and i < len(row) and row[i] not in (None, ""):
+                return row[i]
+        return ""
+
+    out = io.StringIO()
+    w = csv.DictWriter(out, fieldnames=[
+        "Date", "Card Member Name", "Account Number", "Amount",
+        "Merchant Name", "Merchant Doing Business As", "_recon"])
+    w.writeheader()
+    rows_iter = sheet.iter_rows(min_row=2, values_only=True)
+    for row in rows_iter:
+        desc = re.sub(r"\s+", " ", str(cell(row, "desc", "transaction description 1"))).strip()
+        raw_date = cell(row, "transaction date", "t.date")
+        raw_amt = cell(row, "transaction amount usd", "amt")
+        if not desc or raw_date in ("", None) or raw_amt in ("", None):
+            continue
+        if isinstance(raw_date, datetime):
+            iso = raw_date.strftime("%Y-%m-%d")
+        else:
+            dt = _parse_date(str(raw_date))
+            if not dt:
+                continue
+            iso = dt.strftime("%Y-%m-%d")
+        try:
+            amt = f"{float(raw_amt):.2f}"
+        except (ValueError, TypeError):
+            continue
+        first = str(cell(row, "supplemental cardmember first name",
+                         "basic cardmember first name")).strip()
+        last = str(cell(row, "supplemental cardmember last name",
+                        "basic cardmember last name")).strip()
+        acct = re.sub(r"\D", "", str(cell(row, "supplemental account number",
+                                          "basic card account no.")))
+        w.writerow({
+            "Date": iso,
+            "Card Member Name": f"{first} {last}".strip(),
+            "Account Number": acct,
+            "Amount": amt,
+            "Merchant Name": desc,
+            "Merchant Doing Business As": "",
+            "_recon": str(cell(row, "recon")).strip().upper(),
+        })
+    return out.getvalue().encode("utf-8")
+
+
 def _ingest_csv(username: str, csv_bytes: bytes, filename: str) -> dict:
     """Merge a CSV into the pool. Returns {"added", "dup_skipped", "matched"}."""
     pool = _load_tx_pool(username)
@@ -764,6 +851,11 @@ def _ingest_csv(username: str, csv_bytes: bytes, filename: str) -> dict:
     added, matched = 0, 0
     for row in fresh:
         e = _row_to_entry(row, rules, filename)
+        if str(row.get("_recon", "")).strip().upper() == "Y":
+            # Master xlsx marks reconciled transactions — enter as history,
+            # not as open Review work.
+            e["status"] = "completed"
+            e["completed_at"] = e["added_at"]
         r = _find_receipt_match(e["date"], e["amount"], receipts_map, fx_receipts)
         if r is not None:
             _apply_receipt_match(e, r, receipts)
@@ -2569,6 +2661,10 @@ def _handle_upload(body, user=None):
     if not user:
         return ("redirect", "/cardconv/ledger")
     try:
+        # AMEX Master xlsx uploads are adapted to CSV shape, then flow through
+        # the same pipeline. Stored converted so Re-run works unchanged.
+        if csv_name.lower().endswith(".xlsx") or csv_bytes[:4] == b"PK\x03\x04":
+            csv_bytes = _master_xlsx_to_csv_bytes(csv_bytes)
         stats = _ingest_csv(user, csv_bytes, csv_name)
         _save_uploaded_csv(user, csv_bytes, csv_name, stats["added"], "")
         _add_hist({

@@ -439,16 +439,16 @@ def _render_convert(user: str) -> str:
 
   <div class="notepad-card" style="margin-bottom:20px">
     <div class="notepad-header">
-      <span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--accent)">Upload CSV</span>{_info_icon('Upload the Posted_*.csv downloaded from your AMEX statement. It will be automatically matched with receipts and exported as an SAP-ready xlsx.', right=True)}
+      <span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--accent)">Upload Statement</span>{_info_icon('Upload the Posted_*.csv downloaded from your AMEX statement, or an AMEX Master xlsx (recon export). Either is matched with receipts and exported as an SAP-ready xlsx.', right=True)}
     </div>
     <div class="notepad-body" style="padding:20px">
       <form id="upForm" method="POST" action="/cardconv/upload" enctype="multipart/form-data">
         <div class="upload-zone" id="dropZone" style="position:relative">
-          <input type="file" id="csvFile" name="file" accept=".csv"
+          <input type="file" id="csvFile" name="file" accept=".csv,.xlsx"
             onchange="handleCsvFile(this)"
             style="position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;z-index:2">
           <div style="font-size:2rem;margin-bottom:8px">📎</div>
-          <div style="font-weight:700;color:var(--text);margin-bottom:4px">Drop Posted_*.csv here</div>
+          <div style="font-weight:700;color:var(--text);margin-bottom:4px">Drop Posted_*.csv or AMEX Master xlsx here</div>
           <div style="font-size:.8rem;color:var(--text-muted)">or click to browse</div>
         </div>
         <div id="fileInfo" style="display:none;margin-top:12px;padding:12px 16px;background:var(--surface-2);border-radius:var(--radius-md);align-items:center;gap:12px">
@@ -541,6 +541,7 @@ function handleCsvFile(input) {{
   csvName.textContent = input.files[0].name;
   csvInfo.style.display = 'flex';
   csvZone.style.display = 'none';
+  if (/\.xlsx$/i.test(input.files[0].name)) return;  // binary — no name suggest
   const reader = new FileReader();
   reader.onload = e => parseCsvSuggest(e.target.result);
   reader.readAsText(input.files[0]);
