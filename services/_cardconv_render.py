@@ -755,6 +755,7 @@ def _render_review(user: str) -> str:
     out_fn    = review.get("out_filename", "")
     source    = review.get("source", "")
     gen_at    = (review.get("generated_at", "") or "")[:19].replace("T", " ")
+    dup_skipped = review.get("dup_skipped", 0)
 
     def _money(a):
         return f'${a:,.2f}' if isinstance(a, (int, float)) else (_esc(a) or '–')
@@ -835,6 +836,14 @@ def _render_review(user: str) -> str:
     download_btn = ('<button id="rvDownload" class="btn btn-primary">⬇ Download xlsx</button>'
                     if out_fn else '')
     meta_line = f'{_esc(source)} &nbsp;·&nbsp; {gen_at}' if source else 'No conversion staged'
+    dup_notice = ''
+    if dup_skipped:
+        dup_notice = (
+            '<div style="display:flex;align-items:center;gap:8px;padding:9px 14px;margin-bottom:14px;'
+            'border:1px solid rgba(59,130,246,.35);background:rgba(59,130,246,.08);'
+            'border-radius:var(--radius-md);font-size:.84rem;color:var(--text)">'
+            f'⏭ <b>{dup_skipped}</b>&nbsp;transaction(s) already converted in earlier uploads were skipped '
+            '<span style="color:var(--text-muted)">(overlapping statement period — delete the old upload in History to re-include them)</span></div>')
 
     return f'''<!DOCTYPE html>
 <html lang="en"><head>
@@ -904,6 +913,7 @@ def _render_review(user: str) -> str:
     <span>{meta_line}</span>{_info_icon('Shows converted transactions with receipt matching results. Unmatched rows (red) can be linked via 🔗 Match manually, or carried over to the next billing cycle.', right=True)}
   </div>
 
+  {dup_notice}
   <div class="stat-grid">
     <div class="stat-card"><div class="stat-value" id="rvTotal">{total}</div><div class="stat-label">Total</div></div>
     <div class="stat-card"><div class="stat-value" id="rvMatched" style="color:#22c55e">{matched}</div><div class="stat-label">Matched</div></div>

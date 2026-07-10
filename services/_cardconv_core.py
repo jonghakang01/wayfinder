@@ -1,4 +1,5 @@
 import csv, io, json, os, re, base64, uuid
+from collections import Counter
 from datetime import date, datetime
 from pathlib import Path
 
@@ -502,6 +503,63 @@ def _save_uploaded_csv(username: str, csv_bytes: bytes, orig_name: str,
     return entry
 
 
+# ── Cross-upload duplicate detection ──────────────────────────────────────────
+# Statement CSVs with overlapping periods repeat transactions. History keeps
+# every uploaded CSV, so it is the source of truth: deleting an upload there
+# automatically releases its transactions for re-conversion.
+
+def _tx_key(row: dict):
+    """Duplicate-detection key for one CSV transaction row."""
+    try:
+        amt = f"{float(row.get('Amount', 0)):.2f}"
+    except (ValueError, TypeError):
+        amt = str(row.get('Amount', '')).strip()
+    return (
+        (row.get('Date') or '').strip(),
+        amt,
+        (row.get('Account Number') or '').strip(),
+        (row.get('Merchant Name') or '').strip().upper(),
+    )
+
+
+def _prior_tx_counter(username: str, exclude_id: str = None) -> Counter:
+    """Multiset of transaction keys across previously uploaded CSVs."""
+    counts = Counter()
+    d = _uploads_dir(username)
+    for entry in _load_uploads(username):
+        if exclude_id and entry.get('id') == exclude_id:
+            continue
+        p = d / entry.get('stored_name', '')
+        if not p.exists():
+            continue
+        try:
+            reader = csv.DictReader(
+                io.TextIOWrapper(io.BytesIO(p.read_bytes()), encoding='utf-8-sig', newline=''))
+            for row in reader:
+                counts[_tx_key(row)] += 1
+        except Exception:
+            continue  # unreadable CSV must not block conversion
+    return counts
+
+
+def _dedup_rows(rows: list, prior: Counter) -> tuple:
+    """(kept_rows, skipped_count). Multiset semantics: N prior occurrences
+    absorb at most N new ones, so legitimate same-day/same-amount repeats
+    within one statement survive."""
+    if not prior:
+        return rows, 0
+    kept, skipped = [], 0
+    remaining = Counter(prior)
+    for r in rows:
+        k = _tx_key(r)
+        if remaining.get(k, 0) > 0:
+            remaining[k] -= 1
+            skipped += 1
+        else:
+            kept.append(r)
+    return kept, skipped
+
+
 # ── Drive OAuth helpers ───────────────────────────────────────────────────────
 
 def _get_creds(username: str):
@@ -968,8 +1026,12 @@ def _parse_date(s: str):
     return None
 
 
-def convert(csv_bytes: bytes, filename: str, username: str = None) -> tuple:
-    """Returns (xlsx_bytes, out_filename, total_rows, unmatched_count)."""
+def convert(csv_bytes: bytes, filename: str, username: str = None,
+            exclude_upload_id: str = None) -> tuple:
+    """Returns (xlsx_bytes, out_filename, total_rows, unmatched_count, dup_skipped).
+
+    exclude_upload_id: skip that History entry when building the duplicate
+    filter — required for re-runs so a CSV isn't deduped against itself."""
     rules  = _load_kw()
     today  = date.today()
     m      = re.search(r'(\d{4}-\d{2}-\d{2})', filename)
@@ -986,6 +1048,11 @@ def convert(csv_bytes: bytes, filename: str, username: str = None) -> tuple:
     target_names = set(_get_card_member_names(username))
     reader = csv.DictReader(io.TextIOWrapper(io.BytesIO(csv_bytes), encoding='utf-8-sig', newline=''))
     rows   = [r for r in reader if r.get("Card Member Name","").strip().upper() in target_names]
+
+    # Drop transactions already converted in a previous upload (overlapping periods).
+    dup_skipped = 0
+    if username:
+        rows, dup_skipped = _dedup_rows(rows, _prior_tx_counter(username, exclude_id=exclude_upload_id))
 
     wb = openpyxl.load_workbook(template_path)
     ws = wb["sheetMst"]
@@ -1211,6 +1278,7 @@ def convert(csv_bytes: bytes, filename: str, username: str = None) -> tuple:
             "matched":      receipt_matched,
             "unmatched":    len(rows) - receipt_matched,
             "kw_unmatched": unmatched,
+            "dup_skipped":  dup_skipped,
             "rows":         review_rows,
         })
 
@@ -1218,7 +1286,7 @@ def convert(csv_bytes: bytes, filename: str, username: str = None) -> tuple:
     wb.save(buf)
     xlsx_bytes = buf.getvalue()
     (OUT_DIR / out_fn).write_bytes(xlsx_bytes)
-    return xlsx_bytes, out_fn, len(rows), unmatched
+    return xlsx_bytes, out_fn, len(rows), unmatched, dup_skipped
 
 
 # ── Ledger ──────────────────────────────────────────────────────────────────
@@ -2471,15 +2539,16 @@ def _handle_upload(body, user=None):
         return ("redirect", "/cardconv/ledger")
 
     try:
-        xlsx_bytes, out_fn, total, unmatched = convert(csv_bytes, csv_name, username=user)
+        xlsx_bytes, out_fn, total, unmatched, dup_skipped = convert(csv_bytes, csv_name, username=user)
         _add_hist({
-            "type":      "conversion",
-            "filename":  out_fn,
-            "source":    csv_name,
-            "rows":      total,
-            "unmatched": unmatched,
-            "date":      datetime.now().strftime("%Y-%m-%d %H:%M"),
-            "user":      user or "",
+            "type":        "conversion",
+            "filename":    out_fn,
+            "source":      csv_name,
+            "rows":        total,
+            "unmatched":   unmatched,
+            "dup_skipped": dup_skipped,
+            "date":        datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "user":        user or "",
         })
         if user:
             _save_uploaded_csv(user, csv_bytes, csv_name, total, out_fn)
@@ -2501,13 +2570,15 @@ def _handle_upload_rerun(username: str, uid: str):
     try:
         csv_bytes = stored.read_bytes()
         fn = entry.get("filename", "upload.csv")
-        xlsx_bytes, out_fn, total, unmatched = convert(csv_bytes, fn, username=username)
+        xlsx_bytes, out_fn, total, unmatched, dup_skipped = convert(
+            csv_bytes, fn, username=username, exclude_upload_id=uid)
         _add_hist({
-            "filename":  out_fn,
-            "source":    fn,
-            "rows":      total,
-            "unmatched": unmatched,
-            "date":      datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "filename":    out_fn,
+            "source":      fn,
+            "rows":        total,
+            "unmatched":   unmatched,
+            "dup_skipped": dup_skipped,
+            "date":        datetime.now().strftime("%Y-%m-%d %H:%M"),
         })
         entry["rows"] = total
         entry["out_filename"] = out_fn
