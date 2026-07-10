@@ -110,7 +110,8 @@ def _render_drive_connected(folder_url: str = "") -> str:
 # ── Shared tab bar ───────────────────────────────────────────────────────────
 
 _CC_TAB_CSS = (
-    ".cc-tabs{display:inline-flex;align-items:center;gap:2px;padding:3px;margin-bottom:20px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md);flex-wrap:wrap;max-width:100%}"
+    ".cc-tabbar{position:sticky;top:0;z-index:150;background:var(--bg-deep);padding:12px 0 10px;margin:-12px 0 10px}"
+    ".cc-tabs{display:inline-flex;align-items:center;gap:2px;padding:3px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md);flex-wrap:wrap;max-width:100%}"
     ".cc-tab{display:inline-flex;align-items:center;padding:7px 16px;font-size:.82rem;font-weight:600;color:var(--text-muted);border-radius:var(--radius-sm);text-decoration:none;transition:background .15s,color .15s}"
     ".cc-tab:hover{color:var(--text)}"
     ".cc-tab.active{background:var(--accent);color:var(--on-accent)}"
@@ -172,7 +173,9 @@ def _tab_bar(active: str, user: str) -> str:
         cls = "cc-tab active" if key == active else "cc-tab"
         out.append(f'<a href="{href}" class="{cls}">{label}</a>')
     out.append('</div>')
-    return "".join(out) + _workflow_bar(active, user)
+    # Sticky wrapper: the tab pill stays pinned while the page scrolls, and its
+    # full-width ground hides content passing behind it.
+    return '<div class="cc-tabbar">' + "".join(out) + '</div>' + _workflow_bar(active, user)
 
 
 def _info_icon(tip: str, right: bool = False) -> str:
@@ -408,7 +411,7 @@ def _render_convert(user: str) -> str:
   <span class="nav-brand">💳 Cheil USA AMEX Converter</span>
   <span class="nav-user">👤 {user} &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
 </nav>
-<div class="container" style="max-width:860px">
+<div class="container" style="max-width:1100px">
   {_tab_bar("convert", user)}
 
   <div class="notepad-card" style="margin-bottom:20px">
@@ -622,7 +625,7 @@ def _render_history(user: str) -> str:
   <span class="nav-brand">💳 Cheil USA AMEX Converter</span>
   <span class="nav-user">👤 {user} &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
 </nav>
-<div class="container" style="max-width:860px">
+<div class="container" style="max-width:1100px">
   {_tab_bar("history", user)}
 
   <div class="notepad-card" style="margin-bottom:20px">
@@ -708,7 +711,7 @@ def _render_keywords(user: str) -> str:
   <span class="nav-brand">💳 Cheil USA AMEX Converter</span>
   <span class="nav-user">👤 {user} &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
 </nav>
-<div class="container" style="max-width:860px">
+<div class="container" style="max-width:1100px">
   {_tab_bar("keywords", user)}
 
   <div class="notepad-card" id="keywords">
@@ -938,7 +941,7 @@ def _render_review(user: str) -> str:
   <span class="nav-brand">💳 Cheil USA AMEX Converter</span>
   <span class="nav-user">👤 {user} &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
 </nav>
-<div class="container" style="max-width:920px">
+<div class="container" style="max-width:1100px">
   {_tab_bar("review", user)}
 
   <div style="font-size:.8rem;color:var(--text-muted);margin-bottom:12px;display:flex;align-items:center;gap:6px">
