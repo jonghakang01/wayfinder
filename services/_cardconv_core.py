@@ -1747,10 +1747,11 @@ def _handle_ledger_api(username: str, query: dict):
         page = max(1, int((query.get("page", ["1"]) or ["1"])[0]))
     except ValueError:
         page = 1
+    # limit<=0 (the default) returns everything — the Ledger shows all rows at once.
     try:
-        limit = max(1, int((query.get("limit", ["50"]) or ["50"])[0]))
+        limit = int((query.get("limit", ["0"]) or ["0"])[0])
     except ValueError:
-        limit = 50
+        limit = 0
 
     filtered = _apply_ledger_filters(entries, f["status"], f["dfrom"], f["dto"],
                                      f["card_brand"], f["usage"], f["completed"])
@@ -1758,8 +1759,12 @@ def _handle_ledger_api(username: str, query: dict):
 
     stats   = _ledger_stats(filtered)
     total_f = len(filtered)
-    pages   = max(1, (total_f + limit - 1) // limit)
-    start   = (page - 1) * limit
+    if limit > 0:
+        pages = max(1, (total_f + limit - 1) // limit)
+        start = (page - 1) * limit
+        page_entries = filtered[start:start + limit]
+    else:
+        pages, page, page_entries = 1, 1, filtered
     # Distinct usage tags across the whole ledger (for the filter dropdown), and
     # a completed count so the UI can surface how many are archived.
     usages = sorted({(e.get("usage") or "Regular") for e in entries})
@@ -1774,7 +1779,7 @@ def _handle_ledger_api(username: str, query: dict):
         "page":        page,
         "pages":       pages,
         "last_synced": ledger.get("last_batch_at"),
-        "entries":     filtered[start:start + limit],
+        "entries":     page_entries,
     })
 
 

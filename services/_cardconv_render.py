@@ -1544,10 +1544,6 @@ __TABCSS__
 /* SVG is sized/positioned in JS to overlap the rendered (object-fit:contain) image rect. */
 .receipt-bbox-overlay{position:absolute;top:0;left:0;pointer-events:none;display:none}
 .detail-actions{padding:16px 20px;display:flex;flex-direction:column;gap:8px;margin-top:auto}
-.pagination{display:flex;align-items:center;justify-content:center;gap:12px;padding:14px;font-size:.82rem;color:var(--text-muted)}
-.pagination button{background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);
-  padding:4px 12px;font-size:.8rem;cursor:pointer}
-.pagination button:disabled{opacity:.4;cursor:default}
 .fb-advanced{display:none}
 .fb-advanced.open{display:flex}
 .fb-more-btn{background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:.78rem;font-weight:600;padding:5px 11px;cursor:pointer;display:inline-flex;align-items:center;gap:5px}
@@ -1653,11 +1649,6 @@ __TABCSS__
         </tr></thead>
         <tbody id="ledgerBody"></tbody>
       </table>
-      <div class="pagination">
-        <button id="pPrev">Prev</button>
-        <span id="pInfo">1 / 1</span>
-        <button id="pNext">Next</button>
-      </div>
     </div>
   </div>
 
@@ -1777,7 +1768,7 @@ __TABCSS__
 </div>
 
 <script>
-let CUR_PAGE = 1, CUR_ID = null, CUR_FILE_ID = null, ENTRIES = [], VIEW_MODE = 'all';
+let CUR_ID = null, CUR_FILE_ID = null, ENTRIES = [], VIEW_MODE = 'all';
 const $ = id => document.getElementById(id);
 const STATUS_LABEL = {matched:'✅ Matched', unmatched:'❌ Unmatched', pending_match:'⏳ Pending Match'};
 
@@ -2066,7 +2057,6 @@ function syncUsageOptions(usages){
 
 async function load(){
   const p = filterParams();
-  p.set('page', CUR_PAGE);
   const r = await fetch('/cardconv/ledger/api?' + p.toString());
   const d = await r.json();
   $('statTotal').textContent = d.total;
@@ -2078,11 +2068,6 @@ async function load(){
   ENTRIES = d.entries;
   rerender();
   renderLastSynced(d.last_synced);
-  $('pInfo').textContent = d.page + ' / ' + d.pages;
-  $('pPrev').disabled = d.page <= 1;
-  $('pNext').disabled = d.page >= d.pages;
-  CUR_PAGE = d.page;
-  window._pages = d.pages;
 }
 
 function escSvg(s){
@@ -2420,7 +2405,6 @@ function applyPreset(p){
   else if(p==='all'){ from = ''; to = ''; }
   $('fFrom').value = from;
   $('fTo').value = to;
-  CUR_PAGE = 1;
   load();
 }
 
@@ -2435,12 +2419,12 @@ document.querySelectorAll('.detail-actions button[data-set]').forEach(b =>
 $('panelClose').addEventListener('click', closePanel);
 $('overlay').addEventListener('click', closePanel);
 document.addEventListener('keydown', e => { if(e.key==='Escape') closePanel(); });
-$('fFrom').addEventListener('change', () => { CUR_PAGE=1; load(); });
-$('fTo').addEventListener('change', () => { CUR_PAGE=1; load(); });
-$('fStatus').addEventListener('change', () => { CUR_PAGE=1; load(); });
-$('fCard').addEventListener('change', () => { CUR_PAGE=1; load(); });
-$('fUsage').addEventListener('change', () => { CUR_PAGE=1; load(); });
-$('fCompleted').addEventListener('change', () => { CUR_PAGE=1; load(); });
+$('fFrom').addEventListener('change', load);
+$('fTo').addEventListener('change', load);
+$('fStatus').addEventListener('change', load);
+$('fCard').addEventListener('change', load);
+$('fUsage').addEventListener('change', load);
+$('fCompleted').addEventListener('change', load);
 $('fMore').addEventListener('click', () => {
   const adv = $('fAdvanced'), open = adv.classList.toggle('open');
   $('fMore').classList.toggle('open', open);
@@ -2448,7 +2432,7 @@ $('fMore').addEventListener('click', () => {
 });
 $('fReset').addEventListener('click', () => {
   $('fStatus').value='all'; $('fCard').value='all'; $('fUsage').value='all';
-  $('fCompleted').value='hide'; setDefaultDates(); CUR_PAGE=1; load();
+  $('fCompleted').value='hide'; setDefaultDates(); load();
 });
 // Both downloads respect the currently applied filters.
 $('fDownload').addEventListener('click', () => {
@@ -2457,8 +2441,6 @@ $('fDownload').addEventListener('click', () => {
 $('fDownloadXlsx').addEventListener('click', () => {
   window.location = '/cardconv/ledger/download.xlsx?' + filterParams().toString();
 });
-$('pPrev').addEventListener('click', () => { if(CUR_PAGE>1){CUR_PAGE--; load();} });
-$('pNext').addEventListener('click', () => { if(CUR_PAGE<window._pages){CUR_PAGE++; load();} });
 $('fDelete').addEventListener('click', deleteSelected);
 $('fComplete').addEventListener('click', () => completeSelected(false));
 $('fUncomplete').addEventListener('click', () => completeSelected(true));
