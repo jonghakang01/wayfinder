@@ -2211,9 +2211,16 @@ def _handle_ledger_pdf(username: str, query: dict):
 
     f = _parse_filter_params(query)
     status, dfrom, dto = f["status"], f["dfrom"], f["dto"]
-    entries = _apply_ledger_filters(_ledger_entries(username), status, dfrom, dto,
-                                    f["card_brand"], f["usage"], f["completed"],
-                                    f["merchant"], f["sort"])
+    rids_q = (query.get("rids", [""]) or [""])[0]
+    if rids_q:
+        # Explicit receipt selection (Review "download selected") — bypasses
+        # the ledger filters entirely.
+        want = {r for r in rids_q.split(",") if r}
+        entries = [e for e in _ledger_entries(username) if e.get("id") in want]
+    else:
+        entries = _apply_ledger_filters(_ledger_entries(username), status, dfrom, dto,
+                                        f["card_brand"], f["usage"], f["completed"],
+                                        f["merchant"], f["sort"])
     stats   = _ledger_stats(entries)
     service = _get_drive_service(username)
 
@@ -2887,18 +2894,29 @@ def _handle_review_complete(username: str, body: dict):
     return ("json", {"ok": True, "touched": touched, "undo": undo})
 
 
-def _handle_review_download(username: str, query: dict):
-    """GET /cardconv/review/download — xlsx of the OPEN transactions, built on
-    demand from the pool. from/to (YYYY-MM-DD) filter by transaction date;
-    dateless rows are always kept, matching the Ledger/Review convention."""
+def _select_review_entries(username: str, query: dict) -> list:
+    """Transactions targeted by a Review download: an explicit `ids` selection,
+    or all OPEN transactions within the optional from/to date range (dateless
+    rows always kept, matching the Ledger/Review convention)."""
+    pool = _load_tx_pool(username)
+    ids_q = (query.get("ids", [""]) or [""])[0]
+    if ids_q:
+        want = {i for i in ids_q.split(",") if i}
+        return [e for e in pool["entries"] if e.get("id") in want]
     dfrom = (query.get("from", [""]) or [""])[0]
     dto   = (query.get("to", [""]) or [""])[0]
-    pool = _load_tx_pool(username)
     entries = [e for e in pool["entries"] if e.get("status") != "completed"]
     if dfrom or dto:
         entries = [e for e in entries
                    if not e.get("date")
                    or ((not dfrom or e["date"] >= dfrom) and (not dto or e["date"] <= dto))]
+    return entries
+
+
+def _handle_review_download(username: str, query: dict):
+    """GET /cardconv/review/download — xlsx of open (or explicitly selected)
+    transactions, built on demand from the pool."""
+    entries = _select_review_entries(username, query)
     if not entries:
         return ("html", "<h2 style='padding:40px'>No open transactions to download.</h2>", 404)
     try:
@@ -2907,6 +2925,18 @@ def _handle_review_download(username: str, query: dict):
         return ("html", f"<h2 style='padding:40px'>{e}</h2>", 404)
     return ("file_inline", xlsx_bytes,
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", out_fn)
+
+
+def _handle_review_pdf(username: str, query: dict):
+    """GET /cardconv/review/download.pdf — receipt-image PDF for the matched
+    receipts of the targeted transactions (selected ids, or all open)."""
+    entries = _select_review_entries(username, query)
+    rids = [(e.get("receipt") or {}).get("id") for e in entries if e.get("matched")]
+    rids = [r for r in rids if r]
+    if not rids:
+        return ("html", "<h2 style='padding:40px'>No matched receipts among the "
+                        "targeted transactions.</h2>", 404)
+    return _handle_ledger_pdf(username, {"rids": [",".join(rids)]})
 
 
 _CARD_BRAND_LABEL = {"amex": "AMEX", "visa": "Visa", "other": "Other"}

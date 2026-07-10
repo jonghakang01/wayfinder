@@ -42,6 +42,8 @@ def handle(method, path, body, ctx=None):
         return ("json", _rematch_pool(user))
     if method == "GET" and path == "/cardconv/review/download":
         return _handle_review_download(user, body)  # GET passes query dict as body
+    if method == "GET" and path == "/cardconv/review/download.pdf":
+        return _handle_review_pdf(user, body)
 
     # Ledger
     if method == "GET" and path == "/cardconv/ledger":

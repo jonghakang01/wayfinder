@@ -872,7 +872,8 @@ def _render_review(user: str) -> str:
                 f'data-matched="{"1" if is_matched else "0"}">{txn}{receipt_block}</div>')
         body_html = "".join(items)
 
-    download_btn = ('<button id="rvDownload" class="btn btn-primary">⬇ Download xlsx (open)</button>'
+    download_btn = (('<button id="rvDownload" class="btn btn-primary">⬇ xlsx</button>'
+                     '<button id="rvDownloadPdf" class="btn btn-secondary">📄 Receipts PDF</button>')
                     if total else '')
     if li:
         li_at = (li.get("at", "") or "")[:16].replace("T", " ")
@@ -1136,14 +1137,30 @@ function clearPresetActive(){{ document.querySelectorAll('.preset-btn').forEach(
 document.querySelectorAll('.preset-btn').forEach(b =>
   b.addEventListener('click', () => applyPreset(b.dataset.preset)));
 
-// Filtered xlsx download — only the currently filtered transactions are included.
+// Downloads: checked rows take priority (download selected only); otherwise
+// the current date filter applies to all open transactions.
+function rvDlParams(){{
+  const p = new URLSearchParams();
+  const ids = Array.from(document.querySelectorAll('.rv-cb:checked')).map(cb => cb.dataset.id);
+  if(ids.length){{ p.set('ids', ids.join(',')); return p; }}
+  if($('rvFrom').value) p.set('from', $('rvFrom').value);
+  if($('rvTo').value)   p.set('to', $('rvTo').value);
+  return p;
+}}
 const rvDl = $('rvDownload');
 if(rvDl){{
   rvDl.addEventListener('click', () => {{
-    const p = new URLSearchParams();
-    if($('rvFrom').value) p.set('from', $('rvFrom').value);
-    if($('rvTo').value)   p.set('to', $('rvTo').value);
-    window.location = '/cardconv/review/download?' + p.toString();
+    window.location = '/cardconv/review/download?' + rvDlParams().toString();
+  }});
+  $('rvDownloadPdf').addEventListener('click', () => {{
+    window.location = '/cardconv/review/download.pdf?' + rvDlParams().toString();
+  }});
+  // Reflect the selection count on the download buttons.
+  document.addEventListener('change', e => {{
+    if(!e.target.classList || (!e.target.classList.contains('rv-cb') && e.target.id !== 'rvSelAll')) return;
+    const n = document.querySelectorAll('.rv-cb:checked').length;
+    rvDl.textContent = n ? ('⬇ xlsx (' + n + ' selected)') : '⬇ xlsx';
+    $('rvDownloadPdf').textContent = n ? ('📄 Receipts PDF (' + n + ' selected)') : '📄 Receipts PDF';
   }});
 }}
 
