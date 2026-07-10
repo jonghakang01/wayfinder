@@ -335,7 +335,7 @@ body{background:var(--bg-deep);color:var(--text);font-family:'Pretendard Variabl
 .notepad-chevron{font-size:0.7rem;color:var(--text-muted);cursor:pointer;transition:transform 0.2s;user-select:none}
 .notepad-card.collapsed .notepad-chevron{transform:rotate(-90deg)}
 .notepad-name{font-weight:700;font-size:1rem;color:var(--text);flex:1;letter-spacing:-0.01em}
-.notepad-count{font-size:11px;font-weight:700;padding:2px 9px;background:var(--accent);color:#080d14;border-radius:99px;min-width:22px;text-align:center}
+.notepad-count{font-size:11px;font-weight:700;padding:2px 9px;background:var(--accent);color:var(--on-accent);border-radius:99px;min-width:22px;text-align:center}
 .notepad-body{padding:8px 12px 4px}
 .notepad-card.collapsed .notepad-body{display:none}
 nav{position:sticky;top:0;left:0;right:0;padding:13px 32px;background:rgba(8,13,20,0.95);backdrop-filter:blur(12px);border-bottom:1px solid rgba(255,255,255,0.07);display:flex;align-items:center;justify-content:space-between;z-index:100}

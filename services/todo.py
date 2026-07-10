@@ -555,7 +555,7 @@ def render(todos, habits, user, readonly=False):
 .notepad-chevron {{ font-size:0.7rem; color:var(--text-muted); cursor:pointer; transition:transform 0.2s; user-select:none; }}
 .notepad-card.collapsed .notepad-chevron {{ transform:rotate(-90deg); }}
 .notepad-name {{ font-weight:var(--fw-bold); font-size:var(--text-md); color:var(--text); flex:1; }}
-.notepad-count {{ font-size:var(--text-xs); font-weight:var(--fw-bold); padding:2px 9px; background:var(--accent); color:#080d14; border-radius:var(--radius-full); min-width:22px; text-align:center; }}
+.notepad-count {{ font-size:var(--text-xs); font-weight:var(--fw-bold); padding:2px 9px; background:var(--accent); color:var(--on-accent); border-radius:var(--radius-full); min-width:22px; text-align:center; }}
 .notepad-del-btn {{ background:transparent; border:none; color:var(--text-dim); font-size:1.1rem; cursor:pointer; padding:0 4px; transition:color 0.15s; }}
 .notepad-del-btn:hover {{ color:var(--danger); }}
 .notepad-body {{ padding:8px 12px 4px; }}
@@ -623,7 +623,7 @@ def render(todos, habits, user, readonly=False):
 .h-name {{ flex:1; font-size:0.9rem; font-weight:600; color:var(--text); }}
 .h-streak {{ font-size:0.75rem; color:var(--warn); font-weight:700; white-space:nowrap; background:rgba(251,191,36,0.1); padding:2px 8px; border-radius:var(--radius-full); border:1px solid rgba(251,191,36,0.3); }}
 .h-actions {{ display:flex; gap:6px; align-items:center; flex-shrink:0; }}
-.hb-check {{ background:var(--accent); color:#080d14; font-size:0.78rem; padding:4px 12px; border-radius:6px; border:none; cursor:pointer; font-weight:700; transition:0.2s; }}
+.hb-check {{ background:var(--accent); color:var(--on-accent); font-size:0.78rem; padding:4px 12px; border-radius:6px; border:none; cursor:pointer; font-weight:700; transition:0.2s; }}
 .hb-check:hover {{ opacity:0.88; transform:translateY(-1px); box-shadow:0 4px 10px rgba(56,189,248,0.3); }}
 .hb-done {{ font-size:0.78rem; color:var(--success); font-weight:700; padding:4px 8px; background:rgba(52,211,153,0.1); border-radius:6px; border:1px solid rgba(52,211,153,0.3); }}
 .hb-detail {{ background:var(--surface-2); color:var(--text-muted); font-size:0.78rem; text-decoration:none; padding:4px 10px; border-radius:6px; border:1px solid var(--border); transition:0.2s; }}
