@@ -61,6 +61,22 @@ STYLE = """
   --btn-h-sm:28px; --btn-h-base:32px; --btn-h-lg:40px;
   --notepad-header:var(--surface-2); --notepad-line:var(--border);
 }
+/* Light theme — activated by data-theme="light" on <html> (toggle, localStorage) */
+:root[data-theme="light"] {
+  /* Guide v2, direction A "Deep Sky" — accent only on buttons/links/active
+     tabs/badges, never body text. Status colors are a separate axis. */
+  --bg-deep:#F6F7F9; --surface:#FFFFFF; --surface-2:#EFF1F4; --surface-3:#E6EAF0;
+  --border:#E2E6EC; --border-bright:#CBD5E1;
+  --text:#1B2330; --text-muted:#5F6B7A; --text-dim:#98A2B0;
+  --accent:#0269A6; --accent-glow:rgba(2,105,166,0.10);
+  --success:#177E42; --warn:#B45309; --danger:#D33A3A; --info:#4F46E5;
+  --slate-50:#111827; --slate-100:#1C2430; --slate-200:#334155;
+  --slate-300:#475569; --slate-400:#66707E; --slate-500:#5A6472;
+  --slate-700:#CBD5E1;
+  --shadow-sm:0 1px 4px rgba(28,36,48,0.08);
+  --shadow-md:0 4px 16px rgba(28,36,48,0.10);
+  --shadow-lg:0 8px 32px rgba(28,36,48,0.14);
+}
 * { box-sizing: border-box; margin: 0; padding: 0; }
 input, textarea, select, button { font-family: inherit; font-size: inherit; }
 body { font-family: 'Pretendard Variable', Pretendard, -apple-system, system-ui, sans-serif; background: var(--bg-deep); color: var(--text); line-height: 1.5; -webkit-font-smoothing: antialiased; min-height: 100vh; }
@@ -362,6 +378,7 @@ PWA_INJECT = (
     '<meta name="apple-mobile-web-app-title" content="Wayfinder">'
     '<link rel="apple-touch-icon" href="/icons/icon.svg">'
     "<script>if('serviceWorker'in navigator)navigator.serviceWorker.register('/sw.js');</script>"
+    "<script>try{var _t=localStorage.getItem('wf-theme');if(_t)document.documentElement.dataset.theme=_t;}catch(e){}</script>"
 )
 
 # Small floating "back to home" link injected into every app page (not the home/login,
@@ -373,6 +390,20 @@ WAYFINDER_BACK = (
     'color:#cbd5e1;border:1px solid #334155;border-radius:99px;font-size:.78rem;'
     'font-weight:600;text-decoration:none;backdrop-filter:blur(6px);'
     'box-shadow:0 4px 14px rgba(0,0,0,.35)">🧭 Wayfinder</a>'
+)
+
+THEME_TOGGLE = (
+    '<button id="wfThemeBtn" title="Toggle light/dark" onclick="wfToggleTheme()" '
+    'style="position:fixed;right:16px;bottom:16px;z-index:9999;width:40px;height:40px;'
+    'border-radius:50%;border:1px solid var(--border-bright,#334155);cursor:pointer;'
+    'background:var(--surface,#111827);color:var(--text,#f1f5f9);font-size:1.02rem;'
+    'line-height:1;box-shadow:0 4px 14px rgba(0,0,0,.3)"></button>'
+    "<script>function wfThemeIcon(){var l=document.documentElement.dataset.theme==='light';"
+    "var b=document.getElementById('wfThemeBtn');if(b)b.textContent=l?'🌙':'☀️';}"
+    "function wfToggleTheme(){var r=document.documentElement;"
+    "r.dataset.theme=(r.dataset.theme==='light')?'dark':'light';"
+    "try{localStorage.setItem('wf-theme',r.dataset.theme)}catch(e){}wfThemeIcon();}"
+    "wfThemeIcon();</script>"
 )
 
 CATEGORIES = {
@@ -573,6 +604,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def send_html(self, html, code=200):
         html = html.replace('</head>', PWA_INJECT + '</head>', 1)
+        if '</body>' in html:
+            html = html.replace('</body>', THEME_TOGGLE + '</body>', 1)
         if '<!--wf-root-->' not in html and '</body>' in html:
             html = html.replace('</body>', WAYFINDER_BACK + '</body>', 1)
         b = html.encode()
