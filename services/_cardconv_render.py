@@ -872,7 +872,8 @@ def _render_review(user: str) -> str:
                 f'data-matched="{"1" if is_matched else "0"}">{txn}{receipt_block}</div>')
         body_html = "".join(items)
 
-    download_btn = (('<button id="rvDownload" class="btn btn-secondary btn-sm">⬇ xlsx</button>'
+    download_btn = (('<button id="rvDownload" class="btn btn-secondary btn-sm" '
+                     'title="SAP upload file (for_upload_*.xlsx)">⬇ xlsx (SAP)</button>'
                      '<button id="rvDownloadPdf" class="btn btn-secondary btn-sm" '
                      'title="Receipt images of the matched transactions">⬇ PDF</button>')
                     if total else '')
@@ -1153,7 +1154,7 @@ if(rvDl){{
   document.addEventListener('change', e => {{
     if(!e.target.classList || (!e.target.classList.contains('rv-cb') && e.target.id !== 'rvSelAll')) return;
     const n = document.querySelectorAll('.rv-cb:checked').length;
-    rvDl.textContent = n ? ('⬇ xlsx (' + n + ' selected)') : '⬇ xlsx';
+    rvDl.textContent = n ? ('⬇ xlsx (SAP · ' + n + ' selected)') : '⬇ xlsx (SAP)';
     $('rvDownloadPdf').textContent = n ? ('⬇ PDF (' + n + ' selected)') : '⬇ PDF';
   }});
 }}
@@ -1658,7 +1659,7 @@ __TABCSS__
     </div>
     <button class="fb-more-btn fb-spacer" id="fMore" aria-expanded="false">More filters <span class="chev">▾</span></button>
     <div class="fb-group">
-      <button class="btn btn-secondary btn-sm" id="fDownloadXlsx">⬇ xlsx</button>
+      <button class="btn btn-secondary btn-sm" id="fDownloadXlsx" title="Ledger backup with Card Type/Usage columns — NOT for SAP upload (use Review's xlsx)">⬇ xlsx (ledger)</button>
       <button class="btn btn-secondary btn-sm" id="fDownload">⬇ PDF</button>
     </div>
   </div>
