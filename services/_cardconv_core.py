@@ -1,4 +1,4 @@
-import csv, io, json, os, re, base64, uuid
+import csv, io, json, os, re, base64, uuid, zipfile
 from collections import Counter
 from datetime import date, datetime
 from pathlib import Path
@@ -915,6 +915,73 @@ def _ingest_csv(username: str, csv_bytes: bytes, filename: str) -> dict:
     return {"added": added, "dup_skipped": dup_skipped, "matched": matched}
 
 
+def _inline_to_shared_strings(xlsx_bytes: bytes) -> bytes:
+    """Rewrite an openpyxl-saved xlsx to use a sharedStrings table.
+
+    openpyxl (3.1+) hardcodes strings as t="inlineStr", which strict parsers
+    (SAP's Excel upload among them) don't understand — cells get misread and
+    numeric columns render as dates. Excel itself always writes t="s" +
+    xl/sharedStrings.xml, so we convert to that form.
+    """
+    src = zipfile.ZipFile(io.BytesIO(xlsx_bytes))
+    parts = {n: src.read(n) for n in src.namelist()}
+
+    strings: list = []
+    index: dict = {}
+    total = 0
+
+    cell_re = re.compile(
+        rb'(<c [^>]*?)t="inlineStr"([^>]*)><is><t(?: xml:space="preserve")?>'
+        rb'(.*?)</t></is></c>', re.S)
+
+    def convert(m):
+        nonlocal total
+        text = m.group(3)
+        if text not in index:
+            index[text] = len(strings)
+            strings.append(text)
+        total += 1
+        idx = index[text]
+        return m.group(1) + b't="s"' + m.group(2) + b'><v>' + str(idx).encode() + b'</v></c>'
+
+    for name in list(parts):
+        if name.startswith("xl/worksheets/") and name.endswith(".xml"):
+            parts[name] = cell_re.sub(convert, parts[name])
+
+    if strings:
+        sst = [b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+               b'<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+               b'count="%d" uniqueCount="%d">' % (total, len(strings))]
+        for s in strings:
+            pre = b' xml:space="preserve"' if s.strip() != s else b''
+            sst.append(b'<si><t%s>%s</t></si>' % (pre, s))
+        sst.append(b'</sst>')
+        parts["xl/sharedStrings.xml"] = b''.join(sst)
+
+        ct = parts["[Content_Types].xml"]
+        if b'sharedStrings' not in ct:
+            parts["[Content_Types].xml"] = ct.replace(
+                b'</Types>',
+                b'<Override PartName="/xl/sharedStrings.xml" ContentType='
+                b'"application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/></Types>')
+
+        rels = parts["xl/_rels/workbook.xml.rels"]
+        if b'sharedStrings' not in rels:
+            rids = [int(x) for x in re.findall(rb'Id="rId(\d+)"', rels)]
+            new_rid = max(rids or [0]) + 1
+            parts["xl/_rels/workbook.xml.rels"] = rels.replace(
+                b'</Relationships>',
+                b'<Relationship Id="rId%d" Type="http://schemas.openxmlformats.org/'
+                b'officeDocument/2006/relationships/sharedStrings" '
+                b'Target="sharedStrings.xml"/></Relationships>' % new_rid)
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as out:
+        for name, data in parts.items():
+            out.writestr(name, data)
+    return buf.getvalue()
+
+
 def _build_xlsx_from_entries(entries: list) -> tuple:
     """(xlsx_bytes, out_filename) from pool entries via the SAP template."""
     if TEMPLATE.exists():
@@ -985,7 +1052,7 @@ def _build_xlsx_from_entries(entries: list) -> tuple:
 
     buf = io.BytesIO()
     wb.save(buf)
-    xlsx_bytes = buf.getvalue()
+    xlsx_bytes = _inline_to_shared_strings(buf.getvalue())
     (OUT_DIR / out_fn).write_bytes(xlsx_bytes)
     return xlsx_bytes, out_fn
 
@@ -3025,7 +3092,7 @@ def _handle_ledger_xlsx(username: str, query: dict):
     buf = io.BytesIO()
     wb.save(buf)
     out_fn = f"ledger_export_{today.strftime('%Y-%m-%d')}.xlsx"
-    return ("file_inline", buf.getvalue(),
+    return ("file_inline", _inline_to_shared_strings(buf.getvalue()),
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", out_fn)
 
 
