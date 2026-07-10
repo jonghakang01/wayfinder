@@ -1541,14 +1541,17 @@ def _handle_batch_run(username: str, ctx):
 
 def _apply_ledger_filters(entries: list, status: str, dfrom: str, dto: str,
                           card_brand: str = "", usage: str = "",
-                          completed: str = "hide") -> list:
-    """Filter + sort ledger entries by status, OCR-date range, card brand, usage
-    and completion state.
+                          completed: str = "hide", merchant: str = "",
+                          sort: str = "date") -> list:
+    """Filter + sort ledger entries by status, OCR-date range, card brand, usage,
+    completion state and merchant text.
 
     Shared by the JSON API, the PDF export and the xlsx export so all honor
     identical filters. Date filters keep entries without an OCR date always
     visible. `completed` is one of: "hide" (default — exclude completed),
-    "only" (completed only), "all" (include both).
+    "only" (completed only), "all" (include both). `merchant` is a
+    case-insensitive substring match. `sort` is "date" (desc, default) or
+    "merchant" (A→Z).
     """
     filtered = entries
     if status and status != "all":
@@ -1568,6 +1571,11 @@ def _apply_ledger_filters(entries: list, status: str, dfrom: str, dto: str,
         filtered = [e for e in filtered if e.get("completed")]
     elif completed != "all":  # "hide" (default)
         filtered = [e for e in filtered if not e.get("completed")]
+    if merchant:
+        m = merchant.strip().lower()
+        filtered = [e for e in filtered if m in (e.get("ocr_merchant") or "").lower()]
+    if sort == "merchant":
+        return sorted(filtered, key=lambda e: (e.get("ocr_merchant") or "￿").lower())
     return sorted(
         filtered,
         key=lambda e: e.get("ocr_date") or e.get("uploaded_at") or "",
@@ -1868,6 +1876,8 @@ def _parse_filter_params(query: dict) -> dict:
         "card_brand": _q("card_brand", "all"),
         "usage":      _q("usage", "all"),
         "completed":  _q("completed", "hide"),
+        "merchant":   _q("merchant", ""),
+        "sort":       _q("sort", "date"),
     }
 
 
@@ -1887,7 +1897,8 @@ def _handle_ledger_api(username: str, query: dict):
         limit = 0
 
     filtered = _apply_ledger_filters(entries, f["status"], f["dfrom"], f["dto"],
-                                     f["card_brand"], f["usage"], f["completed"])
+                                     f["card_brand"], f["usage"], f["completed"],
+                                     f["merchant"], f["sort"])
     _mark_duplicates(filtered)
 
     stats   = _ledger_stats(filtered)
@@ -2201,7 +2212,8 @@ def _handle_ledger_pdf(username: str, query: dict):
     f = _parse_filter_params(query)
     status, dfrom, dto = f["status"], f["dfrom"], f["dto"]
     entries = _apply_ledger_filters(_ledger_entries(username), status, dfrom, dto,
-                                    f["card_brand"], f["usage"], f["completed"])
+                                    f["card_brand"], f["usage"], f["completed"],
+                                    f["merchant"], f["sort"])
     stats   = _ledger_stats(entries)
     service = _get_drive_service(username)
 
@@ -2911,7 +2923,8 @@ def _handle_ledger_xlsx(username: str, query: dict):
     f = _parse_filter_params(query)
     entries = _apply_ledger_filters(_ledger_entries(username),
                                     f["status"], f["dfrom"], f["dto"],
-                                    f["card_brand"], f["usage"], f["completed"])
+                                    f["card_brand"], f["usage"], f["completed"],
+                                    f["merchant"], f["sort"])
     if TEMPLATE.exists():
         template_path = TEMPLATE
     elif TEMPLATE_FALLBACK.exists():

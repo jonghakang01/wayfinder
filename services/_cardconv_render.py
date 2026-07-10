@@ -864,8 +864,10 @@ def _render_review(user: str) -> str:
                     '</div>')
             item_cls = 'rv-item' + ('' if is_matched else ' unmatched') + ('' if is_open else ' done')
             row_date = _esc(r.get("date")) or ""
+            row_merchant = _esc(str(r.get("merchant") or "").lower())
             items.append(
                 f'<div class="{item_cls}" data-date="{row_date}" '
+                f'data-merchant="{row_merchant}" '
                 f'data-status="{"open" if is_open else "completed"}" '
                 f'data-matched="{"1" if is_matched else "0"}">{txn}{receipt_block}</div>')
         body_html = "".join(items)
@@ -899,9 +901,9 @@ def _render_review(user: str) -> str:
 .stat-label{{font-size:.73rem;color:var(--text-muted);margin-top:4px;text-transform:uppercase;letter-spacing:.06em}}
 .filter-bar{{display:flex;align-items:center;gap:10px;padding:10px 16px;background:var(--surface-2);
   border:1px solid var(--border);border-radius:var(--radius-md);margin-bottom:14px;flex-wrap:wrap}}
-.filter-bar input[type=date]{{background:var(--surface);border:1px solid var(--border);
+.filter-bar input[type=date],.filter-bar input[type=text],.filter-bar select{{background:var(--surface);border:1px solid var(--border);
   border-radius:6px;color:var(--text);font-size:.82rem;padding:5px 8px;outline:none}}
-.filter-bar input[type=date]:focus{{border-color:var(--accent)}}
+.filter-bar input[type=date]:focus,.filter-bar input[type=text]:focus,.filter-bar select:focus{{border-color:var(--accent)}}
 .preset-btn{{background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);
   font-size:.76rem;padding:4px 9px;cursor:pointer}}
 .preset-btn:hover{{border-color:var(--accent)}}
@@ -977,6 +979,11 @@ def _render_review(user: str) -> str:
 
   <div class="filter-bar">
     📅 <input type="date" id="rvFrom"> ~ <input type="date" id="rvTo">
+    🔍 <input type="text" id="rvMerchant" placeholder="Merchant..." style="width:130px">
+    <select id="rvSort">
+      <option value="date">Date ↓</option>
+      <option value="merchant">Merchant A→Z</option>
+    </select>
     <button class="btn btn-ghost btn-sm" id="rvReset">Reset</button>
     <span style="flex:1"></span>
     {download_btn}
@@ -1025,11 +1032,13 @@ function iso(d){{ return d.toISOString().slice(0,10); }}
 let rvView = 'open';
 function applyFilter(){{
   const from = $('rvFrom').value, to = $('rvTo').value;
+  const mq = $('rvMerchant').value.trim().toLowerCase();
   let total=0, matched=0, unmatched=0;
   document.querySelectorAll('.rv-item').forEach(it => {{
     const d = it.dataset.date || '';
     const show = (it.dataset.status === rvView)
-      && (!from || !d || d >= from) && (!to || !d || d <= to);
+      && (!from || !d || d >= from) && (!to || !d || d <= to)
+      && (!mq || (it.dataset.merchant || '').includes(mq));
     it.style.display = show ? '' : 'none';
     if(!show) it.querySelector('.rv-cb').checked = false;
     if(show){{
@@ -1041,6 +1050,18 @@ function applyFilter(){{
   $('rvMatched').textContent = matched;
   $('rvUnmatched').textContent = unmatched;
   $('rvSelAll').checked = false;
+}}
+
+function applySort(){{
+  const mode = $('rvSort').value;
+  const list = document.querySelector('.rv-list');
+  const items = Array.from(list.querySelectorAll('.rv-item'));
+  items.sort((a, b) => {{
+    if(mode === 'merchant')
+      return (a.dataset.merchant || '\\uffff').localeCompare(b.dataset.merchant || '\\uffff');
+    return (b.dataset.date || '').localeCompare(a.dataset.date || '');  // date desc
+  }});
+  items.forEach(it => list.appendChild(it));
 }}
 
 // ── Complete workflow ────────────────────────────────────────────────────────
@@ -1102,10 +1123,14 @@ function applyPreset(p){{
   applyFilter();
 }}
 
+let _rvmDeb;
+$('rvMerchant').addEventListener('input', () => {{ clearTimeout(_rvmDeb); _rvmDeb = setTimeout(applyFilter, 250); }});
+$('rvSort').addEventListener('change', applySort);
 $('rvFrom').addEventListener('change', () => {{ clearPresetActive(); applyFilter(); }});
 $('rvTo').addEventListener('change', () => {{ clearPresetActive(); applyFilter(); }});
 $('rvReset').addEventListener('click', () => {{
-  $('rvFrom').value = ''; $('rvTo').value = ''; clearPresetActive(); applyFilter();
+  $('rvFrom').value = ''; $('rvTo').value = ''; $('rvMerchant').value = '';
+  $('rvSort').value = 'date'; applySort(); clearPresetActive(); applyFilter();
 }});
 function clearPresetActive(){{ document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active')); }}
 document.querySelectorAll('.preset-btn').forEach(b =>
@@ -1461,9 +1486,9 @@ __TABCSS__
 .filter-bar{display:flex;align-items:center;gap:14px;padding:9px 16px;background:var(--surface-2);
   border:1px solid var(--border);border-radius:var(--radius-md);margin-bottom:8px;flex-wrap:wrap}
 .filter-bar:last-of-type{margin-bottom:14px}
-.filter-bar input[type=date],.filter-bar select{background:var(--surface);border:1px solid var(--border);
+.filter-bar input[type=date],.filter-bar input[type=text],.filter-bar select{background:var(--surface);border:1px solid var(--border);
   border-radius:6px;color:var(--text);font-size:.82rem;padding:5px 8px;outline:none}
-.filter-bar input[type=date]:focus,.filter-bar select:focus{border-color:var(--accent)}
+.filter-bar input[type=date]:focus,.filter-bar input[type=text]:focus,.filter-bar select:focus{border-color:var(--accent)}
 /* label+control bundled so a wrap never separates a label from its input */
 .fb-field{display:inline-flex;align-items:center;gap:7px;white-space:nowrap}
 .fb-field>span{font-size:.74rem;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em}
@@ -1609,6 +1634,15 @@ __TABCSS__
         <option value="matched">Matched</option>
         <option value="unmatched">Unmatched</option>
         <option value="pending_match">Pending Match</option>
+      </select>
+    </div>
+    <div class="fb-field"><span>🔍</span>
+      <input type="text" id="fMerchant" placeholder="Merchant..." style="width:130px">
+    </div>
+    <div class="fb-field"><span>Sort</span>
+      <select id="fSort">
+        <option value="date">Date ↓</option>
+        <option value="merchant">Merchant A→Z</option>
       </select>
     </div>
     <button class="fb-more-btn fb-spacer" id="fMore" aria-expanded="false">More filters <span class="chev">▾</span></button>
@@ -2058,6 +2092,8 @@ function filterParams(){
   p.set('card_brand', $('fCard').value);
   p.set('usage', $('fUsage').value);
   p.set('completed', $('fCompleted').value);
+  if($('fMerchant').value.trim()) p.set('merchant', $('fMerchant').value.trim());
+  p.set('sort', $('fSort').value);
   return p;
 }
 
@@ -2441,6 +2477,9 @@ $('fStatus').addEventListener('change', load);
 $('fCard').addEventListener('change', load);
 $('fUsage').addEventListener('change', load);
 $('fCompleted').addEventListener('change', load);
+$('fSort').addEventListener('change', load);
+let _mDeb;
+$('fMerchant').addEventListener('input', () => { clearTimeout(_mDeb); _mDeb = setTimeout(load, 300); });
 $('fMore').addEventListener('click', () => {
   const adv = $('fAdvanced'), open = adv.classList.toggle('open');
   $('fMore').classList.toggle('open', open);
@@ -2448,7 +2487,8 @@ $('fMore').addEventListener('click', () => {
 });
 $('fReset').addEventListener('click', () => {
   $('fStatus').value='all'; $('fCard').value='all'; $('fUsage').value='all';
-  $('fCompleted').value='hide'; setDefaultDates(); load();
+  $('fCompleted').value='hide'; $('fMerchant').value=''; $('fSort').value='date';
+  setDefaultDates(); load();
 });
 // Both downloads respect the currently applied filters.
 $('fDownload').addEventListener('click', () => {
