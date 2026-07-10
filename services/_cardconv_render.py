@@ -110,7 +110,9 @@ def _render_drive_connected(folder_url: str = "") -> str:
 # ── Shared tab bar ───────────────────────────────────────────────────────────
 
 _CC_TAB_CSS = (
-    ".cc-tabbar{position:sticky;top:0;z-index:150;background:var(--bg-deep);padding:12px 0 10px;margin:-12px 0 10px}"
+    # top is set by script in _tab_bar to the live nav height, so the pill
+    # pins below the sticky site nav instead of sliding over it (nav z=100).
+    ".cc-tabbar{position:sticky;top:52px;z-index:90;background:var(--bg-deep);padding:12px 0 10px;margin:-12px 0 10px}"
     ".cc-tabs{display:inline-flex;align-items:center;gap:2px;padding:3px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md);flex-wrap:wrap;max-width:100%}"
     ".cc-tab{display:inline-flex;align-items:center;padding:7px 16px;font-size:.82rem;font-weight:600;color:var(--text-muted);border-radius:var(--radius-sm);text-decoration:none;transition:background .15s,color .15s}"
     ".cc-tab:hover{color:var(--text)}"
@@ -174,8 +176,15 @@ def _tab_bar(active: str, user: str) -> str:
         out.append(f'<a href="{href}" class="{cls}">{label}</a>')
     out.append('</div>')
     # Sticky wrapper: the tab pill stays pinned while the page scrolls, and its
-    # full-width ground hides content passing behind it.
-    return '<div class="cc-tabbar">' + "".join(out) + '</div>' + _workflow_bar(active, user)
+    # full-width ground hides content passing behind it. The script keeps the
+    # pin offset equal to the actual nav height (it changes when nav wraps).
+    sync_js = (
+        '<script>(function(){var n=document.querySelector("nav"),'
+        't=document.querySelector(".cc-tabbar");if(!n||!t)return;'
+        'var f=function(){t.style.top=n.offsetHeight+"px"};'
+        'f();window.addEventListener("resize",f);})();</script>'
+    )
+    return '<div class="cc-tabbar">' + "".join(out) + '</div>' + sync_js + _workflow_bar(active, user)
 
 
 def _info_icon(tip: str, right: bool = False) -> str:
@@ -323,7 +332,7 @@ def _register_section(user: str) -> str:
   </div>
   <div class="notepad-card" style="margin-bottom:20px">
     <div class="notepad-header">
-      <span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--slate-400)">Google Drive</span>{drive_tip}
+      <span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--accent)">Google Drive</span>{drive_tip}
     </div>
     <div class="notepad-body" style="padding:14px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap">
       {drive_status_html}
@@ -630,7 +639,7 @@ def _render_history(user: str) -> str:
 
   <div class="notepad-card" style="margin-bottom:20px">
     <div class="notepad-header" style="display:flex;align-items:center;justify-content:space-between">
-      <span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--slate-400)">Upload &amp; Download History</span>
+      <span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--accent)">Upload &amp; Download History</span>
       <div style="display:flex;gap:8px">
         <button onclick="delSelected()" class="btn btn-ghost btn-sm" style="font-size:.74rem" id="delSelBtn" disabled>🗑 Delete Selected</button>
         <button onclick="clearAll()" class="btn btn-danger btn-sm" style="font-size:.74rem">✕ Clear All</button>
@@ -716,7 +725,7 @@ def _render_keywords(user: str) -> str:
 
   <div class="notepad-card" id="keywords">
     <div class="notepad-header" style="display:flex;align-items:center;justify-content:space-between">
-      <span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--slate-400)">Keywords ({len(kws)})</span>
+      <span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--accent)">Keywords ({len(kws)})</span>
     </div>
     <div class="notepad-body" style="padding:12px 16px">
       <form method="POST" action="/cardconv/keyword/add" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px;align-items:flex-end">
@@ -738,9 +747,9 @@ def _render_keywords(user: str) -> str:
         </div>
         <button type="submit" class="btn btn-primary btn-sm" style="align-self:flex-end">+ Add</button>
       </form>
-      <div style="max-height:480px;overflow-y:auto">
+      <div>
         <table class="kw-table">
-          <thead style="position:sticky;top:0;background:var(--surface)">
+          <thead>
             <tr style="border-bottom:1px solid var(--border)">
               <th style="padding:6px 10px;text-align:left;font-size:.7rem;color:var(--text-muted);font-weight:700;text-transform:uppercase">Keyword</th>
               <th style="padding:6px 10px;text-align:left;font-size:.7rem;color:var(--text-muted);font-weight:700;text-transform:uppercase">G/L</th>
