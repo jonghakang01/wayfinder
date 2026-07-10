@@ -414,6 +414,9 @@ def _handle_ocr_staging_confirm(username: str, body: dict):
         receipts = _load_receipts(username)
         receipts.extend(confirmed)
         _save_receipts(username, receipts)
+        # Match the fresh receipts against open pool transactions right away —
+        # otherwise they sit pending until some other flow happens to re-match.
+        _rematch_pool(username)
 
     _clear_ocr_staging(username)
     # Native form (staging page) submissions navigate the browser, so send them
