@@ -945,15 +945,32 @@ def _build_xlsx_from_entries(entries: list) -> tuple:
         last, first  = _name_parts(e.get("member", ""))
         amount = e.get("amount", 0)
 
+        # Content formats mirror the hand-made 'for upload.xlsx' SAP file:
+        # numeric G/L and Ser. as numbers (leading-zero Ser. stays text),
+        # dates typed with the exact display formats, no extra columns.
+        gl = e.get("gl")
+        try:
+            gl = int(gl)
+        except (TypeError, ValueError):
+            pass
+        ser = e.get("ser")
+        ser_s = str(ser or "").strip()
+        ser_is_text = ser_s.startswith("0") or not ser_s.isdigit()
+        ser = ser_s if ser_is_text else int(ser_s)
+
         ws.cell(start,  1).value = FIXED["receipt_type"]
         ws.cell(start,  2).value = FIXED["employee_id"]
         ws.cell(start,  3).value = FIXED["payee"]
         ws.cell(start,  5).value = inv_dt
+        ws.cell(start,  5).number_format = "mm-dd-yy"
         ws.cell(start,  6).value = FIXED["domestic"]
-        ws.cell(start,  7).value = e.get("merchant", "")
+        ws.cell(start,  7).value = re.sub(r"\s+", " ", str(e.get("merchant") or "")).strip()
         ws.cell(start,  8).value = posting_dt
-        ws.cell(start,  9).value = e.get("gl")
-        ws.cell(start, 10).value = e.get("ser")
+        ws.cell(start,  8).number_format = "yyyy-mm-dd"
+        ws.cell(start,  9).value = gl
+        ws.cell(start, 10).value = ser
+        if ser_is_text:
+            ws.cell(start, 10).number_format = "@"
         ws.cell(start, 11).value = FIXED["currency"]
         ws.cell(start, 12).value = FIXED["tax_code"]
         ws.cell(start, 14).value = amount
@@ -964,12 +981,6 @@ def _build_xlsx_from_entries(entries: list) -> tuple:
         ws.cell(start, 22).value = first
         ws.cell(start, 23).value = supp
         ws.cell(start, 26).value = amount
-        rc = e.get("receipt") or {}
-        if e.get("matched") and rc:
-            fn, url = rc.get('filename', ''), rc.get('drive_url', '')
-            ws.cell(start, 27).value = f"✅ {fn} ({url})" if url else f"✅ {fn}"
-        else:
-            ws.cell(start, 27).value = "❌ Missing"
         start += 1
 
     buf = io.BytesIO()
