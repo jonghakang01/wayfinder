@@ -677,7 +677,19 @@ def _rematch_pool(username: str) -> dict:
     if not todo:
         return {"matched": 0}
     receipts = _load_receipts(username)
+    # Heal orphaned links first: a receipt can carry matched flags whose
+    # transaction-side link no longer exists (e.g. dropped by migration).
+    # Left as-is the matcher skips it forever.
+    linked = {(e.get("receipt") or {}).get("id")
+              for e in pool.get("entries", []) if e.get("matched")}
+    dirty_heal = False
+    for r in receipts:
+        if r.get("matched") and r.get("id") not in linked:
+            r["matched"] = False
+            r["match_status"] = "pending_match"
+            dirty_heal = True
     receipts_map, fx_receipts, dirty = _build_receipt_index(receipts, username)
+    dirty = dirty or dirty_heal
     matched = 0
     for e in todo:
         r = _find_receipt_match(e["date"], e["amount"], receipts_map, fx_receipts)
