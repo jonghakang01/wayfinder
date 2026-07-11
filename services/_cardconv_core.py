@@ -1227,15 +1227,23 @@ def _upload_file_to_drive(username: str, file_bytes: bytes, filename: str,
 _OCR_PROMPT = (
     'This image may contain ONE OR MULTIPLE receipts (e.g. several small '
     'receipts scanned together on a single page). Identify EACH distinct receipt. '
-    'STEP 1 — HANDWRITING SWEEP: before anything else, scan the WHOLE receipt and '
+    'STEP 1 — ANNOTATION SWEEP: before anything else, scan the WHOLE image and '
     'its margins (top edge, corners, over the printed text, beside the total) for '
-    'ANY handwriting: numbers, names, short notes like "w/ sds". Handwriting is '
-    'often faint, small, slanted, in pen over thermal print, or cut off at the '
-    'edge — transcribe every handwritten mark you find, exactly as written, into '
-    'the handwriting_notes field (null only if there is truly none). '
+    'ANY annotation that is NOT part of the original printed receipt: '
+    '(a) handwriting — numbers, checkmarks, names, short notes; often faint, '
+    'small, slanted, in pen over thermal print, or cut off at the edge; AND '
+    '(b) TYPED text overlaid or captioned onto the photo/screenshot (e.g. a '
+    'caption like "W/ SEA, D2C" added above the receipt). '
+    'Transcribe every annotation you find, exactly as written, into the '
+    'handwriting_notes field (null only if there is truly none). '
     'STEP 2 — FIELDS: for EACH receipt look CAREFULLY for handwritten numbers '
     '(e.g. tip amount, final total written by hand on top of the printed receipt). '
     'Inspect tip line, total line, and any margin notes for handwriting. '
+    'TIP CHECKBOX RULE: when the receipt prints tip options (e.g. "[ ] 18% … '
+    '[ ] 20% (Tip $75.69 Total $454.12)") and one option is marked with a '
+    'checkmark, X or circle, the MARKED option\'s Total IS the final amount — '
+    'return it as handwritten_amount, and keep printed_amount as the pre-tip '
+    'base Amount. '
     'For each receipt extract: '
     '1) date (YYYY-MM-DD), '
     '2) merchant name, '
@@ -1261,13 +1269,15 @@ _OCR_PROMPT = (
     'other clear signals -> that ISO code (e.g. "EUR", "JPY"). Use "USD" only when '
     'the receipt is clearly US-based or shows "$" with English/US formatting; a bare '
     '"$" on a Hong Kong receipt means HKD, not USD. '
-    '7) handwriting_notes: the full transcription from STEP 1 — every handwritten '
-    'mark on this receipt as one string (e.g. "w/sds  33.10"), null if none. '
-    '8) companions: from the handwriting, any note naming who the meal/expense was '
-    'shared with — usually "w/ NAME" or "with NAME" (e.g. "w/sds" -> "sds", '
-    '"w/ John, Amy" -> "John, Amy"). The letters after "w/" are often initials or '
-    'a nickname, not a dictionary word — transcribe them literally, do not '
-    '"correct" them. Return just the name part without the "w/" prefix, or null '
+    '7) handwriting_notes: the full transcription from STEP 1 — every annotation '
+    '(handwritten or typed overlay) on this receipt as one string '
+    '(e.g. "W/ SEA, D2C  ✓20%"), null if none. '
+    '8) companions: from the annotations, any note naming who the meal/expense '
+    'was shared with — usually "w/ NAME" or "with NAME", handwritten OR typed, '
+    'any case ("W/ SEA, D2C" -> "SEA, D2C", "w/sds" -> "sds", "w/ John, Amy" -> '
+    '"John, Amy"). The part after "w/" is often initials, a team code or a '
+    'nickname (may contain digits like "D2C") — transcribe it literally, do not '
+    '"correct" it. Return just the name part without the "w/" prefix, or null '
     'if no such note is visible. '
     'For each receipt, ALSO return its bounding box in the image as bbox: '
     '[ymin, xmin, ymax, xmax] using a 0-1000 normalized coordinate system '
@@ -1316,7 +1326,7 @@ def _normalize_ocr(result: dict) -> dict:
     # Deterministic fallback: the model often transcribes "w/ NAME" into the
     # handwriting sweep but misses the dedicated companions field.
     if not result["companions"] and result["handwriting_notes"]:
-        m = re.search(r"\b(?:w/|with\s)\s*([A-Za-z가-힣][A-Za-z가-힣 ,.&-]*)",
+        m = re.search(r"\b(?:w/|with\s)\s*([A-Za-z가-힣][A-Za-z0-9가-힣 ,.&/-]*)",
                       result["handwriting_notes"], re.I)
         if m:
             result["companions"] = _coerce_companions(m.group(1))
