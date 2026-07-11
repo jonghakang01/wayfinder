@@ -1730,8 +1730,12 @@ __TABCSS__
 .fb-more-btn .chev{transition:transform .18s}
 .fb-more-btn.open .chev{transform:rotate(180deg)}
 .fb-selbar{display:none;align-items:center;gap:10px;padding:9px 16px;background:rgba(129,140,248,.08);border:1px solid rgba(129,140,248,.25);border-radius:var(--radius-md);margin-bottom:8px;flex-wrap:wrap}
-.fb-selbar select{background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.78rem;padding:4px 7px;outline:none}
-.fb-selbar select:focus{border-color:var(--accent)}
+.sb-edit-group{display:inline-flex;align-items:center;gap:7px;padding-left:12px;border-left:1px solid rgba(129,140,248,.35)}
+.sb-label{font-size:.64rem;font-weight:800;letter-spacing:.09em;text-transform:uppercase;color:#a5b4fc;white-space:nowrap}
+.sb-act{background:var(--surface-3);border:1px solid var(--border-bright);border-radius:7px;color:var(--text);
+  font-size:.78rem;font-weight:600;padding:6px 11px;cursor:pointer;outline:none;line-height:1.2}
+.sb-act:hover,.sb-act:focus{border-color:var(--accent);color:var(--accent)}
+select.sb-act{padding:5px 8px}
 .fb-selbar.show{display:flex}
 .fb-selcount{font-size:.8rem;font-weight:700;color:var(--text)}
 @media(max-width:640px){.detail-panel{width:100vw}.stat-grid{grid-template-columns:1fr 1fr}.filter-bar{gap:8px;padding:9px 12px}.filter-bar .fb-field{flex-wrap:wrap}.preset-btn{padding:7px 12px}.row-check,.del-check input{width:20px;height:20px}.usage-sel,.card-sel{padding:6px 8px;max-width:none}.ledger-table,.ledger-table tbody,.ledger-table tr,.ledger-table td{display:block;width:100%}.ledger-table thead{display:none}.ledger-table tr{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md);margin-bottom:10px;padding:10px 12px;position:relative}.ledger-table tr:hover td{background:transparent}.ledger-table td{border-bottom:none!important;padding:5px 0;display:flex;justify-content:space-between;align-items:center;gap:10px;text-align:right}.ledger-table td::before{content:attr(data-label);font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);text-align:left}.ledger-table td[data-label=Select]{position:absolute;top:8px;right:10px;padding:0}.ledger-table td[data-label=Select]::before{display:none}.ledger-table td[data-label=Date]{font-weight:700;font-size:.95rem;padding-right:34px}}
@@ -1846,19 +1850,20 @@ __TABCSS__
   <!-- 선택 시에만 등장하는 일괄작업 바 -->
   <div class="fb-selbar" id="fSelBar">
     <span class="fb-selcount" id="fSelCount">0 selected</span>
-    <div class="fb-group" role="group" aria-label="Bulk edits">
-      <select id="fBulkCard" title="Set card type on all selected">
-        <option value="">💳 Card…</option>
-        <option value="none">– (clear)</option>
+    <div class="sb-edit-group" role="group" aria-label="Bulk edits">
+      <span class="sb-label">Edit selected</span>
+      <select class="sb-act" id="fBulkCard" title="Set card type on all selected">
+        <option value="">💳 Card type</option>
         <option value="amex">AMEX</option>
         <option value="visa">Visa</option>
         <option value="other">Other</option>
+        <option value="none">Clear (–)</option>
       </select>
-      <select id="fBulkUsage" title="Set usage tag on all selected">
-        <option value="">🏷 Usage…</option>
+      <select class="sb-act" id="fBulkUsage" title="Set usage tag on all selected">
+        <option value="">🏷 Usage tag</option>
       </select>
-      <button class="btn btn-sm" id="fBulkWith" title="Set the w/ companion note on all selected">👥 w/…</button>
-      <button class="btn btn-sm" id="fBulkRematch" title="Re-try CSV matching using only the selected receipts">↻ Re-match</button>
+      <button class="sb-act" id="fBulkWith" title="Set the w/ companion note on all selected">👥 w/ note</button>
+      <button class="sb-act" id="fBulkRematch" title="Re-try CSV matching using only the selected receipts">↻ Re-match</button>
     </div>
     <div class="fb-group fb-spacer" role="group" aria-label="Selection actions">
       <button class="btn btn-sm fb-act-complete" id="fComplete" disabled>✓ Complete (0)</button>
@@ -2294,7 +2299,7 @@ function syncUsageOptions(usages){
   // Bulk selector mirrors the same tags plus a new-tag sentinel.
   const b = $('fBulkUsage');
   if(b){
-    b.innerHTML = ['<option value="">🏷 Usage…</option>']
+    b.innerHTML = ['<option value="">🏷 Usage tag</option>']
       .concat((usages||[]).map(u => '<option value="' + u.replace(/"/g,'&quot;') + '">' + u + '</option>'))
       .concat(['<option value="__new__">+ New…</option>']).join('');
   }
@@ -2580,13 +2585,13 @@ function selectedIds(){
 function updateDeleteBtn(){
   const ids = selectedIds();
   const n = ids.length;
-  $('fDelete').textContent = '🗑 Delete Selected (' + n + ')';
+  $('fDelete').textContent = '🗑 Delete (' + n + ')';
   $('fDelete').disabled = n === 0;
   // Split selection into active vs already-completed to drive the two buttons.
   const sel = new Set(ids);
   let active = 0, done = 0;
   ENTRIES.forEach(e => { if(sel.has(e.id)){ e.completed ? done++ : active++; } });
-  $('fComplete').textContent = '✓ Complete Selected (' + active + ')';
+  $('fComplete').textContent = '✓ Complete (' + active + ')';
   $('fComplete').disabled = active === 0;
   $('fUncomplete').textContent = '↩ Un-complete (' + done + ')';
   $('fUncomplete').disabled = done === 0;
