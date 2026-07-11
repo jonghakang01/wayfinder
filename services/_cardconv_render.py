@@ -432,7 +432,7 @@ def _render_convert(user: str) -> str:
 <style>{_CC_TAB_CSS}{_UPLOAD_CSS}</style>
 </head><body>
 <nav>
-  <span class="nav-brand">💳 Cheil USA AMEX Converter</span>
+  <span class="nav-brand">💳 Cheil AMEX Expense Assistant</span>
   <span class="nav-user">👤 {user} &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
 </nav>
 <div class="container" style="max-width:1100px">
@@ -647,7 +647,7 @@ def _render_history(user: str) -> str:
 <style>{_CC_TAB_CSS}</style>
 </head><body>
 <nav>
-  <span class="nav-brand">💳 Cheil USA AMEX Converter</span>
+  <span class="nav-brand">💳 Cheil AMEX Expense Assistant</span>
   <span class="nav-user">👤 {user} &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
 </nav>
 <div class="container" style="max-width:1100px">
@@ -733,7 +733,7 @@ def _render_keywords(user: str) -> str:
 </style>
 </head><body>
 <nav>
-  <span class="nav-brand">💳 Cheil USA AMEX Converter</span>
+  <span class="nav-brand">💳 Cheil AMEX Expense Assistant</span>
   <span class="nav-user">👤 {user} &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
 </nav>
 <div class="container" style="max-width:1100px">
@@ -976,7 +976,7 @@ def _render_review(user: str) -> str:
 </style>
 </head><body>
 <nav>
-  <span class="nav-brand">💳 Cheil USA AMEX Converter</span>
+  <span class="nav-brand">💳 Cheil AMEX Expense Assistant</span>
   <span class="nav-user">👤 {user} &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
 </nav>
 <div class="container" style="max-width:1100px">
@@ -1651,7 +1651,7 @@ __TABCSS__
 </style>
 </head><body>
 <nav>
-  <span class="nav-brand">💳 Cheil USA AMEX Converter</span>
+  <span class="nav-brand">💳 Cheil AMEX Expense Assistant</span>
   <span class="nav-user">👤 __USER__ &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
 </nav>
 <div class="container" style="max-width:1100px">

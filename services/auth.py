@@ -16,7 +16,7 @@ ADMIN_EMAIL       = "jongha.kang01@gmail.com"
 CONTROLLED_SERVICES = {"todo", "cardconv", "aeo", "llm-check"}
 APP_LABELS = {
     "todo":      "📋 Daily Task",
-    "cardconv":  "💳 Cheil USA AMEX Converter",
+    "cardconv":  "💳 Cheil AMEX Expense Assistant",
     "aeo":       "🔍 AEO Analysis",
     "llm-check": "🤖 AEO 페이지 진단",
 }
