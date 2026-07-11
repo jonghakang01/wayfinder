@@ -1696,7 +1696,10 @@ def _apply_ledger_filters(entries: list, status: str, dfrom: str, dto: str,
     "merchant" (A→Z).
     """
     filtered = entries
-    if status and status != "all":
+    if status == "unmatched_any":
+        # Everything not yet matched — explicit unmatched plus pending_match.
+        filtered = [e for e in filtered if e.get("match_status") in ("unmatched", "pending_match")]
+    elif status and status != "all":
         filtered = [e for e in filtered if e.get("match_status") == status]
     if dfrom:
         filtered = [e for e in filtered if not e.get("ocr_date") or e["ocr_date"] >= dfrom]

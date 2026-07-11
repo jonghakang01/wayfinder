@@ -1663,7 +1663,7 @@ __TABCSS__
   <div class="stat-grid">
     <div class="stat-card stat-click" data-statview="total" title="Show all active receipts"><div class="stat-value" id="statTotal">–</div><div class="stat-label">Total</div></div>
     <div class="stat-card stat-click" data-statview="matched" title="Matched receipts only"><div class="stat-value" id="statMatched" style="color:#22c55e">–</div><div class="stat-label">Matched</div></div>
-    <div class="stat-card stat-click" data-statview="unmatched" title="Unmatched receipts only"><div class="stat-value" id="statUnmatched" style="color:#ef4444">–</div><div class="stat-label">Unmatched</div></div>
+    <div class="stat-card stat-click" data-statview="unmatched" title="No transaction matched yet (includes Pending Match)"><div class="stat-value" id="statUnmatched" style="color:#ef4444">–</div><div class="stat-label">Unmatched</div></div>
     <div class="stat-card stat-click" data-statview="in_progress" title="Settlement submitted, awaiting approval"><div class="stat-value" id="statInProg" style="color:#f59e0b">–</div><div class="stat-label">⏳ In progress</div></div>
     <div class="stat-card stat-click" data-statview="completed" title="Archived receipts"><div class="stat-value" id="statCompleted" style="color:#818cf8">–</div><div class="stat-label">Completed</div></div>
   </div>
@@ -1686,7 +1686,8 @@ __TABCSS__
       <select id="fStatus">
         <option value="all">All</option>
         <option value="matched">Matched</option>
-        <option value="unmatched">Unmatched</option>
+        <option value="unmatched_any">Unmatched (any)</option>
+        <option value="unmatched">Unmatched only</option>
         <option value="pending_match">Pending Match</option>
       </select>
     </div>
@@ -2190,7 +2191,7 @@ async function load(){
   if(seq !== _loadSeq) return;  // superseded by a newer load — drop stale response
   $('statTotal').textContent = d.total;
   $('statMatched').textContent = d.matched;
-  $('statUnmatched').textContent = d.unmatched;
+  $('statUnmatched').textContent = d.unmatched + (d.pending_match || 0);
   $('statInProg').textContent = (d.in_progress!=null ? d.in_progress : '–');
   $('statCompleted').textContent = (d.completed!=null ? d.completed : '–');
   window.USAGES = d.usages || ['Regular'];
@@ -2560,11 +2561,11 @@ $('fSort').addEventListener('change', load);
 
 // Stat cards double as one-click views (Review-style switching).
 const STAT_VIEWS = {
-  total:       {status:'all',       settle:'all',         completed:'hide'},
-  matched:     {status:'matched',   settle:'all',         completed:'hide'},
-  unmatched:   {status:'unmatched', settle:'all',         completed:'hide'},
-  in_progress: {status:'all',       settle:'in_progress', completed:'hide'},
-  completed:   {status:'all',       settle:'all',         completed:'only'},
+  total:       {status:'all',           settle:'all',         completed:'hide'},
+  matched:     {status:'matched',       settle:'all',         completed:'hide'},
+  unmatched:   {status:'unmatched_any', settle:'all',         completed:'hide'},
+  in_progress: {status:'all',           settle:'in_progress', completed:'hide'},
+  completed:   {status:'all',           settle:'all',         completed:'only'},
 };
 document.querySelectorAll('.stat-click').forEach(card => card.addEventListener('click', () => {
   const v = STAT_VIEWS[card.dataset.statview];
