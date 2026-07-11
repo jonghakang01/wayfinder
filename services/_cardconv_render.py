@@ -7,7 +7,7 @@ def _render_drive_connect(username: str, auth_url: str, requested: bool = False)
     requested_banner = (
         '<div style="background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.4);'
         'color:#16a34a;border-radius:8px;padding:10px 14px;font-size:.85rem">'
-        '✅ 테스터 등록을 요청했습니다. 관리자 승인 후 다시 시도하세요.</div>'
+        '✅ Tester registration requested. Try again once the admin approves it.</div>'
         if requested else ''
     )
     return f'''<!DOCTYPE html>
@@ -46,17 +46,17 @@ def _render_drive_connect(username: str, auth_url: str, requested: bool = False)
       </form>
       <details style="border-top:1px solid var(--border);padding-top:16px">
         <summary style="cursor:pointer;font-size:.82rem;color:var(--text-muted)">
-          🚫 "Access blocked / has not completed verification" 오류가 뜨나요?
+          🚫 Seeing an "Access blocked / has not completed verification" error?
         </summary>
         <div style="margin-top:12px;display:flex;flex-direction:column;gap:10px">
           <p style="font-size:.82rem;color:var(--text-muted);line-height:1.7">
-            이 앱은 테스트 중이라 등록된 Google 계정만 연동됩니다.
-            연동하려는 <b style="color:var(--text)">Google 이메일</b>을 남기면 관리자가 테스터로 등록합니다.
+            This app is in Google testing mode, so only registered accounts can connect.
+            Leave the <b style="color:var(--text)">Google email</b> you want to connect and the admin will register it as a tester.
           </p>
           <form method="POST" action="/cardconv/drive/request-tester" style="display:flex;gap:8px;flex-wrap:wrap">
             <input type="email" name="tester_email" required placeholder="you@gmail.com"
               style="flex:1;min-width:200px;padding:10px 14px;border:1px solid var(--border);border-radius:8px;background:var(--surface-2);color:var(--text);font-size:.88rem;outline:none">
-            <button type="submit" class="btn btn-primary" style="width:fit-content">📩 테스터 등록 요청</button>
+            <button type="submit" class="btn btn-primary" style="width:fit-content">📩 Request tester access</button>
           </form>
         </div>
       </details>
@@ -443,7 +443,7 @@ def _render_convert(user: str) -> str:
       <span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--accent)">My Card Names</span>{_info_icon('Only transactions whose Card Member Name matches one of these names will be converted. Enter your name exactly as it appears in the AMEX CSV.')}
     </div>
     <div class="notepad-body" style="padding:12px 16px">
-      <p style="font-size:.78rem;color:var(--text-muted);margin-bottom:12px">CSV의 'Card Member Name'이 아래 이름과 일치하는 거래만 변환됩니다.</p>
+      <p style="font-size:.78rem;color:var(--text-muted);margin-bottom:12px">Only transactions whose CSV 'Card Member Name' matches a name below are converted.</p>
       <form method="POST" action="/cardconv/cardnames/add" style="display:flex;gap:8px;margin-bottom:14px">
         <input name="name" placeholder="e.g. JOHN DOE" required style="flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);color:var(--text);font-size:.82rem">
         <button type="submit" class="btn btn-primary btn-sm">+ Add</button>
@@ -1048,7 +1048,7 @@ def _render_review(user: str) -> str:
     <button class="btn btn-ghost btn-sm" id="rvMarkOpen">↩ Reopen</button>
     <button class="btn btn-ghost btn-sm" id="rvRematch" title="Match open transactions against the receipt ledger">↻ Re-match receipts</button>
     <span style="flex:1"></span>
-    <span style="font-size:.76rem;color:var(--text-muted)">위 카드를 클릭해 뷰 전환</span>
+    <span style="font-size:.76rem;color:var(--text-muted)">Click a card above to switch views</span>
   </div>
 
   <div class="notepad-card">
@@ -1058,7 +1058,7 @@ def _render_review(user: str) -> str:
   </div>
 
   <div class="rv-foot">
-    <span style="font-size:.78rem;color:var(--text-muted)">각 거래 옆에 매칭된 영수증이 표시됩니다. 미매칭 거래는 빨간색으로 표시됩니다.</span>
+    <span style="font-size:.78rem;color:var(--text-muted)">The matched receipt shows next to each transaction. Unmatched transactions are highlighted in red.</span>
   </div>
 </div>
 
@@ -1459,7 +1459,7 @@ def _render_ocr_staging_review(user: str) -> str:
         if fx_cur and fx_cur != "USD":
             fx_badge = f'<span class="stg-badge fx">{_esc(fx_cur)}</span>'
             rate_txt = (f'1 USD ≈ {_FX_SYM.get(fx_cur, "")}{fx_rate:,.2f} (ECB, {date_v})'
-                        if isinstance(fx_rate, (int, float)) else '환율 조회 실패 — rerun OCR')
+                        if isinstance(fx_rate, (int, float)) else 'FX rate lookup failed — rerun OCR')
             fx_row = (f'<div class="stg-row"><span class="stg-lbl">FX</span>'
                       f'<span class="stg-val" style="color:var(--warn)">{rate_txt}</span></div>')
         else:
@@ -1801,7 +1801,7 @@ select.sb-act{padding:5px 8px}
               <option value="all">All</option>
               <option value="amex">AMEX</option>
               <option value="visa">Visa</option>
-              <option value="other">Other</option>
+              <option value="other">Cash</option>
               <option value="unknown">Unknown</option>
             </select>
           </div>
@@ -1826,7 +1826,7 @@ select.sb-act{padding:5px 8px}
           <div class="fb-field"><span>Duplicates</span>
             <span style="display:inline-flex;align-items:center;gap:6px">
               <button class="preset-btn" id="viewToggle" title="Collapse duplicate receipts into one row">🔁 Group Duplicates</button>
-              <span class="cc-info-wrap"><span class="cc-info" onclick="ccTipToggle(this)">ℹ</span><span class="cc-tip">같은 영수증이 여러 장 인식된 경우 그룹으로 묶어 표시합니다. 불필요한 중복은 삭제하세요.</span></span>
+              <span class="cc-info-wrap"><span class="cc-info" onclick="ccTipToggle(this)">ℹ</span><span class="cc-tip">Groups receipts recognized multiple times from the same image. Delete the redundant duplicates.</span></span>
             </span>
           </div>
         </div>
@@ -1847,7 +1847,7 @@ select.sb-act{padding:5px 8px}
   <!-- Non-default filters stay visible as chips even while the popover is closed -->
   <div class="fb-chips" id="fChips" hidden></div>
 
-  <!-- 선택 시에만 등장하는 일괄작업 바 -->
+  <!-- Bulk-action bar, appears only while rows are selected -->
   <div class="fb-selbar" id="fSelBar">
     <span class="fb-selcount" id="fSelCount">0 selected</span>
     <div class="sb-edit-group" role="group" aria-label="Bulk edits">
@@ -1856,7 +1856,7 @@ select.sb-act{padding:5px 8px}
         <option value="">💳 Card type</option>
         <option value="amex">AMEX</option>
         <option value="visa">Visa</option>
-        <option value="other">Other</option>
+        <option value="other">Cash</option>
         <option value="none">Clear (–)</option>
       </select>
       <select class="sb-act" id="fBulkUsage" title="Set usage tag on all selected">
@@ -1928,7 +1928,7 @@ select.sb-act{padding:5px 8px}
     <div class="detail-row"><span class="key">Card Type</span>
       <span class="val" id="dCard">–</span>
       <select id="eCard" style="display:none;width:120px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:.82rem;padding:2px 6px">
-        <option value="none">–</option><option value="amex">AMEX</option><option value="visa">Visa</option><option value="other">Other</option>
+        <option value="none">–</option><option value="amex">AMEX</option><option value="visa">Visa</option><option value="other">Cash</option>
       </select>
     </div>
     <div class="detail-row"><span class="key">Usage</span>
@@ -1956,50 +1956,50 @@ select.sb-act{padding:5px 8px}
     <button class="btn btn-ghost btn-sm" data-set="pending_match" style="color:#f59e0b">⏳ Mark Pending</button>
     <button class="btn btn-ghost btn-sm" id="dCompleteBtn" onclick="togglePanelComplete()" style="color:#818cf8;margin-top:6px;width:100%">✓ Mark Complete</button>
     <button class="btn btn-ghost btn-sm" id="reOcrBtn" onclick="reOCR()" style="color:#818cf8;margin-top:6px;width:100%">🔄 Re-OCR</button>
-    <button class="btn btn-ghost btn-sm" id="manualAddBtn" onclick="openManualAdd()" style="color:#34d399;margin-top:2px;width:100%">➕ 이 이미지에 영수증 수동 추가</button>
+    <button class="btn btn-ghost btn-sm" id="manualAddBtn" onclick="openManualAdd()" style="color:#34d399;margin-top:2px;width:100%">➕ Manually add a receipt on this image</button>
   </div>
 </div>
 
 <!-- Manual Receipt Add Modal -->
 <div class="overlay-bg" id="manualOverlay"></div>
 <div class="del-modal" id="manualModal" style="width:420px">
-  <div class="del-title">➕ 영수증 수동 추가</div>
-  <div style="font-size:.82rem;color:var(--text-muted);margin-bottom:14px">OCR에서 누락된 영수증을 이 이미지에 직접 추가합니다.</div>
+  <div class="del-title">➕ Add receipt manually</div>
+  <div style="font-size:.82rem;color:var(--text-muted);margin-bottom:14px">Add a receipt on this image that OCR missed.</div>
   <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px">
     <div>
-      <label style="font-size:.76rem;color:var(--text-muted);display:block;margin-bottom:4px">날짜</label>
+      <label style="font-size:.76rem;color:var(--text-muted);display:block;margin-bottom:4px">Date</label>
       <input id="mDate" type="date" style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.85rem;padding:6px 10px;outline:none;box-sizing:border-box">
     </div>
     <div>
-      <label style="font-size:.76rem;color:var(--text-muted);display:block;margin-bottom:4px">가맹점</label>
-      <input id="mMerchant" type="text" placeholder="가맹점명" style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.85rem;padding:6px 10px;outline:none;box-sizing:border-box">
+      <label style="font-size:.76rem;color:var(--text-muted);display:block;margin-bottom:4px">Merchant</label>
+      <input id="mMerchant" type="text" placeholder="Merchant name" style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.85rem;padding:6px 10px;outline:none;box-sizing:border-box">
     </div>
     <div style="display:flex;gap:10px">
       <div style="flex:1">
-        <label style="font-size:.76rem;color:var(--text-muted);display:block;margin-bottom:4px">인쇄 금액 ($)</label>
+        <label style="font-size:.76rem;color:var(--text-muted);display:block;margin-bottom:4px">Printed amount ($)</label>
         <input id="mPrinted" type="number" step="0.01" min="0" placeholder="0.00" style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.85rem;padding:6px 10px;outline:none;box-sizing:border-box">
       </div>
       <div style="flex:1">
-        <label style="font-size:.76rem;color:var(--text-muted);display:block;margin-bottom:4px">수기 금액 ✍️</label>
-        <input id="mHandw" type="number" step="0.01" min="0" placeholder="선택" style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.85rem;padding:6px 10px;outline:none;box-sizing:border-box">
+        <label style="font-size:.76rem;color:var(--text-muted);display:block;margin-bottom:4px">Handwritten amount ✍️</label>
+        <input id="mHandw" type="number" step="0.01" min="0" placeholder="Optional" style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.85rem;padding:6px 10px;outline:none;box-sizing:border-box">
       </div>
     </div>
   </div>
   <div class="del-actions">
-    <button class="btn btn-ghost btn-sm" onclick="closeManualAdd()">취소</button>
-    <button class="btn btn-primary btn-sm" id="manualAddConfirm" onclick="submitManualAdd()">추가</button>
+    <button class="btn btn-ghost btn-sm" onclick="closeManualAdd()">Cancel</button>
+    <button class="btn btn-primary btn-sm" id="manualAddConfirm" onclick="submitManualAdd()">Add</button>
   </div>
 </div>
 
 <div class="overlay-bg" id="delOverlay"></div>
 <div class="del-modal" id="delModal">
-  <div class="del-title">🗑 영수증 삭제</div>
-  <div class="del-body" id="delBody">체크된 영수증을 Ledger에서 삭제할까요?</div>
-  <label class="del-check"><input type="checkbox" id="delDrive"> Drive 원본도 함께 휴지통으로 이동</label>
+  <div class="del-title">🗑 Delete receipts</div>
+  <div class="del-body" id="delBody">Delete the checked receipts from the Ledger?</div>
+  <label class="del-check"><input type="checkbox" id="delDrive"> Also move the Drive originals to trash</label>
   <div class="del-actions">
-    <button class="btn btn-ghost btn-sm" id="delCancel">취소</button>
+    <button class="btn btn-ghost btn-sm" id="delCancel">Cancel</button>
     <button class="btn btn-sm" id="delConfirm"
-      style="background:rgba(239,68,68,.15);color:#ef4444;border:1px solid rgba(239,68,68,.3)">삭제</button>
+      style="background:rgba(239,68,68,.15);color:#ef4444;border:1px solid rgba(239,68,68,.3)">Delete</button>
   </div>
 </div>
 
@@ -2030,7 +2030,7 @@ function thumb(e){
          'onerror="this.onerror=null;this.src=\'' + proxy + '\'">';
 }
 
-const CARD_LABEL = {amex:'AMEX', visa:'Visa', other:'Other'};
+const CARD_LABEL = {amex:'AMEX', visa:'Visa', other:'Cash'};
 function cardBadge(b){
   if(!b || !CARD_LABEL[b]) return '<span style="color:var(--text-muted);font-size:.72rem">–</span>';
   return '<span class="card-badge card-' + b + '">' + CARD_LABEL[b] + '</span>';
@@ -2056,7 +2056,7 @@ function usageCell(e){
   const cur = e.usage || 'Regular';
   const known = (window.USAGES && window.USAGES.length ? window.USAGES : ['Regular']);
   const opts = Array.from(new Set(['Regular'].concat(known).concat([cur])));
-  let html = '<select class="usage-sel" data-id="' + esc1(e.id) + '" title="Usage 변경">';
+  let html = '<select class="usage-sel" data-id="' + esc1(e.id) + '" title="Change usage">';
   opts.forEach(function(u){
     html += '<option value="' + esc1(u) + '"' + (u===cur?' selected':'') + '>' + esc1(u) + '</option>';
   });
@@ -2068,13 +2068,13 @@ async function changeUsage(sel){
   const id = sel.dataset.id;
   let val = sel.value;
   if(val === '__new__'){
-    val = (prompt('새 Usage 입력 (비우면 취소)', '') || '').trim();
+    val = (prompt('New usage tag (leave blank to cancel)', '') || '').trim();
     if(!val){ load(); return; }   // cancelled → revert via reload
   }
   const r = await fetch('/cardconv/ledger/' + id + '/update',
     {method:'POST', body: new URLSearchParams({usage: val})});
   const d = await r.json().catch(function(){ return {}; });
-  if(!d.ok){ alert('Usage 변경 실패: ' + (d.error || r.status)); load(); return; }
+  if(!d.ok){ alert('Usage update failed: ' + (d.error || r.status)); load(); return; }
   const e = ENTRIES.find(function(x){ return x.id===id; }); if(e) e.usage = val;
   load();   // refresh so the Usage filter dropdown picks up any new tag
 }
@@ -2082,10 +2082,10 @@ async function changeUsage(sel){
 // Inline-editable Card Type cell: dropdown of –/AMEX/Visa/Other, edited from the row.
 // The "none" value is an explicit sentinel (empty form values get dropped in
 // transit, so they can't clear a field) that the backend maps back to null.
-const CARD_OPTS = [['none','–'],['amex','AMEX'],['visa','Visa'],['other','Other']];
+const CARD_OPTS = [['none','–'],['amex','AMEX'],['visa','Visa'],['other','Cash']];
 function cardCell(e){
   const cur = e.card_brand || 'none';
-  let html = '<select class="card-sel" data-id="' + esc1(e.id) + '" title="Card Type 변경">';
+  let html = '<select class="card-sel" data-id="' + esc1(e.id) + '" title="Change card type">';
   CARD_OPTS.forEach(function(o){
     html += '<option value="' + o[0] + '"' + (o[0]===cur?' selected':'') + '>' + o[1] + '</option>';
   });
@@ -2098,7 +2098,7 @@ async function changeCard(sel){
   const r = await fetch('/cardconv/ledger/' + id + '/update',
     {method:'POST', body: new URLSearchParams({card_brand: val})});
   const d = await r.json().catch(function(){ return {}; });
-  if(!d.ok){ alert('Card Type 변경 실패: ' + (d.error || r.status)); load(); return; }
+  if(!d.ok){ alert('Card type update failed: ' + (d.error || r.status)); load(); return; }
   const e = ENTRIES.find(function(x){ return x.id===id; }); if(e) e.card_brand = (val==='none' ? null : val);
 }
 
@@ -2474,16 +2474,16 @@ async function togglePanelComplete(){
   if(!CUR_ID) return;
   var e = ENTRIES.find(x => x.id === CUR_ID) || {};
   var undo = !!e.completed;
-  if(!undo && !confirm('이 영수증을 완료 처리할까요?\n(기본 목록·Sync·Mapping에서 제외되고 Drive Completed 폴더로 이동됩니다)')) return;
+  if(!undo && !confirm('Mark this receipt complete?\n(It leaves the default list, Sync and Mapping; the Drive original moves to the Completed folder)')) return;
   var r = await fetch('/cardconv/ledger/complete', {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({ids:[CUR_ID], undo: undo})
   });
   var d = await r.json().catch(() => ({}));
-  if(!d.ok){ alert('실패: '+(d && d.error||r.status)); return; }
-  toast(undo ? '완료 해제됨' : '완료 처리됨', false);
+  if(!d.ok){ alert('Failed: '+(d && d.error||r.status)); return; }
+  toast(undo ? 'Marked incomplete' : 'Marked complete', false);
   if(d.attempted && d.moved < d.attempted){
-    toast('Drive 원본 이동이 적용되지 않았습니다. 정산 데이터는 정상 반영됨.', true);
+    toast('Drive file move did not apply. Settlement data was saved correctly.', true);
   }
   closePanel();
   load();
@@ -2605,21 +2605,21 @@ async function completeSelected(undo){
   const ids = ENTRIES.filter(e => sel.has(e.id) && (undo ? e.completed : !e.completed))
                      .map(e => e.id);
   if(!ids.length) return;
-  const verb = undo ? '완료 해제' : '완료 처리';
-  if(!confirm(ids.length + '건을 ' + verb + '할까요?' +
-      (undo ? '' : '\n(완료 항목은 기본 목록·Sync·Mapping에서 제외되고 Drive Completed 폴더로 이동됩니다)'))) return;
+  const verb = undo ? 'incomplete' : 'complete';
+  if(!confirm('Mark ' + ids.length + ' receipts ' + verb + '?' +
+      (undo ? '' : '\n(Completed receipts leave the default list, Sync and Mapping; Drive originals move to the Completed folder)'))) return;
   const r = await fetch('/cardconv/ledger/complete', {
     method:'POST',
     headers:{'Content-Type':'application/json'},
     body: JSON.stringify({ids: ids, undo: !!undo})
   });
   const d = await r.json().catch(() => ({}));
-  if(!d.ok){ alert('실패: ' + (d.error || r.status)); load(); return; }
-  toast(ids.length + '건 ' + verb + ' 완료', false);
+  if(!d.ok){ alert('Failed: ' + (d.error || r.status)); load(); return; }
+  toast(ids.length + ' receipts marked ' + verb, false);
   // Warn when some Drive originals couldn't be moved (e.g. Drive offline);
   // the ledger flag is already set so exclusion from Sync/Mapping still holds.
   if(d.attempted && d.moved < d.attempted){
-    toast('일부 Drive 원본 이동이 적용되지 않았습니다. 정산 데이터는 정상 반영됨.', true);
+    toast('Some Drive file moves did not apply. Settlement data was saved correctly.', true);
   }
   load();
 }
@@ -2627,7 +2627,7 @@ async function completeSelected(undo){
 function deleteSelected(){
   const ids = selectedIds();
   if(!ids.length) return;
-  $('delBody').textContent = '체크된 영수증 ' + ids.length + '건을 Ledger에서 삭제할까요?';
+  $('delBody').textContent = 'Delete ' + ids.length + ' checked receipts from the Ledger?';
   $('delDrive').checked = false;
   $('delOverlay').classList.add('open');
   $('delModal').classList.add('open');
@@ -2761,7 +2761,7 @@ $('fBulkUsage').addEventListener('change', () => {
   bulkApply('usage', v);
 });
 $('fBulkWith').addEventListener('click', () => {
-  const v = prompt('동행인 (w/) — 비워서 확인하면 제거됩니다:');
+  const v = prompt('Companions (w/) — leave blank and press OK to clear:');
   if(v === null) return;
   bulkApply('companions', v.trim());
 });
@@ -2878,7 +2878,7 @@ function closeManualAdd(){
 async function submitManualAdd(){
   if(!_MANUAL_FILE_ID) return;
   const btn = $('manualAddConfirm');
-  btn.disabled = true; btn.textContent = '추가 중...';
+  btn.disabled = true; btn.textContent = 'Adding…';
   const body = new URLSearchParams({
     file_id:               _MANUAL_FILE_ID,
     filename:              _MANUAL_META.filename,
@@ -2892,12 +2892,12 @@ async function submitManualAdd(){
   try {
     const r = await fetch('/cardconv/receipts/manual-add', {method:'POST', body});
     const d = await r.json();
-    if(!d.ok){ alert('추가 실패: ' + (d.error||r.status)); return; }
+    if(!d.ok){ alert('Add failed: ' + (d.error||r.status)); return; }
     closeManualAdd();
     closePanel();
     load();
-  } catch(e){ alert('오류: '+e); }
-  finally { btn.disabled=false; btn.textContent='추가'; }
+  } catch(e){ alert('Error: '+e); }
+  finally { btn.disabled=false; btn.textContent='Add'; }
 }
 $('manualOverlay').addEventListener('click', closeManualAdd);
 
@@ -3100,7 +3100,7 @@ function _imgLbKey(e){ if(e.key==='Escape') closeImgLb(); }
       if (isFx && e.ocr_amount != null) {
         var rateTxt = (e.fx_rate != null)
           ? ' <span style="color:var(--text-muted);font-weight:400">(1 USD ≈ ' + (FX_SYM[cur] || '') + Number(e.fx_rate).toLocaleString(undefined, {maximumFractionDigits: 2}) + ')</span>'
-          : ' <span style="color:var(--text-muted);font-weight:400">환율 조회 실패</span>';
+          : ' <span style="color:var(--text-muted);font-weight:400">FX rate lookup failed</span>';
         fxRow = '<div style="font-size:.76rem;padding:5px 8px;border-radius:4px;'
           + 'background:rgba(245,158,11,.12);color:#f59e0b;font-weight:600">💱 '
           + fmtAmtFx(e, e.ocr_amount) + rateTxt + '</div>';
