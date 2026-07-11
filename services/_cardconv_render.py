@@ -113,6 +113,14 @@ _CC_TAB_CSS = (
     # top is set by script in _tab_bar to the live nav height, so the pill
     # pins below the sticky site nav instead of sliding over it (nav z=100).
     ".cc-tabbar{position:sticky;top:52px;z-index:90;background:var(--bg-deep);padding:12px 0 10px;margin:-12px 0 10px}"
+    # Collapsible section (Register Receipts etc.) — mobile-first, closed by default
+    ".cc-collapse{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md);margin-bottom:16px;overflow:hidden}"
+    ".cc-collapse>summary{padding:12px 16px;font-size:.82rem;font-weight:700;color:var(--text);cursor:pointer;"
+    "user-select:none;list-style:none;display:flex;align-items:center;gap:8px}"
+    ".cc-collapse>summary::-webkit-details-marker{display:none}"
+    ".cc-collapse>summary::before{content:'▸';font-size:.7rem;color:var(--text-muted);transition:transform .15s}"
+    ".cc-collapse[open]>summary::before{transform:rotate(90deg)}"
+    ".cc-collapse-body{padding:4px 16px 14px}"
     ".cc-tabs{display:inline-flex;align-items:center;gap:2px;padding:3px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md);flex-wrap:wrap;max-width:100%}"
     ".cc-tab{display:inline-flex;align-items:center;padding:7px 16px;font-size:.82rem;font-weight:600;color:var(--text-muted);border-radius:var(--radius-sm);text-decoration:none;transition:background .15s,color .15s}"
     ".cc-tab:hover{color:var(--text)}"
@@ -324,28 +332,35 @@ def _register_section(user: str) -> str:
     drive_tip = _info_icon(
         'Links to your Wayfinder/Receipts/ folder in Google Drive. '
         'After connecting, click Sync to automatically OCR all receipts in that folder.')
+    # Collapsed by default (mobile-first) — auto-open until Drive is connected.
+    open_attr = "" if connected else " open"
     return f'''
   <div id="driveNewBanner" style="display:none;align-items:center;gap:10px;padding:10px 14px;margin-bottom:14px;border:1px solid rgba(245,158,11,.35);background:rgba(245,158,11,.08);border-radius:var(--radius-md)">
     <span style="font-size:1.1rem">🧾</span>
     <span style="font-size:.85rem;color:var(--text)">New receipts in Drive: <b id="driveNewCount" style="color:#f59e0b">0</b> file(s) waiting to be synced</span>
     <button class="btn btn-primary btn-sm" style="margin-left:auto;flex-shrink:0" onclick="startDriveSync(this)">🔄 Sync now</button>
   </div>
-  <div class="notepad-card" style="margin-bottom:20px">
-    <div class="notepad-header">
-      <span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--accent)">Google Drive</span>{drive_tip}
+  <details class="cc-collapse"{open_attr}>
+    <summary>📥 Register Receipts <span style="font-weight:500;color:var(--text-dim)">— Google Drive · Upload</span></summary>
+    <div class="cc-collapse-body">
+      <div class="notepad-card" style="margin-bottom:16px">
+        <div class="notepad-header">
+          <span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--accent)">Google Drive</span>{drive_tip}
+        </div>
+        <div class="notepad-body" style="padding:14px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+          {drive_status_html}
+        </div>
+      </div>
+      <div class="notepad-card">
+        <div class="notepad-header">
+          <span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--accent)">Upload</span>
+        </div>
+        <div class="notepad-body" style="padding:20px">
+          {receipt_upload_html}
+        </div>
+      </div>
     </div>
-    <div class="notepad-body" style="padding:14px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap">
-      {drive_status_html}
-    </div>
-  </div>
-  <div class="notepad-card" style="margin-bottom:20px">
-    <div class="notepad-header">
-      <span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--accent)">Register Receipts</span>
-    </div>
-    <div class="notepad-body" style="padding:20px">
-      {receipt_upload_html}
-    </div>
-  </div>'''
+  </details>'''
 
 
 # Receipt-upload drop-zone JS (injected into the Ledger page)
@@ -902,8 +917,11 @@ def _render_review(user: str) -> str:
 <title>🔍 Review · Wayfinder</title>
 <link rel="stylesheet" href="/static/style.css?v={CSS_VER}">
 <style>{_CC_TAB_CSS}
-.stat-grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px}}
+.stat-grid{{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:16px}}
 .stat-card{{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md);padding:16px 20px;text-align:center}}
+.stat-click{{cursor:pointer;transition:border-color .12s}}
+.stat-click:hover{{border-color:var(--accent)}}
+.stat-click.active{{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}}
 .stat-value{{font-size:1.6rem;font-weight:700;color:var(--text);line-height:1.2}}
 .stat-label{{font-size:.73rem;color:var(--text-muted);margin-top:4px;text-transform:uppercase;letter-spacing:.06em}}
 .filter-bar{{display:flex;align-items:center;gap:10px;padding:10px 16px;background:var(--surface-2);
@@ -969,9 +987,11 @@ def _render_review(user: str) -> str:
   </div>
 
   <div class="stat-grid">
-    <div class="stat-card"><div class="stat-value" id="rvTotal">{total}</div><div class="stat-label">Open</div></div>
-    <div class="stat-card"><div class="stat-value" id="rvMatched" style="color:#22c55e">{matched}</div><div class="stat-label">Matched</div></div>
-    <div class="stat-card"><div class="stat-value" id="rvUnmatched" style="color:#ef4444">{unmatched}</div><div class="stat-label">Unmatched</div></div>
+    <div class="stat-card stat-click active" data-rvview="open" title="Open transactions"><div class="stat-value" id="rvTotal">{total}</div><div class="stat-label">Open</div></div>
+    <div class="stat-card stat-click" data-rvview="matched" title="Open + receipt matched"><div class="stat-value" id="rvMatched" style="color:#22c55e">{matched}</div><div class="stat-label">Matched</div></div>
+    <div class="stat-card stat-click" data-rvview="unmatched" title="Open + no receipt"><div class="stat-value" id="rvUnmatched" style="color:#ef4444">{unmatched}</div><div class="stat-label">Unmatched</div></div>
+    <div class="stat-card stat-click" data-rvview="in_progress" title="Submitted to SAP, awaiting approval"><div class="stat-value" style="color:#f59e0b">{inprog_n}</div><div class="stat-label">⏳ In progress</div></div>
+    <div class="stat-card stat-click" data-rvview="completed" title="Settlement completed"><div class="stat-value" style="color:#818cf8">{completed_n}</div><div class="stat-label">✔ Completed</div></div>
   </div>
 
   <div class="filter-bar">
@@ -1002,10 +1022,7 @@ def _render_review(user: str) -> str:
     <button class="btn btn-ghost btn-sm" id="rvMarkOpen">↩ Reopen</button>
     <button class="btn btn-ghost btn-sm" id="rvRematch" title="Match open transactions against the receipt ledger">↻ Re-match receipts</button>
     <span style="flex:1"></span>
-    <span style="font-size:.76rem;color:var(--text-muted)">View:</span>
-    <button class="preset-btn rv-view active" data-view="open">Open ({total})</button>
-    <button class="preset-btn rv-view" data-view="in_progress">⏳ In progress ({inprog_n})</button>
-    <button class="preset-btn rv-view" data-view="completed">✔ Completed ({completed_n})</button>
+    <span style="font-size:.76rem;color:var(--text-muted)">위 카드를 클릭해 뷰 전환</span>
   </div>
 
   <div class="notepad-card">
@@ -1040,25 +1057,19 @@ function iso(d){{ return d.toISOString().slice(0,10); }}
 // View state: 'open' (default) or 'completed'. Date filters keep rows without
 // an invoice date always visible, matching Ledger.
 let rvView = 'open';
+let rvMatchedF = 'all';   // 'all' | '1' | '0' — set by the Matched/Unmatched cards
 function applyFilter(){{
   const from = $('rvFrom').value, to = $('rvTo').value;
   const mq = $('rvMerchant').value.trim().toLowerCase();
-  let total=0, matched=0, unmatched=0;
   document.querySelectorAll('.rv-item').forEach(it => {{
     const d = it.dataset.date || '';
     const show = (it.dataset.status === rvView)
+      && (rvMatchedF === 'all' || it.dataset.matched === rvMatchedF)
       && (!from || !d || d >= from) && (!to || !d || d <= to)
       && (!mq || (it.dataset.merchant || '').includes(mq));
     it.style.display = show ? '' : 'none';
     if(!show) it.querySelector('.rv-cb').checked = false;
-    if(show){{
-      total++;
-      if(it.dataset.matched === '1') matched++; else unmatched++;
-    }}
   }});
-  $('rvTotal').textContent = total;
-  $('rvMatched').textContent = matched;
-  $('rvUnmatched').textContent = unmatched;
   $('rvSelAll').checked = false;
 }}
 
@@ -1075,9 +1086,18 @@ function applySort(){{
 }}
 
 // ── Status workflow: open → in_progress (SAP submitted) → completed ─────────
-document.querySelectorAll('.rv-view').forEach(b => b.addEventListener('click', () => {{
-  rvView = b.dataset.view;
-  document.querySelectorAll('.rv-view').forEach(x => x.classList.toggle('active', x === b));
+// Stat cards double as view switchers (same UX as the Ledger).
+const RV_VIEWS = {{
+  open:        {{view: 'open',        matched: 'all'}},
+  matched:     {{view: 'open',        matched: '1'}},
+  unmatched:   {{view: 'open',        matched: '0'}},
+  in_progress: {{view: 'in_progress', matched: 'all'}},
+  completed:   {{view: 'completed',   matched: 'all'}},
+}};
+document.querySelectorAll('.stat-click').forEach(card => card.addEventListener('click', () => {{
+  const v = RV_VIEWS[card.dataset.rvview];
+  rvView = v.view; rvMatchedF = v.matched;
+  document.querySelectorAll('.stat-click').forEach(c => c.classList.toggle('active', c === card));
   applyFilter();
 }}));
 
@@ -1141,7 +1161,10 @@ $('rvFrom').addEventListener('change', () => {{ clearPresetActive(); applyFilter
 $('rvTo').addEventListener('change', () => {{ clearPresetActive(); applyFilter(); }});
 $('rvReset').addEventListener('click', () => {{
   $('rvFrom').value = ''; $('rvTo').value = ''; $('rvMerchant').value = '';
-  $('rvSort').value = 'date'; applySort(); clearPresetActive(); applyFilter();
+  $('rvSort').value = 'date'; applySort();
+  rvView = 'open'; rvMatchedF = 'all';
+  document.querySelectorAll('.stat-click').forEach(c => c.classList.toggle('active', c.dataset.rvview === 'open'));
+  clearPresetActive(); applyFilter();
 }});
 function clearPresetActive(){{ document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active')); }}
 document.querySelectorAll('.preset-btn').forEach(b =>
