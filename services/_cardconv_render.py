@@ -1729,7 +1729,9 @@ __TABCSS__
 .fb-more-btn:hover{border-color:var(--accent);color:var(--text)}
 .fb-more-btn .chev{transition:transform .18s}
 .fb-more-btn.open .chev{transform:rotate(180deg)}
-.fb-selbar{display:none;align-items:center;gap:10px;padding:9px 16px;background:rgba(129,140,248,.08);border:1px solid rgba(129,140,248,.25);border-radius:var(--radius-md);margin-bottom:8px}
+.fb-selbar{display:none;align-items:center;gap:10px;padding:9px 16px;background:rgba(129,140,248,.08);border:1px solid rgba(129,140,248,.25);border-radius:var(--radius-md);margin-bottom:8px;flex-wrap:wrap}
+.fb-selbar select{background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.78rem;padding:4px 7px;outline:none}
+.fb-selbar select:focus{border-color:var(--accent)}
 .fb-selbar.show{display:flex}
 .fb-selcount{font-size:.8rem;font-weight:700;color:var(--text)}
 @media(max-width:640px){.detail-panel{width:100vw}.stat-grid{grid-template-columns:1fr 1fr}.filter-bar{gap:8px;padding:9px 12px}.filter-bar .fb-field{flex-wrap:wrap}.preset-btn{padding:7px 12px}.row-check,.del-check input{width:20px;height:20px}.usage-sel,.card-sel{padding:6px 8px;max-width:none}.ledger-table,.ledger-table tbody,.ledger-table tr,.ledger-table td{display:block;width:100%}.ledger-table thead{display:none}.ledger-table tr{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md);margin-bottom:10px;padding:10px 12px;position:relative}.ledger-table tr:hover td{background:transparent}.ledger-table td{border-bottom:none!important;padding:5px 0;display:flex;justify-content:space-between;align-items:center;gap:10px;text-align:right}.ledger-table td::before{content:attr(data-label);font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);text-align:left}.ledger-table td[data-label=Select]{position:absolute;top:8px;right:10px;padding:0}.ledger-table td[data-label=Select]::before{display:none}.ledger-table td[data-label=Date]{font-weight:700;font-size:.95rem;padding-right:34px}}
@@ -1844,6 +1846,20 @@ __TABCSS__
   <!-- 선택 시에만 등장하는 일괄작업 바 -->
   <div class="fb-selbar" id="fSelBar">
     <span class="fb-selcount" id="fSelCount">0 selected</span>
+    <div class="fb-group" role="group" aria-label="Bulk edits">
+      <select id="fBulkCard" title="Set card type on all selected">
+        <option value="">💳 Card…</option>
+        <option value="none">– (clear)</option>
+        <option value="amex">AMEX</option>
+        <option value="visa">Visa</option>
+        <option value="other">Other</option>
+      </select>
+      <select id="fBulkUsage" title="Set usage tag on all selected">
+        <option value="">🏷 Usage…</option>
+      </select>
+      <button class="btn btn-sm" id="fBulkWith" title="Set the w/ companion note on all selected">👥 w/…</button>
+      <button class="btn btn-sm" id="fBulkRematch" title="Re-try CSV matching using only the selected receipts">↻ Re-match</button>
+    </div>
     <div class="fb-group fb-spacer" role="group" aria-label="Selection actions">
       <button class="btn btn-sm fb-act-complete" id="fComplete" disabled>✓ Complete (0)</button>
       <button class="btn btn-sm fb-act-uncomplete" id="fUncomplete" disabled>↩ Un-complete (0)</button>
@@ -2275,6 +2291,13 @@ function syncUsageOptions(usages){
     .concat((usages||[]).map(u => '<option value="' + u.replace(/"/g,'&quot;') + '">' + u + '</option>'));
   sel.innerHTML = opts.join('');
   sel.value = (usages||[]).includes(cur) || cur==='all' ? cur : 'all';
+  // Bulk selector mirrors the same tags plus a new-tag sentinel.
+  const b = $('fBulkUsage');
+  if(b){
+    b.innerHTML = ['<option value="">🏷 Usage…</option>']
+      .concat((usages||[]).map(u => '<option value="' + u.replace(/"/g,'&quot;') + '">' + u + '</option>'))
+      .concat(['<option value="__new__">+ New…</option>']).join('');
+  }
 }
 
 let _loadSeq = 0;
@@ -2705,6 +2728,39 @@ $('checkAll').addEventListener('change', () => {
   document.querySelectorAll('.sel').forEach(c => { c.checked = $('checkAll').checked; });
   updateDeleteBtn();
 });
+
+// Bulk edits on the current selection — one action per call.
+async function bulkApply(action, value){
+  const ids = selectedIds();
+  if(!ids.length) return;
+  const r = await fetch('/cardconv/ledger/bulk', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ids: ids, action: action, value: value})
+  });
+  const d = await r.json().catch(() => ({}));
+  if(!d.ok){ toast('Bulk update failed', true); return; }
+  if(action === 'rematch') toast(d.matched + ' of ' + ids.length + ' selected matched' + (d.matched ? '' : ' — no CSV transaction fits'), !d.matched);
+  else toast('Updated ' + d.updated + ' receipts');
+  load();
+}
+$('fBulkCard').addEventListener('change', () => {
+  const v = $('fBulkCard').value;
+  $('fBulkCard').value = '';
+  if(v !== '') bulkApply('card', v);
+});
+$('fBulkUsage').addEventListener('change', () => {
+  let v = $('fBulkUsage').value;
+  $('fBulkUsage').value = '';
+  if(v === '') return;
+  if(v === '__new__'){ v = (prompt('New usage tag:') || '').trim(); if(!v) return; }
+  bulkApply('usage', v);
+});
+$('fBulkWith').addEventListener('click', () => {
+  const v = prompt('동행인 (w/) — 비워서 확인하면 제거됩니다:');
+  if(v === null) return;
+  bulkApply('companions', v.trim());
+});
+$('fBulkRematch').addEventListener('click', () => bulkApply('rematch', null));
 // Period select drives the date range; Custom… reveals the two date inputs.
 $('fPeriod').addEventListener('change', () => {
   const v = $('fPeriod').value;

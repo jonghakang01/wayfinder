@@ -671,10 +671,11 @@ def _load_tx_pool(username: str) -> dict:
     return pool
 
 
-def _rematch_pool(username: str) -> dict:
+def _rematch_pool(username: str, only_receipt_ids=None) -> dict:
     """Match every open, unmatched pool transaction against the receipt ledger.
 
     Same matching as _ingest_csv applies to fresh rows. Returns {"matched": n}.
+    only_receipt_ids restricts the candidate receipts (bulk re-match of a selection).
     """
     pool = _load_tx_pool(username)
     todo = [e for e in pool.get("entries", [])
@@ -694,6 +695,10 @@ def _rematch_pool(username: str) -> dict:
             r["match_status"] = "pending_match"
             dirty_heal = True
     receipts_map, fx_receipts, dirty = _build_receipt_index(receipts, username)
+    if only_receipt_ids:
+        sel = set(only_receipt_ids)
+        receipts_map = {k: r for k, r in receipts_map.items() if r.get("id") in sel}
+        fx_receipts = [t for t in fx_receipts if t[2].get("id") in sel]
     dirty = dirty or dirty_heal
     matched = 0
     for e in todo:
@@ -3033,6 +3038,50 @@ def _handle_ledger_update(username: str, entry_id: str, body: dict):
         return ("json", {"error": "not found"}, 404)
     _save_ledger(username, ledger)
     return ("json", {"ok": True})
+
+
+def _handle_ledger_bulk(username: str, body: dict):
+    """POST /cardconv/ledger/bulk — apply one action to the selected receipts.
+
+    JSON body: {"ids": [...], "action": "card"|"usage"|"companions"|"rematch",
+    "value": ...}. companions mirrors into matched transactions' snapshots."""
+    ids = set(body.get("ids") or [])
+    action = body.get("action")
+    value = body.get("value")
+    if not ids or action not in ("card", "usage", "companions", "rematch"):
+        return ("json", {"error": "bad request"}, 400)
+
+    if action == "rematch":
+        res = _rematch_pool(username, only_receipt_ids=ids)
+        return ("json", {"ok": True, **res})
+
+    comp = _coerce_companions(str(value).strip()) if (action == "companions" and value) else None
+    ledger = _load_ledger(username)
+    updated = 0
+    for e in ledger["entries"]:
+        if e.get("id") not in ids:
+            continue
+        if action == "card":
+            v = str(value or "").strip().lower()
+            e["card_brand"] = v if v in ("amex", "visa", "other") else None
+        elif action == "usage":
+            e["usage"] = str(value or "").strip() or "Regular"
+        elif action == "companions":
+            e["ocr_companions"] = comp
+        updated += 1
+    if updated:
+        _save_ledger(username, ledger)
+        if action == "companions":
+            pool = _load_tx_pool(username)
+            dirty = False
+            for t in pool["entries"]:
+                rc = t.get("receipt") or {}
+                if rc.get("id") in ids:
+                    rc["companions"] = comp
+                    dirty = True
+            if dirty:
+                _save_tx_pool(username, pool)
+    return ("json", {"ok": True, "updated": updated})
 
 
 def _handle_review_manual_match(username: str, body: dict):

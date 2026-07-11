@@ -58,6 +58,8 @@ def handle(method, path, body, ctx=None):
         return _handle_ledger_delete(user, body)
     if method == "POST" and path == "/cardconv/ledger/complete":
         return _handle_ledger_complete(user, body)
+    if method == "POST" and path == "/cardconv/ledger/bulk":
+        return _handle_ledger_bulk(user, body)
     if method == "GET" and path == "/cardconv/ledger/download.xlsx":
         return _handle_ledger_xlsx(user, body)  # GET passes query dict as body
     if method == "POST" and path.startswith("/cardconv/ledger/") and path.endswith("/status"):
