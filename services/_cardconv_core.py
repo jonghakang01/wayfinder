@@ -3014,6 +3014,30 @@ def _handle_review_reason(username: str, body: dict):
     return ("json", {"error": "not found"}, 404)
 
 
+def _handle_review_set_status(username: str, body: dict):
+    """POST /cardconv/review/status — set open / in_progress / completed.
+
+    in_progress marks transactions submitted to SAP and awaiting approval,
+    so the settlement state is trackable between upload and sign-off."""
+    raw = body.get("ids", [])
+    ids = {str(i) for i in (raw if isinstance(raw, list) else [raw]) if i}
+    status = str(body.get("status", "")).strip()
+    if not ids:
+        return ("json", {"error": "no ids"}, 400)
+    if status not in ("open", "in_progress", "completed"):
+        return ("json", {"error": "bad status"}, 400)
+    pool = _load_tx_pool(username)
+    now = datetime.now().isoformat()
+    touched = 0
+    for e in pool["entries"]:
+        if e.get("id") in ids:
+            e["status"] = status
+            e["completed_at"] = now if status == "completed" else None
+            touched += 1
+    _save_tx_pool(username, pool)
+    return ("json", {"ok": True, "touched": touched, "status": status})
+
+
 def _handle_review_complete(username: str, body: dict):
     """POST /cardconv/review/complete — mark transactions completed (or undo).
 
@@ -3047,7 +3071,7 @@ def _select_review_entries(username: str, query: dict) -> list:
         return [e for e in pool["entries"] if e.get("id") in want]
     dfrom = (query.get("from", [""]) or [""])[0]
     dto   = (query.get("to", [""]) or [""])[0]
-    entries = [e for e in pool["entries"] if e.get("status") != "completed"]
+    entries = [e for e in pool["entries"] if e.get("status", "open") == "open"]
     if dfrom or dto:
         entries = [e for e in entries
                    if not e.get("date")

@@ -777,11 +777,12 @@ def _render_review(user: str) -> str:
     rows    = sorted(pool.get("entries", []),
                      key=lambda e: (e.get("date") or "0000-00-00", e.get("added_at") or ""),
                      reverse=True)
-    open_rows   = [e for e in rows if e.get("status") != "completed"]
+    open_rows   = [e for e in rows if (e.get("status") or "open") == "open"]
     total       = len(open_rows)
     matched     = sum(1 for e in open_rows if e.get("matched"))
     unmatched   = total - matched
-    completed_n = len(rows) - total
+    inprog_n    = sum(1 for e in rows if e.get("status") == "in_progress")
+    completed_n = sum(1 for e in rows if e.get("status") == "completed")
     li          = pool.get("last_ingest") or {}
     dup_skipped = li.get("dup_skipped", 0)
 
@@ -796,11 +797,17 @@ def _render_review(user: str) -> str:
         items = []
         for r in rows:
             is_matched = r.get("matched")
-            is_open    = r.get("status") != "completed"
+            st = r.get("status") or "open"
+            is_open = st == "open"
             rc = r.get("receipt") or {}
-            done_badge = ('' if is_open else
-                          '<span style="font-size:.62rem;font-weight:700;padding:2px 6px;border-radius:8px;'
-                          'background:rgba(34,197,94,.15);color:#22c55e">✔ COMPLETED</span>')
+            if st == "completed":
+                done_badge = ('<span style="font-size:.62rem;font-weight:700;padding:2px 6px;border-radius:8px;'
+                              'background:rgba(34,197,94,.15);color:#22c55e">✔ COMPLETED</span>')
+            elif st == "in_progress":
+                done_badge = ('<span style="font-size:.62rem;font-weight:700;padding:2px 6px;border-radius:8px;'
+                              'background:rgba(245,158,11,.15);color:#f59e0b">⏳ APPROVAL IN PROGRESS</span>')
+            else:
+                done_badge = ''
             # Transaction (CSV line item) header
             txn = (
                 f'<label class="rv-cb-wrap"><input type="checkbox" class="rv-cb" data-id="{_esc(r.get("id",""))}"></label>'
@@ -862,13 +869,15 @@ def _render_review(user: str) -> str:
                       '<div class="rv-nomatch">❌ No receipt matched</div>'
                       f'{match_btn}'
                     '</div>')
-            item_cls = 'rv-item' + ('' if is_matched else ' unmatched') + ('' if is_open else ' done')
+            item_cls = 'rv-item' + ('' if is_matched else ' unmatched') + ('' if st == "completed" else '')
+            if st == "completed":
+                item_cls += ' done'
             row_date = _esc(r.get("date")) or ""
             row_merchant = _esc(str(r.get("merchant") or "").lower())
             items.append(
                 f'<div class="{item_cls}" data-date="{row_date}" '
                 f'data-merchant="{row_merchant}" '
-                f'data-status="{"open" if is_open else "completed"}" '
+                f'data-status="{st}" '
                 f'data-matched="{"1" if is_matched else "0"}">{txn}{receipt_block}</div>')
         body_html = "".join(items)
 
@@ -988,10 +997,15 @@ def _render_review(user: str) -> str:
     <label style="display:flex;align-items:center;gap:6px;font-size:.8rem;color:var(--text-muted);cursor:pointer">
       <input type="checkbox" id="rvSelAll" style="width:15px;height:15px;accent-color:var(--accent);cursor:pointer"> Select all
     </label>
-    <button class="btn btn-primary btn-sm" id="rvBulkBtn">✔ Mark completed</button>
+    <button class="btn btn-secondary btn-sm" id="rvMarkProg" title="Submitted to SAP, awaiting approval">⏳ Mark in progress</button>
+    <button class="btn btn-primary btn-sm" id="rvMarkDone">✔ Mark completed</button>
+    <button class="btn btn-ghost btn-sm" id="rvMarkOpen">↩ Reopen</button>
     <button class="btn btn-ghost btn-sm" id="rvRematch" title="Match open transactions against the receipt ledger">↻ Re-match receipts</button>
     <span style="flex:1"></span>
-    <button class="preset-btn" id="rvViewToggle">Show completed ({completed_n})</button>
+    <span style="font-size:.76rem;color:var(--text-muted)">View:</span>
+    <button class="preset-btn rv-view active" data-view="open">Open ({total})</button>
+    <button class="preset-btn rv-view" data-view="in_progress">⏳ In progress ({inprog_n})</button>
+    <button class="preset-btn rv-view" data-view="completed">✔ Completed ({completed_n})</button>
   </div>
 
   <div class="notepad-card">
@@ -1060,13 +1074,29 @@ function applySort(){{
   items.forEach(it => list.appendChild(it));
 }}
 
-// ── Complete workflow ────────────────────────────────────────────────────────
-$('rvViewToggle').addEventListener('click', () => {{
-  rvView = (rvView === 'open') ? 'completed' : 'open';
-  $('rvViewToggle').classList.toggle('active', rvView === 'completed');
-  $('rvBulkBtn').textContent = (rvView === 'open') ? '✔ Mark completed' : '↩ Reopen';
+// ── Status workflow: open → in_progress (SAP submitted) → completed ─────────
+document.querySelectorAll('.rv-view').forEach(b => b.addEventListener('click', () => {{
+  rvView = b.dataset.view;
+  document.querySelectorAll('.rv-view').forEach(x => x.classList.toggle('active', x === b));
   applyFilter();
-}});
+}}));
+
+function rvSetStatus(status, label){{
+  const ids = Array.from(document.querySelectorAll('.rv-cb:checked')).map(cb => cb.dataset.id);
+  if(!ids.length){{ alert('Select transactions first.'); return; }}
+  if(!confirm(label + ' — ' + ids.length + ' transaction(s)?')) return;
+  fetch('/cardconv/review/status', {{
+    method: 'POST',
+    headers: {{'Content-Type': 'application/json'}},
+    body: JSON.stringify({{ids: ids, status: status}})
+  }}).then(r => r.json()).then(d => {{
+    if(d.error){{ alert('Error: ' + d.error); return; }}
+    location.reload();
+  }}).catch(e => alert('Error: ' + e));
+}}
+$('rvMarkProg').addEventListener('click', () => rvSetStatus('in_progress', '⏳ Mark in progress'));
+$('rvMarkDone').addEventListener('click', () => rvSetStatus('completed', '✔ Mark completed'));
+$('rvMarkOpen').addEventListener('click', () => rvSetStatus('open', '↩ Reopen'));
 
 $('rvRematch').addEventListener('click', async () => {{
   const btn = $('rvRematch');
@@ -1087,21 +1117,6 @@ $('rvSelAll').addEventListener('change', () => {{
   document.querySelectorAll('.rv-item').forEach(it => {{
     if(it.style.display !== 'none') it.querySelector('.rv-cb').checked = on;
   }});
-}});
-
-$('rvBulkBtn').addEventListener('click', () => {{
-  const ids = Array.from(document.querySelectorAll('.rv-cb:checked')).map(cb => cb.dataset.id);
-  if(!ids.length){{ alert('Select transactions first.'); return; }}
-  const undo = (rvView === 'completed');
-  if(!confirm((undo ? 'Reopen ' : 'Mark ') + ids.length + ' transaction(s)' + (undo ? '?' : ' as completed?'))) return;
-  fetch('/cardconv/review/complete', {{
-    method: 'POST',
-    headers: {{'Content-Type': 'application/json'}},
-    body: JSON.stringify({{ids: ids, undo: undo}})
-  }}).then(r => r.json()).then(d => {{
-    if(d.error){{ alert('Error: ' + d.error); return; }}
-    location.reload();
-  }}).catch(e => alert('Error: ' + e));
 }});
 
 function applyPreset(p){{

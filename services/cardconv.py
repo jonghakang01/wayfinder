@@ -38,6 +38,8 @@ def handle(method, path, body, ctx=None):
         return _handle_review_manual_match(user, body)
     if method == "POST" and path == "/cardconv/review/complete":
         return _handle_review_complete(user, body)
+    if method == "POST" and path == "/cardconv/review/status":
+        return _handle_review_set_status(user, body)
     if method == "POST" and path == "/cardconv/review/rematch":
         return ("json", _rematch_pool(user))
     if method == "GET" and path == "/cardconv/review/download":
