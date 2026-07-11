@@ -168,7 +168,10 @@ _CC_TAB_CSS = (
 def _tab_bar(active: str, user: str) -> str:
     """Shared Card Converter tab bar. active ∈ ledger|convert|review|history|keywords."""
     unmatched_n = _ledger_stats(_ledger_entries(user))["unmatched"]
-    ledger_badge = f'<span class="tab-badge">{unmatched_n}</span>' if unmatched_n else ''
+    ledger_badge = (f'<span class="tab-badge" title="{unmatched_n} unmatched receipt(s) — click to view" '
+                    f'style="cursor:pointer" '
+                    f'onclick="location.href=\'/cardconv/ledger?view=unmatched\';return false;">{unmatched_n}</span>'
+                    if unmatched_n else '')
     staged_n = len(_load_ocr_staging(user).get("entries", []))
     ocr_badge = f'<span class="tab-badge" style="background:#f59e0b;cursor:pointer" onclick="openOcrModal();return false;">{staged_n}</span>' if staged_n else ''
     tabs = [
@@ -3195,6 +3198,13 @@ function _imgLbKey(e){ if(e.key==='Escape') closeImgLb(); }
   if (new URLSearchParams(location.search).get('ocr_review') === '1') {
     history.replaceState({}, '', location.pathname);
     openOcrModal();
+  }
+
+  // Tab-badge deep link: ?view=unmatched applies the Unmatched stat view.
+  if (new URLSearchParams(location.search).get('view') === 'unmatched') {
+    history.replaceState({}, '', location.pathname);
+    var uc = document.querySelector('[data-statview="unmatched"]');
+    if (uc) uc.click();
   }
 
 })();
