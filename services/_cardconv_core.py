@@ -2078,12 +2078,14 @@ def _handle_ledger_api(username: str, query: dict):
     # a completed count so the UI can surface how many are archived.
     usages = sorted({(e.get("usage") or "Regular") for e in entries})
     completed_n = sum(1 for e in entries if e.get("completed"))
+    inprog_n = sum(1 for e in entries if e.get("settle_status") == "in_progress")
     return ("json", {
         "total":       stats["total"],
         "matched":     stats["matched"],
         "unmatched":   stats["unmatched"],
         "pending_match": stats["pending_match"],
         "completed":   completed_n,
+        "in_progress": inprog_n,
         "usages":      usages,
         "page":        page,
         "pages":       pages,

@@ -1505,7 +1505,10 @@ _LEDGER_HTML = r'''<!DOCTYPE html>
 <link rel="stylesheet" href="/static/style.css?v=__CSSVER__">
 <style>
 __TABCSS__
-.stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+.stat-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:16px}
+.stat-click{cursor:pointer;transition:border-color .12s}
+.stat-click:hover{border-color:var(--accent)}
+.stat-click.active{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
 .stat-card{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md);
   padding:16px 20px;text-align:center}
 .stat-value{font-size:1.6rem;font-weight:700;color:var(--text);line-height:1.2}
@@ -1635,10 +1638,11 @@ __TABCSS__
   __REGISTER__
 
   <div class="stat-grid">
-    <div class="stat-card"><div class="stat-value" id="statTotal">–</div><div class="stat-label">Total</div></div>
-    <div class="stat-card"><div class="stat-value" id="statMatched" style="color:#22c55e">–</div><div class="stat-label">Matched</div></div>
-    <div class="stat-card"><div class="stat-value" id="statUnmatched" style="color:#ef4444">–</div><div class="stat-label">Unmatched</div></div>
-    <div class="stat-card"><div class="stat-value" id="statCompleted" style="color:#818cf8">–</div><div class="stat-label">Completed</div></div>
+    <div class="stat-card stat-click" data-statview="total" title="Show all active receipts"><div class="stat-value" id="statTotal">–</div><div class="stat-label">Total</div></div>
+    <div class="stat-card stat-click" data-statview="matched" title="Matched receipts only"><div class="stat-value" id="statMatched" style="color:#22c55e">–</div><div class="stat-label">Matched</div></div>
+    <div class="stat-card stat-click" data-statview="unmatched" title="Unmatched receipts only"><div class="stat-value" id="statUnmatched" style="color:#ef4444">–</div><div class="stat-label">Unmatched</div></div>
+    <div class="stat-card stat-click" data-statview="in_progress" title="Settlement submitted, awaiting approval"><div class="stat-value" id="statInProg" style="color:#f59e0b">–</div><div class="stat-label">⏳ In progress</div></div>
+    <div class="stat-card stat-click" data-statview="completed" title="Archived receipts"><div class="stat-value" id="statCompleted" style="color:#818cf8">–</div><div class="stat-label">Completed</div></div>
   </div>
 
   <!-- Row 1 · date range + quick presets (kept together as one period control) -->
@@ -2154,13 +2158,17 @@ function syncUsageOptions(usages){
   sel.value = (usages||[]).includes(cur) || cur==='all' ? cur : 'all';
 }
 
+let _loadSeq = 0;
 async function load(){
+  const seq = ++_loadSeq;
   const p = filterParams();
   const r = await fetch('/cardconv/ledger/api?' + p.toString());
   const d = await r.json();
+  if(seq !== _loadSeq) return;  // superseded by a newer load — drop stale response
   $('statTotal').textContent = d.total;
   $('statMatched').textContent = d.matched;
   $('statUnmatched').textContent = d.unmatched;
+  $('statInProg').textContent = (d.in_progress!=null ? d.in_progress : '–');
   $('statCompleted').textContent = (d.completed!=null ? d.completed : '–');
   window.USAGES = d.usages || ['Regular'];
   syncUsageOptions(d.usages);
@@ -2526,6 +2534,23 @@ $('fUsage').addEventListener('change', load);
 $('fCompleted').addEventListener('change', load);
 $('fSettle').addEventListener('change', load);
 $('fSort').addEventListener('change', load);
+
+// Stat cards double as one-click views (Review-style switching).
+const STAT_VIEWS = {
+  total:       {status:'all',       settle:'all',         completed:'hide'},
+  matched:     {status:'matched',   settle:'all',         completed:'hide'},
+  unmatched:   {status:'unmatched', settle:'all',         completed:'hide'},
+  in_progress: {status:'all',       settle:'in_progress', completed:'hide'},
+  completed:   {status:'all',       settle:'all',         completed:'only'},
+};
+document.querySelectorAll('.stat-click').forEach(card => card.addEventListener('click', () => {
+  const v = STAT_VIEWS[card.dataset.statview];
+  $('fStatus').value = v.status;
+  $('fSettle').value = v.settle;
+  $('fCompleted').value = v.completed;
+  document.querySelectorAll('.stat-click').forEach(c => c.classList.toggle('active', c === card));
+  load();
+}));
 let _mDeb;
 $('fMerchant').addEventListener('input', () => { clearTimeout(_mDeb); _mDeb = setTimeout(load, 300); });
 $('fMore').addEventListener('click', () => {
@@ -2537,6 +2562,7 @@ $('fReset').addEventListener('click', () => {
   $('fStatus').value='all'; $('fCard').value='all'; $('fUsage').value='all';
   $('fCompleted').value='hide'; $('fSettle').value='all';
   $('fMerchant').value=''; $('fSort').value='date';
+  document.querySelectorAll('.stat-click').forEach(c => c.classList.remove('active'));
   setDefaultDates(); load();
 });
 // Both downloads respect the currently applied filters.
