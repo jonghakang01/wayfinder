@@ -1638,8 +1638,30 @@ __TABCSS__
 /* SVG is sized/positioned in JS to overlap the rendered (object-fit:contain) image rect. */
 .receipt-bbox-overlay{position:absolute;top:0;left:0;pointer-events:none;display:none}
 .detail-actions{padding:16px 20px;display:flex;flex-direction:column;gap:8px;margin-top:auto}
-.fb-advanced{display:none}
+.filter-bar [hidden],.fb-chips[hidden]{display:none!important}
+.fb-pop-wrap{position:relative}
+.fb-advanced{display:none;position:absolute;top:calc(100% + 8px);right:0;z-index:120;background:var(--surface-3);border:1px solid var(--border-bright);border-radius:var(--radius-md);box-shadow:0 12px 34px rgba(0,0,0,.55);padding:14px;min-width:440px;flex-direction:column;gap:12px}
 .fb-advanced.open{display:flex}
+.fb-adv-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px 18px}
+.fb-adv-grid .fb-field{justify-content:space-between}
+.fb-adv-foot{display:flex;justify-content:flex-end;border-top:1px solid var(--border-bright);padding-top:10px}
+.fb-badge{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;border-radius:999px;background:var(--accent);color:var(--on-accent,#080d14);font-size:.65rem;font-weight:800;padding:0 4px}
+.fb-menu{display:none;position:absolute;top:calc(100% + 8px);right:0;z-index:120;background:var(--surface-3);border:1px solid var(--border-bright);border-radius:var(--radius-md);box-shadow:0 12px 34px rgba(0,0,0,.55);padding:6px;min-width:280px;flex-direction:column;gap:2px}
+.fb-menu.open{display:flex}
+.fb-menu-item{display:flex;align-items:center;gap:8px;background:none;border:none;border-radius:7px;color:var(--text);font-size:.8rem;font-weight:600;padding:8px 10px;cursor:pointer;text-align:left;white-space:nowrap}
+.fb-menu-item:hover{background:var(--surface-2)}
+.fb-menu-item small{color:var(--text-muted);font-weight:500}
+.fb-search{flex:1;min-width:140px}
+.fb-search input{width:100%}
+.fb-chips{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px;padding:0 4px}
+.fb-chip{display:inline-flex;align-items:center;gap:7px;background:rgba(56,189,248,.12);border:1px solid rgba(56,189,248,.35);color:var(--accent);border-radius:999px;padding:3px 11px;font-size:.74rem;font-weight:600}
+.fb-chip i{font-style:normal;opacity:.7;cursor:pointer}
+.fb-chip i:hover{opacity:1}
+.fb-chip-reset{background:none;border:none;color:var(--text-muted);font-size:.74rem;text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+.th-sort{cursor:pointer;user-select:none}
+.th-sort:hover{color:var(--text)}
+.th-sort.on{color:var(--accent)}
+@media(max-width:640px){.fb-advanced{position:fixed;left:12px;right:12px;top:auto;min-width:0}.fb-adv-grid{grid-template-columns:1fr}}
 .fb-more-btn{background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:.78rem;font-weight:600;padding:5px 11px;cursor:pointer;display:inline-flex;align-items:center;gap:5px}
 .fb-more-btn:hover{border-color:var(--accent);color:var(--text)}
 .fb-more-btn .chev{transition:transform .18s}
@@ -1668,80 +1690,93 @@ __TABCSS__
     <div class="stat-card stat-click" data-statview="completed" title="Archived receipts"><div class="stat-value" id="statCompleted" style="color:#818cf8">–</div><div class="stat-label">Completed</div></div>
   </div>
 
-  <!-- Row 1 · date range + quick presets (kept together as one period control) -->
-  <!-- Row A · 항상 노출: 자주 쓰는 필터 -->
+  <!-- Toolbar · one row, one job per control: Period / Search / Filters / Export.
+       Status filtering lives on the stat cards; fine-grained state in the Filters popover. -->
   <div class="filter-bar">
     <div class="fb-field">
-      <span>📅 Date</span>
+      <span>Period</span>
+      <select id="fPeriod">
+        <option value="all">All time</option>
+        <option value="month">This month</option>
+        <option value="30d">30 days</option>
+        <option value="3m">3 months</option>
+        <option value="ytd">YTD</option>
+        <option value="custom">Custom…</option>
+      </select>
+    </div>
+    <div class="fb-field" id="fCustomRange" hidden>
       <input type="date" id="fFrom"><span class="fb-dash">~</span><input type="date" id="fTo">
     </div>
-    <div class="fb-group" role="group" aria-label="Quick range">
-      <button class="preset-btn" data-preset="month">This month</button>
-      <button class="preset-btn" data-preset="30d">30 days</button>
-      <button class="preset-btn" data-preset="3m">3 months</button>
-      <button class="preset-btn" data-preset="ytd">YTD</button>
-      <button class="preset-btn" data-preset="all">All time</button>
+    <div class="fb-field fb-search"><span>🔍</span>
+      <input type="text" id="fMerchant" placeholder="Search merchant…">
     </div>
-    <div class="fb-field"><span>Status</span>
-      <select id="fStatus">
-        <option value="all">All</option>
-        <option value="matched">Matched</option>
-        <option value="unmatched_any">Unmatched (any)</option>
-        <option value="unmatched">Unmatched only</option>
-        <option value="pending_match">Pending Match</option>
-      </select>
+    <select id="fSort" hidden>
+      <option value="date">Date ↓</option>
+      <option value="merchant">Merchant A→Z</option>
+    </select>
+    <div class="fb-pop-wrap">
+      <button class="fb-more-btn" id="fMore" aria-expanded="false">Filters <span class="chev">▾</span><span class="fb-badge" id="fBadge" hidden>0</span></button>
+      <div class="fb-advanced" id="fAdvanced">
+        <div class="fb-adv-grid">
+          <div class="fb-field"><span>Status</span>
+            <select id="fStatus">
+              <option value="all">All</option>
+              <option value="matched">Matched</option>
+              <option value="unmatched_any">Unmatched (any)</option>
+              <option value="unmatched">Unmatched only</option>
+              <option value="pending_match">Pending Match</option>
+            </select>
+          </div>
+          <div class="fb-field"><span>Card</span>
+            <select id="fCard">
+              <option value="all">All</option>
+              <option value="amex">AMEX</option>
+              <option value="visa">Visa</option>
+              <option value="other">Other</option>
+              <option value="unknown">Unknown</option>
+            </select>
+          </div>
+          <div class="fb-field"><span>Usage</span>
+            <select id="fUsage"><option value="all">All</option></select>
+          </div>
+          <div class="fb-field"><span>Show</span>
+            <select id="fCompleted">
+              <option value="hide">Active only</option>
+              <option value="only">Completed only</option>
+              <option value="all">All</option>
+            </select>
+          </div>
+          <div class="fb-field"><span>Settle</span>
+            <select id="fSettle" title="Settlement state of the linked transaction (set on the Review tab)">
+              <option value="all">All</option>
+              <option value="open">Open</option>
+              <option value="in_progress">⏳ In progress</option>
+              <option value="completed">✔ Completed</option>
+            </select>
+          </div>
+          <div class="fb-field"><span>Duplicates</span>
+            <span style="display:inline-flex;align-items:center;gap:6px">
+              <button class="preset-btn" id="viewToggle" title="Collapse duplicate receipts into one row">🔁 Group Duplicates</button>
+              <span class="cc-info-wrap"><span class="cc-info" onclick="ccTipToggle(this)">ℹ</span><span class="cc-tip">같은 영수증이 여러 장 인식된 경우 그룹으로 묶어 표시합니다. 불필요한 중복은 삭제하세요.</span></span>
+            </span>
+          </div>
+        </div>
+        <div class="fb-adv-foot">
+          <button class="btn btn-ghost btn-sm" id="fReset">↺ Reset all</button>
+        </div>
+      </div>
     </div>
-    <div class="fb-field"><span>🔍</span>
-      <input type="text" id="fMerchant" placeholder="Merchant..." style="width:130px">
-    </div>
-    <div class="fb-field"><span>Sort</span>
-      <select id="fSort">
-        <option value="date">Date ↓</option>
-        <option value="merchant">Merchant A→Z</option>
-      </select>
-    </div>
-    <button class="fb-more-btn fb-spacer" id="fMore" aria-expanded="false">More filters <span class="chev">▾</span></button>
-    <div class="fb-group">
-      <button class="btn btn-secondary btn-sm" id="fDownloadXlsx" title="Ledger backup with Card Type/Usage columns — NOT for SAP upload (use Review's xlsx)">⬇ xlsx (ledger)</button>
-      <button class="btn btn-secondary btn-sm" id="fDownload">⬇ PDF</button>
+    <div class="fb-pop-wrap">
+      <button class="fb-more-btn" id="fExport" aria-expanded="false">⬇ Export <span class="chev">▾</span></button>
+      <div class="fb-menu" id="fExportMenu">
+        <button class="fb-menu-item" id="fDownloadXlsx" title="Ledger backup with Card Type/Usage columns — NOT for SAP upload (use Review's xlsx)">⬇ xlsx (ledger) <small>backup · not for SAP</small></button>
+        <button class="fb-menu-item" id="fDownload">⬇ PDF <small>receipt report, filtered rows</small></button>
+      </div>
     </div>
   </div>
 
-  <!-- Row B · 고급 필터 (기본 접힘) -->
-  <div class="filter-bar fb-advanced" id="fAdvanced">
-    <div class="fb-field"><span>Card</span>
-      <select id="fCard">
-        <option value="all">All</option>
-        <option value="amex">AMEX</option>
-        <option value="visa">Visa</option>
-        <option value="other">Other</option>
-        <option value="unknown">Unknown</option>
-      </select>
-    </div>
-    <div class="fb-field"><span>Usage</span>
-      <select id="fUsage"><option value="all">All</option></select>
-    </div>
-    <div class="fb-field"><span>Show</span>
-      <select id="fCompleted">
-        <option value="hide">Active only</option>
-        <option value="only">Completed only</option>
-        <option value="all">All</option>
-      </select>
-    </div>
-    <div class="fb-field"><span>Settle</span>
-      <select id="fSettle" title="Settlement state of the linked transaction (set on the Review tab)">
-        <option value="all">All</option>
-        <option value="open">Open</option>
-        <option value="in_progress">⏳ In progress</option>
-        <option value="completed">✔ Completed</option>
-      </select>
-    </div>
-    <div class="fb-group">
-      <button class="preset-btn" id="viewToggle" title="Collapse duplicate receipts into one row">🔁 Group Duplicates</button>
-      <span class="cc-info-wrap"><span class="cc-info" onclick="ccTipToggle(this)">ℹ</span><span class="cc-tip">같은 영수증이 여러 장 인식된 경우 그룹으로 묶어 표시합니다. 불필요한 중복은 삭제하세요.</span></span>
-    </div>
-    <button class="btn btn-ghost btn-sm fb-spacer" id="fReset">↺ Reset</button>
-  </div>
+  <!-- Non-default filters stay visible as chips even while the popover is closed -->
+  <div class="fb-chips" id="fChips" hidden></div>
 
   <!-- 선택 시에만 등장하는 일괄작업 바 -->
   <div class="fb-selbar" id="fSelBar">
@@ -1758,7 +1793,7 @@ __TABCSS__
       <table class="ledger-table">
         <thead><tr>
           <th style="width:24px"><input type="checkbox" class="row-check" id="checkAll" title="Select all"></th>
-          <th>Date</th><th>Printed</th><th>Handwritten</th><th>Final</th><th>Merchant</th><th>Card</th><th>Usage</th><th>Receipt</th><th>Status</th><th>AI</th><th>Action</th>
+          <th class="th-sort on" id="thDate" title="Sort by date">Date ↓</th><th>Printed</th><th>Handwritten</th><th>Final</th><th class="th-sort" id="thMerchant" title="Sort by merchant A→Z">Merchant</th><th>Card</th><th>Usage</th><th>Receipt</th><th>Status</th><th>AI</th><th>Action</th>
         </tr></thead>
         <tbody id="ledgerBody"></tbody>
       </table>
@@ -2199,6 +2234,7 @@ async function load(){
   ENTRIES = d.entries;
   rerender();
   renderLastSynced(d.last_synced);
+  updateChips();
 }
 
 function escSvg(s){
@@ -2585,15 +2621,18 @@ $('fMore').addEventListener('click', () => {
 $('fReset').addEventListener('click', () => {
   $('fStatus').value='all'; $('fCard').value='all'; $('fUsage').value='all';
   $('fCompleted').value='hide'; $('fSettle').value='all';
-  $('fMerchant').value=''; $('fSort').value='date';
+  $('fMerchant').value=''; setSort('date');
+  $('fPeriod').value='all'; $('fCustomRange').hidden = true;
   document.querySelectorAll('.stat-click').forEach(c => c.classList.remove('active'));
   setDefaultDates(); load();
 });
 // Both downloads respect the currently applied filters.
 $('fDownload').addEventListener('click', () => {
+  closePops();
   window.location = '/cardconv/ledger/download.pdf?' + filterParams().toString();
 });
 $('fDownloadXlsx').addEventListener('click', () => {
+  closePops();
   window.location = '/cardconv/ledger/download.xlsx?' + filterParams().toString();
 });
 $('fDelete').addEventListener('click', deleteSelected);
@@ -2603,8 +2642,91 @@ $('checkAll').addEventListener('change', () => {
   document.querySelectorAll('.sel').forEach(c => { c.checked = $('checkAll').checked; });
   updateDeleteBtn();
 });
-document.querySelectorAll('.preset-btn:not(#viewToggle)').forEach(b =>
-  b.addEventListener('click', () => applyPreset(b.dataset.preset)));
+// Period select drives the date range; Custom… reveals the two date inputs.
+$('fPeriod').addEventListener('change', () => {
+  const v = $('fPeriod').value;
+  $('fCustomRange').hidden = (v !== 'custom');
+  if(v === 'custom') return;  // wait for the date inputs to change
+  applyPreset(v);
+});
+
+// Sort lives in the column headers (hidden fSort select keeps filterParams intact).
+function setSort(key){
+  $('fSort').value = key;
+  $('thDate').classList.toggle('on', key === 'date');
+  $('thMerchant').classList.toggle('on', key === 'merchant');
+}
+$('thDate').addEventListener('click', () => { setSort('date'); load(); });
+$('thMerchant').addEventListener('click', () => { setSort('merchant'); load(); });
+
+// Export dropdown.
+$('fExport').addEventListener('click', () => {
+  const open = $('fExportMenu').classList.toggle('open');
+  $('fExport').classList.toggle('open', open);
+  $('fExport').setAttribute('aria-expanded', open);
+});
+
+// Click outside / Escape closes both popovers.
+function closePops(){
+  [['fMore','fAdvanced'],['fExport','fExportMenu']].forEach(([b,p]) => {
+    $(p).classList.remove('open'); $(b).classList.remove('open');
+    $(b).setAttribute('aria-expanded','false');
+  });
+}
+document.addEventListener('click', e => {
+  [['fMore','fAdvanced'],['fExport','fExportMenu']].forEach(([b,p]) => {
+    if(!$(p).classList.contains('open')) return;
+    if($(p).contains(e.target) || $(b).contains(e.target)) return;
+    $(p).classList.remove('open'); $(b).classList.remove('open');
+    $(b).setAttribute('aria-expanded','false');
+  });
+});
+document.addEventListener('keydown', e => { if(e.key === 'Escape') closePops(); });
+
+// Active-filter chips: non-default filters stay visible with one-click removal.
+function clearStatRing(){ document.querySelectorAll('.stat-click').forEach(c => c.classList.remove('active')); }
+function updateChips(){
+  const optText = id => { const s = $(id); return s.options[s.selectedIndex] ? s.options[s.selectedIndex].text : s.value; };
+  const chips = [];
+  if($('fPeriod').value !== 'all'){
+    const lbl = $('fPeriod').value === 'custom'
+      ? (($('fFrom').value || '…') + ' ~ ' + ($('fTo').value || '…')) : optText('fPeriod');
+    chips.push({label:'📅 ' + lbl, clear: () => { $('fPeriod').value='all'; $('fCustomRange').hidden=true; applyPreset('all'); }});
+  }
+  if($('fStatus').value !== 'all')
+    chips.push({label: optText('fStatus'), clear: () => { $('fStatus').value='all'; clearStatRing(); load(); }});
+  if($('fCard').value !== 'all')
+    chips.push({label:'Card: ' + optText('fCard'), clear: () => { $('fCard').value='all'; load(); }});
+  if($('fUsage').value !== 'all')
+    chips.push({label:'Usage: ' + $('fUsage').value, clear: () => { $('fUsage').value='all'; load(); }});
+  if($('fCompleted').value !== 'hide')
+    chips.push({label:'Show: ' + optText('fCompleted'), clear: () => { $('fCompleted').value='hide'; clearStatRing(); load(); }});
+  if($('fSettle').value !== 'all')
+    chips.push({label:'Settle: ' + optText('fSettle'), clear: () => { $('fSettle').value='all'; clearStatRing(); load(); }});
+
+  const advCount = ['fStatus','fCard','fUsage','fSettle'].filter(id => $(id).value !== 'all').length
+                 + ($('fCompleted').value !== 'hide' ? 1 : 0);
+  $('fBadge').hidden = advCount === 0;
+  $('fBadge').textContent = advCount;
+
+  const bar = $('fChips');
+  bar.innerHTML = '';
+  if(!chips.length){ bar.hidden = true; return; }
+  bar.hidden = false;
+  chips.forEach(c => {
+    const el = document.createElement('span');
+    el.className = 'fb-chip';
+    el.appendChild(document.createTextNode(c.label + ' '));
+    const x = document.createElement('i'); x.textContent = '×'; x.title = 'Remove filter';
+    x.addEventListener('click', c.clear);
+    el.appendChild(x);
+    bar.appendChild(el);
+  });
+  const r = document.createElement('button');
+  r.className = 'fb-chip-reset'; r.textContent = 'Reset all';
+  r.addEventListener('click', () => $('fReset').click());
+  bar.appendChild(r);
+}
 
 // Group Duplicates toggle — re-renders the current page without refetching.
 $('viewToggle').addEventListener('click', () => {
