@@ -225,6 +225,7 @@ def _migrate_entry(e: dict) -> dict:
     e.setdefault("usage", "Regular")
     # v2.5: handwritten "w/ NAME" companion note — flows into the SAP purpose.
     e.setdefault("ocr_companions", None)
+    e.setdefault("ocr_handwriting", None)
     # v2.4: foreign-currency receipts (KRW/INR business trips) — OCR currency +
     # USD estimate for band-matching against the USD AMEX statement.
     e.setdefault("ocr_currency", None)
@@ -406,6 +407,13 @@ def _handle_ocr_staging_confirm(username: str, body: dict):
                     entry[amt_key] = float(raw) if str(raw).strip() else None
                 except (ValueError, TypeError):
                     pass
+        raw = fix.get("card_brand")
+        if raw is not None:
+            v = str(raw).strip().lower()
+            entry["card_brand"] = v if v in ("amex", "visa", "other") else None
+        raw = fix.get("ocr_companions")
+        if raw is not None:
+            entry["ocr_companions"] = _coerce_companions(str(raw))
         # Recompute final amount after manual correction.
         hw = entry.get("ocr_handwritten_amount")
         pr = entry.get("ocr_amount")
@@ -1219,8 +1227,14 @@ def _upload_file_to_drive(username: str, file_bytes: bytes, filename: str,
 _OCR_PROMPT = (
     'This image may contain ONE OR MULTIPLE receipts (e.g. several small '
     'receipts scanned together on a single page). Identify EACH distinct receipt. '
-    'For EACH receipt look CAREFULLY for handwritten numbers (e.g. tip amount, '
-    'final total written by hand on top of the printed receipt). '
+    'STEP 1 — HANDWRITING SWEEP: before anything else, scan the WHOLE receipt and '
+    'its margins (top edge, corners, over the printed text, beside the total) for '
+    'ANY handwriting: numbers, names, short notes like "w/ sds". Handwriting is '
+    'often faint, small, slanted, in pen over thermal print, or cut off at the '
+    'edge — transcribe every handwritten mark you find, exactly as written, into '
+    'the handwriting_notes field (null only if there is truly none). '
+    'STEP 2 — FIELDS: for EACH receipt look CAREFULLY for handwritten numbers '
+    '(e.g. tip amount, final total written by hand on top of the printed receipt). '
     'Inspect tip line, total line, and any margin notes for handwriting. '
     'For each receipt extract: '
     '1) date (YYYY-MM-DD), '
@@ -1247,16 +1261,21 @@ _OCR_PROMPT = (
     'other clear signals -> that ISO code (e.g. "EUR", "JPY"). Use "USD" only when '
     'the receipt is clearly US-based or shows "$" with English/US formatting; a bare '
     '"$" on a Hong Kong receipt means HKD, not USD. '
-    '7) companions: any HAND-WRITTEN note naming who the meal/expense was shared '
-    'with, usually written as "w/ NAME" or "with NAME" in a margin or on top of the '
-    'receipt (e.g. "w/sds" -> "sds", "w/ John, Amy" -> "John, Amy"). Return just the '
-    'name part without the "w/" prefix, or null if no such note is visible. '
+    '7) handwriting_notes: the full transcription from STEP 1 — every handwritten '
+    'mark on this receipt as one string (e.g. "w/sds  33.10"), null if none. '
+    '8) companions: from the handwriting, any note naming who the meal/expense was '
+    'shared with — usually "w/ NAME" or "with NAME" (e.g. "w/sds" -> "sds", '
+    '"w/ John, Amy" -> "John, Amy"). The letters after "w/" are often initials or '
+    'a nickname, not a dictionary word — transcribe them literally, do not '
+    '"correct" them. Return just the name part without the "w/" prefix, or null '
+    'if no such note is visible. '
     'For each receipt, ALSO return its bounding box in the image as bbox: '
     '[ymin, xmin, ymax, xmax] using a 0-1000 normalized coordinate system '
     '(0=top/left, 1000=bottom/right). '
     'Return a JSON ARRAY ONLY, one object per receipt: '
     '[{"date":"YYYY-MM-DD","merchant":"name","printed_amount":0.00,"handwritten_amount":null,'
-    '"card_brand":"amex","currency":"USD","companions":null,"bbox":[100,50,800,950]}]. '
+    '"card_brand":"amex","currency":"USD","handwriting_notes":null,"companions":null,'
+    '"bbox":[100,50,800,950]}]. '
     'If only one receipt is visible, return an array with a single element.'
 )
 
@@ -1291,7 +1310,16 @@ def _normalize_ocr(result: dict) -> dict:
     result["bbox"] = _coerce_bbox(result.get("bbox"))
     result["card_brand"] = _coerce_card_brand(result.get("card_brand"))
     result["currency"] = _coerce_currency(result.get("currency"))
+    hn = result.get("handwriting_notes")
+    result["handwriting_notes"] = hn.strip()[:200] if isinstance(hn, str) and hn.strip() else None
     result["companions"] = _coerce_companions(result.get("companions"))
+    # Deterministic fallback: the model often transcribes "w/ NAME" into the
+    # handwriting sweep but misses the dedicated companions field.
+    if not result["companions"] and result["handwriting_notes"]:
+        m = re.search(r"\b(?:w/|with\s)\s*([A-Za-z가-힣][A-Za-z가-힣 ,.&-]*)",
+                      result["handwriting_notes"], re.I)
+        if m:
+            result["companions"] = _coerce_companions(m.group(1))
     return result
 
 
@@ -1531,6 +1559,7 @@ def _ocr_entry_fields(ocr: dict) -> dict:
         "ocr_handwritten_amount": ocr.get("handwritten_amount"),
         "ocr_merchant":           ocr.get("merchant"),
         "ocr_companions":         ocr.get("companions"),
+        "ocr_handwriting":        ocr.get("handwriting_notes"),
         "ocr_model":              ocr.get("_model"),
         "ocr_bbox":               ocr.get("bbox"),
         "card_brand":             ocr.get("card_brand"),

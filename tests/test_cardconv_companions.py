@@ -29,6 +29,17 @@ def test_normalize_ocr_carries_companions():
     assert r["companions"] == "sds"
 
 
+def test_normalize_ocr_companions_fallback_from_handwriting():
+    r = _normalize_ocr({"printed_amount": 10.0, "companions": None,
+                        "handwriting_notes": "33.10  w/sds"})
+    assert r["companions"] == "sds"
+    r2 = _normalize_ocr({"printed_amount": 10.0,
+                         "handwriting_notes": "with John, Amy"})
+    assert r2["companions"] == "John, Amy"
+    r3 = _normalize_ocr({"printed_amount": 10.0, "handwriting_notes": "45.00"})
+    assert r3["companions"] is None
+
+
 def test_match_snapshot_includes_companions():
     receipt = {"id": "rcpt_1", "file_id": "f1", "ocr_companions": "sds",
                "ocr_amount": 10.0, "ocr_date": "2026-07-01"}

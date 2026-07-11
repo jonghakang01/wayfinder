@@ -1486,6 +1486,8 @@ def _render_ocr_staging_review(user: str) -> str:
     <div class="stg-row"><span class="stg-lbl">Merchant</span><span class="stg-val">{merch_v}</span></div>
     <div class="stg-row"><span class="stg-lbl">Printed</span><span class="stg-val">{amt_v}</span></div>
     <div class="stg-row"><span class="stg-lbl">Handwritten</span><span class="stg-val">{hw_v}</span></div>
+    <div class="stg-row"><span class="stg-lbl">Card</span><span class="stg-val">{_esc({"amex": "AMEX", "visa": "Visa", "other": "Cash"}.get(e.get("card_brand") or "", "–"))}</span></div>
+    <div class="stg-row"><span class="stg-lbl">w/</span><span class="stg-val">{_esc(e.get("ocr_companions") or "–")}</span></div>
     {fx_row}
   </div>
 </div>''')
@@ -3122,6 +3124,17 @@ function _imgLbKey(e){ if(e.key==='Escape') closeImgLb(); }
         +     '<input class="ocr-field" data-field="ocr_amount" data-id="' + eid + '" type="number" step="0.01" value="' + amtVal + '" placeholder="–" style="' + INPUT_STYLE + '"></div>'
         +   '<div><label style="' + LABEL_STYLE + '">Handwritten ' + curLabel + '</label>'
         +     '<input class="ocr-field" data-field="ocr_handwritten_amount" data-id="' + eid + '" type="number" step="0.01" value="' + hwVal + '" placeholder="–" style="' + INPUT_STYLE + '"></div>'
+        + '</div>'
+        + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">'
+        +   '<div><label style="' + LABEL_STYLE + '">Card type</label>'
+        +     '<select class="ocr-field" data-field="card_brand" data-id="' + eid + '" style="' + INPUT_STYLE + '">'
+        +       ['','amex','visa','other'].map(function(v){
+                  var lbl = {'':'–', amex:'AMEX', visa:'Visa', other:'Cash'}[v];
+                  return '<option value="' + v + '"' + ((e.card_brand || '') === v ? ' selected' : '') + '>' + lbl + '</option>';
+                }).join('')
+        +     '</select></div>'
+        +   '<div><label style="' + LABEL_STYLE + '">w/ (companions)</label>'
+        +     '<input class="ocr-field" data-field="ocr_companions" data-id="' + eid + '" type="text" value="' + ((e.ocr_companions || '')).replace(/"/g,'&quot;') + '" placeholder="e.g. sds" style="' + INPUT_STYLE + '"></div>'
         + '</div>'
         + fxRow
         + '</div></div>';
