@@ -3,6 +3,7 @@ META = {
     "path": "/terminals",
     "icon": "🖥️",
     "description": "팀원 터미널 접속",
+    "bucket": True,
 }
 
 MEMBERS = [

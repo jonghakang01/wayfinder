@@ -105,6 +105,7 @@ META = {
     "path": "/llm-check",
     "icon": "🤖",
     "description": "AI 검색 최적화(AEO) 점수 분석",
+    "bucket": True,
 }
 
 UA = "Mozilla/5.0 (compatible; LLMCompatChecker/1.0)"

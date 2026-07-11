@@ -16,6 +16,7 @@ META = {
     "path": "/aeo",
     "icon": "🔍",
     "description": "AI search optimization score for samsung.com/us",
+    "bucket": True,
 }
 
 PAGE_TYPE_SKIP_EN = {

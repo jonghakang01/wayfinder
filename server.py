@@ -125,6 +125,11 @@ h1 { font-size: 1.75rem; color: var(--text); margin-bottom: 6px; font-weight: 80
 .category-section { margin-bottom: 40px; }
 .category-title { display:flex; align-items:center; gap:8px; font-size:var(--text-sm); font-weight:var(--fw-bold); color:var(--text); text-transform:none; letter-spacing:.01em; margin-bottom:14px; padding-left:2px; }
 .category-title::before { content:""; width:4px; height:1em; border-radius:var(--radius-full); background:var(--slate-500); flex-shrink:0; }
+details.bucket-section summary { cursor:pointer; list-style:none; }
+details.bucket-section summary::-webkit-details-marker { display:none; }
+details.bucket-section:not([open]) .category-title { color:var(--text-muted); }
+details.bucket-section .bucket-hint { font-size:var(--text-xs); font-weight:var(--fw-medium); color:var(--text-muted); }
+details.bucket-section[open] .service-grid { margin-top:14px; }
 .cat-c1::before { background:var(--group-1); }
 .cat-c2::before { background:var(--group-2); }
 .cat-c3::before { background:var(--group-3); }
@@ -453,6 +458,10 @@ def wayfinder(user):
             continue
         svc_map[path] = m
 
+    # Bucket: dormant initiatives — routes stay alive, home shows them collapsed
+    bucket_map = {p: m for p, m in svc_map.items() if m.get("bucket")}
+    svc_map = {p: m for p, m in svc_map.items() if not m.get("bucket")}
+
     def _svc_card(m):
         return (f'<a class="service-card" href="{m["path"]}">'
                 f'<div class="service-icon">{m["icon"]}</div>'
@@ -473,6 +482,13 @@ def wayfinder(user):
         sections_html += f'<div class="category-section"><div class="category-title cat-c5">기타</div><div class="service-grid">{extra}</div></div>'
     if not sections_html:
         sections_html = '<div style="padding:40px;text-align:center;color:var(--text-muted)">접근 가능한 서비스가 없습니다. 관리자에게 문의하세요.</div>'
+    if bucket_map:
+        b_cards = "".join(_svc_card(m) for m in bucket_map.values())
+        sections_html += (
+            '<details class="category-section bucket-section">'
+            f'<summary><div class="category-title">🗄 Bucket <span class="bucket-hint">휴면 이니셔티브 {len(bucket_map)}개 — 클릭해서 열기</span></div></summary>'
+            f'<div class="service-grid">{b_cards}</div></details>'
+        )
 
     # Projects section (admin only)
     projects_html = ""
