@@ -223,6 +223,8 @@ def _migrate_entry(e: dict) -> dict:
     # moved to a "Completed" folder).
     e.setdefault("card_brand", None)
     e.setdefault("usage", "Regular")
+    # v2.5: handwritten "w/ NAME" companion note — flows into the SAP purpose.
+    e.setdefault("ocr_companions", None)
     # v2.4: foreign-currency receipts (KRW/INR business trips) — OCR currency +
     # USD estimate for band-matching against the USD AMEX statement.
     e.setdefault("ocr_currency", None)
@@ -800,6 +802,7 @@ def _apply_receipt_match(entry: dict, receipt: dict, receipts: list):
         "ocr_amount":   receipt.get("ocr_amount"),
         "ocr_date":     receipt.get("ocr_date"),
         "ocr_merchant": receipt.get("ocr_merchant"),
+        "companions":   receipt.get("ocr_companions"),
         "ocr_bbox":     receipt.get("ocr_bbox"),
         "siblings":     siblings if len(siblings) > 1 else [],
     }
@@ -1062,6 +1065,10 @@ def _build_xlsx_from_entries(entries: list) -> tuple:
             gl = ""
         ser_s = str(e.get("ser") or "").strip()
         ser_is_text = ser_s.startswith("0") or not ser_s.isdigit()
+        purpose = e.get("purpose") or ""
+        companions = (e.get("receipt") or {}).get("companions")
+        if companions:
+            purpose = (purpose + " w/ " + companions).strip()
 
         c = [
             cell("A", rnum, FIXED["receipt_type"], "str"),
@@ -1082,7 +1089,7 @@ def _build_xlsx_from_entries(entries: list) -> tuple:
             cell("O", rnum, FIXED["cost_center"], "str"),
             cell("P", rnum, "", "num"),
             cell("Q", rnum, "", "num"),
-            cell("R", rnum, e.get("purpose") or "", "str"),
+            cell("R", rnum, purpose, "str"),
             cell("S", rnum, "", "num"),
             cell("T", rnum, masked, "str"),
             cell("U", rnum, last, "str"),
@@ -1235,12 +1242,16 @@ _OCR_PROMPT = (
     'other clear signals -> that ISO code (e.g. "EUR", "JPY"). Use "USD" only when '
     'the receipt is clearly US-based or shows "$" with English/US formatting; a bare '
     '"$" on a Hong Kong receipt means HKD, not USD. '
+    '7) companions: any HAND-WRITTEN note naming who the meal/expense was shared '
+    'with, usually written as "w/ NAME" or "with NAME" in a margin or on top of the '
+    'receipt (e.g. "w/sds" -> "sds", "w/ John, Amy" -> "John, Amy"). Return just the '
+    'name part without the "w/" prefix, or null if no such note is visible. '
     'For each receipt, ALSO return its bounding box in the image as bbox: '
     '[ymin, xmin, ymax, xmax] using a 0-1000 normalized coordinate system '
     '(0=top/left, 1000=bottom/right). '
     'Return a JSON ARRAY ONLY, one object per receipt: '
     '[{"date":"YYYY-MM-DD","merchant":"name","printed_amount":0.00,"handwritten_amount":null,'
-    '"card_brand":"amex","currency":"USD","bbox":[100,50,800,950]}]. '
+    '"card_brand":"amex","currency":"USD","companions":null,"bbox":[100,50,800,950]}]. '
     'If only one receipt is visible, return an array with a single element.'
 )
 
@@ -1275,7 +1286,16 @@ def _normalize_ocr(result: dict) -> dict:
     result["bbox"] = _coerce_bbox(result.get("bbox"))
     result["card_brand"] = _coerce_card_brand(result.get("card_brand"))
     result["currency"] = _coerce_currency(result.get("currency"))
+    result["companions"] = _coerce_companions(result.get("companions"))
     return result
+
+
+def _coerce_companions(v):
+    """Handwritten 'w/ NAME' note → the name part ('sds', 'John, Amy'), else None."""
+    if not v or not isinstance(v, str):
+        return None
+    s = re.sub(r"^\s*(w/|with)\s*", "", v.strip(), flags=re.I).strip(" ,;")
+    return s[:60] or None
 
 
 def _coerce_currency(v):
@@ -1505,6 +1525,7 @@ def _ocr_entry_fields(ocr: dict) -> dict:
         "ocr_printed_amount":     ocr.get("printed_amount"),
         "ocr_handwritten_amount": ocr.get("handwritten_amount"),
         "ocr_merchant":           ocr.get("merchant"),
+        "ocr_companions":         ocr.get("companions"),
         "ocr_model":              ocr.get("_model"),
         "ocr_bbox":               ocr.get("bbox"),
         "card_brand":             ocr.get("card_brand"),
@@ -2968,6 +2989,22 @@ def _handle_ledger_update(username: str, entry_id: str, body: dict):
             if raw is not None:
                 val = (raw[0] if isinstance(raw, list) else str(raw)).strip()
                 e[field] = val or None
+        # Companions ("w/ NAME" note): normalize and mirror into the matched
+        # transaction's receipt snapshot so Review and the SAP purpose follow.
+        raw = body.get("ocr_companions")
+        if raw is not None:
+            val = (raw[0] if isinstance(raw, list) else str(raw)).strip()
+            # '__clear__' sentinel: parse_qs drops blank values, so the client
+            # sends an explicit marker to clear the note.
+            e["ocr_companions"] = None if val == "__clear__" else _coerce_companions(val)
+            if e.get("matched"):
+                pool = _load_tx_pool(username)
+                for t in pool["entries"]:
+                    rc = t.get("receipt") or {}
+                    if rc.get("id") == entry_id:
+                        rc["companions"] = e["ocr_companions"]
+                        _save_tx_pool(username, pool)
+                        break
         # Card brand: normalize to amex/visa/other, or clear when blank.
         raw = body.get("card_brand")
         if raw is not None:

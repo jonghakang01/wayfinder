@@ -853,6 +853,9 @@ def _render_review(user: str) -> str:
                     "siblings": rc.get("siblings") or [],
                     "drive":    rc.get("drive_url"),
                 }, ensure_ascii=False))
+                comp = (f'<div class="rv-card-line rv-card-comp" title="Handwritten companion note — appended to the SAP purpose">'
+                        f'👥 w/ {_esc(rc.get("companions"))}</div>'
+                        if rc.get("companions") else '')
                 receipt_block = (
                     '<div class="rv-receipt matched">'
                       f'<img class="rv-thumb" src="{tn}" loading="lazy" '
@@ -862,7 +865,7 @@ def _render_review(user: str) -> str:
                         f'<div class="rv-card-line">🗓 {_esc(rc.get("ocr_date")) or "–"}</div>'
                         f'<div class="rv-card-line rv-card-merchant">{_esc(rc.get("ocr_merchant")) or "–"}</div>'
                         f'<div class="rv-card-line rv-card-amt">{_money(rc.get("ocr_amount"))}</div>'
-                        f'{link}'
+                        f'{comp}{link}'
                       '</div>'
                     '</div>')
             else:
@@ -896,10 +899,14 @@ def _render_review(user: str) -> str:
                 f'data-matched="{"1" if is_matched else "0"}">{txn}{receipt_block}</div>')
         body_html = "".join(items)
 
-    download_btn = (('<button id="rvDownload" class="btn btn-secondary btn-sm" '
+    download_btn = (('<span class="fb-pop-wrap">'
+                     '<button class="fb-more-btn" id="rvExport" aria-expanded="false">⬇ Export <span class="chev">▾</span></button>'
+                     '<div class="fb-menu" id="rvExportMenu">'
+                     '<button id="rvDownload" class="fb-menu-item" '
                      'title="SAP upload file (for_upload_*.xlsx)">⬇ xlsx (SAP)</button>'
-                     '<button id="rvDownloadPdf" class="btn btn-secondary btn-sm" '
-                     'title="Receipt images of the matched transactions">⬇ PDF</button>')
+                     '<button id="rvDownloadPdf" class="fb-menu-item" '
+                     'title="Receipt images of the matched transactions">⬇ PDF</button>'
+                     '</div></span>')
                     if total else '')
     if li:
         li_at = (li.get("at", "") or "")[:16].replace("T", " ")
@@ -930,10 +937,20 @@ def _render_review(user: str) -> str:
   border-radius:6px;color:var(--text);font-size:.82rem;padding:5px 8px;outline:none}}
 .filter-bar input[type=date]:focus,.filter-bar input[type=text]:focus,.filter-bar select:focus{{border-color:var(--accent)}}
 .fb-field{{display:inline-flex;align-items:center;gap:6px}}
-.preset-btn{{background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);
-  font-size:.76rem;padding:4px 9px;cursor:pointer}}
-.preset-btn:hover{{border-color:var(--accent)}}
-.preset-btn.active{{background:rgba(250,204,21,.18);border-color:#facc15;color:#b45309;font-weight:700}}
+.fb-field>span{{font-size:.74rem;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em}}
+.filter-bar [hidden]{{display:none!important}}
+.fb-search{{flex:1;min-width:140px;flex-wrap:nowrap!important}}
+.fb-search input{{flex:1;width:auto;min-width:0}}
+.fb-pop-wrap{{position:relative}}
+.fb-more-btn{{background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:.78rem;font-weight:600;padding:5px 11px;cursor:pointer;display:inline-flex;align-items:center;gap:5px}}
+.fb-more-btn:hover{{border-color:var(--accent);color:var(--text)}}
+.fb-more-btn .chev{{transition:transform .18s}}
+.fb-more-btn.open .chev{{transform:rotate(180deg)}}
+.fb-menu{{display:none;position:absolute;top:calc(100% + 8px);right:0;z-index:120;background:var(--surface-3);border:1px solid var(--border-bright);border-radius:var(--radius-md);box-shadow:0 12px 34px rgba(0,0,0,.55);padding:6px;min-width:280px;flex-direction:column;gap:2px}}
+.fb-menu.open{{display:flex}}
+.fb-menu-item{{display:flex;align-items:center;gap:8px;background:none;border:none;border-radius:7px;color:var(--text);font-size:.8rem;font-weight:600;padding:8px 10px;cursor:pointer;text-align:left;white-space:nowrap}}
+.fb-menu-item:hover{{background:var(--surface-2)}}
+.fb-menu-item small{{color:var(--text-muted);font-weight:500}}
 .rv-list{{display:flex;flex-direction:column;gap:10px}}
 .rv-item{{display:flex;gap:14px;align-items:stretch;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md);padding:12px 14px}}
 .rv-item.unmatched{{border-color:rgba(239,68,68,.35);background:rgba(239,68,68,.06)}}
@@ -965,6 +982,7 @@ def _render_review(user: str) -> str:
 .rv-card-info{{display:flex;flex-direction:column;gap:4px;min-width:0}}
 .rv-card-line{{font-size:.8rem;color:var(--text-muted)}}
 .rv-card-merchant{{font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
+.rv-card-comp{{color:var(--accent);font-weight:600}}
 .rv-card-amt{{font-size:1rem;font-weight:700;color:#22c55e}}
 .rv-drive-link{{font-size:.76rem;color:var(--accent);text-decoration:none;margin-top:2px}}
 .rv-drive-link:hover{{text-decoration:underline}}
@@ -995,21 +1013,27 @@ def _render_review(user: str) -> str:
   </div>
 
   <div class="filter-bar">
-    <span class="fb-field">📅 <input type="date" id="rvFrom"> ~ <input type="date" id="rvTo"></span>
-    <span class="fb-field" role="group" aria-label="Quick range">
-      <button class="preset-btn" data-preset="month">This month</button>
-      <button class="preset-btn" data-preset="30d">30 days</button>
-      <button class="preset-btn" data-preset="3m">3 months</button>
-      <button class="preset-btn" data-preset="ytd">YTD</button>
-      <button class="preset-btn" data-preset="all">All time</button>
+    <span class="fb-field"><span>Period</span>
+      <select id="rvPeriod">
+        <option value="all">All time</option>
+        <option value="month">This month</option>
+        <option value="30d">30 days</option>
+        <option value="3m">3 months</option>
+        <option value="ytd">YTD</option>
+        <option value="custom">Custom…</option>
+      </select>
     </span>
-    <span class="fb-field">🔍 <input type="text" id="rvMerchant" placeholder="Merchant..." style="width:130px"></span>
-    <select id="rvSort">
-      <option value="date">Date ↓</option>
-      <option value="merchant">Merchant A→Z</option>
-    </select>
+    <span class="fb-field" id="rvCustomRange" hidden>
+      <input type="date" id="rvFrom"> ~ <input type="date" id="rvTo">
+    </span>
+    <span class="fb-field fb-search">🔍 <input type="text" id="rvMerchant" placeholder="Search merchant…"></span>
+    <span class="fb-field"><span>Sort</span>
+      <select id="rvSort">
+        <option value="date">Date ↓</option>
+        <option value="merchant">Merchant A→Z</option>
+      </select>
+    </span>
     <button class="btn btn-ghost btn-sm" id="rvReset">↺ Reset</button>
-    <span style="flex:1"></span>
     {download_btn}
   </div>
 
@@ -1149,26 +1173,29 @@ function applyPreset(p){{
   else if(p==='all'){{ from = ''; to = ''; }}
   $('rvFrom').value = from;
   $('rvTo').value = to;
-  document.querySelectorAll('.preset-btn').forEach(b =>
-    b.classList.toggle('active', b.dataset.preset === p));
   applyFilter();
 }}
 
 let _rvmDeb;
 $('rvMerchant').addEventListener('input', () => {{ clearTimeout(_rvmDeb); _rvmDeb = setTimeout(applyFilter, 250); }});
 $('rvSort').addEventListener('change', applySort);
-$('rvFrom').addEventListener('change', () => {{ clearPresetActive(); applyFilter(); }});
-$('rvTo').addEventListener('change', () => {{ clearPresetActive(); applyFilter(); }});
+$('rvFrom').addEventListener('change', applyFilter);
+$('rvTo').addEventListener('change', applyFilter);
+// Period select drives the date range; Custom… reveals the two date inputs.
+$('rvPeriod').addEventListener('change', () => {{
+  const v = $('rvPeriod').value;
+  $('rvCustomRange').hidden = (v !== 'custom');
+  if(v === 'custom') return;
+  applyPreset(v);
+}});
 $('rvReset').addEventListener('click', () => {{
   $('rvFrom').value = ''; $('rvTo').value = ''; $('rvMerchant').value = '';
+  $('rvPeriod').value = 'all'; $('rvCustomRange').hidden = true;
   $('rvSort').value = 'date'; applySort();
   rvView = 'open'; rvMatchedF = 'all';
   document.querySelectorAll('.stat-click').forEach(c => c.classList.toggle('active', c.dataset.rvview === 'open'));
-  clearPresetActive(); applyFilter();
+  applyFilter();
 }});
-function clearPresetActive(){{ document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active')); }}
-document.querySelectorAll('.preset-btn').forEach(b =>
-  b.addEventListener('click', () => applyPreset(b.dataset.preset)));
 
 // Downloads: checked rows take priority (download selected only); otherwise
 // the current date filter applies to all open transactions.
@@ -1182,10 +1209,28 @@ function rvDlParams(){{
 }}
 const rvDl = $('rvDownload');
 if(rvDl){{
+  const rvCloseExport = () => {{
+    $('rvExportMenu').classList.remove('open');
+    $('rvExport').classList.remove('open');
+    $('rvExport').setAttribute('aria-expanded','false');
+  }};
+  $('rvExport').addEventListener('click', () => {{
+    const open = $('rvExportMenu').classList.toggle('open');
+    $('rvExport').classList.toggle('open', open);
+    $('rvExport').setAttribute('aria-expanded', open);
+  }});
+  document.addEventListener('click', e => {{
+    if(!$('rvExportMenu').classList.contains('open')) return;
+    if($('rvExportMenu').contains(e.target) || $('rvExport').contains(e.target)) return;
+    rvCloseExport();
+  }});
+  document.addEventListener('keydown', e => {{ if(e.key === 'Escape') rvCloseExport(); }});
   rvDl.addEventListener('click', () => {{
+    rvCloseExport();
     window.location = '/cardconv/review/download?' + rvDlParams().toString();
   }});
   $('rvDownloadPdf').addEventListener('click', () => {{
+    rvCloseExport();
     window.location = '/cardconv/review/download.pdf?' + rvDlParams().toString();
   }});
   // Reflect the selection count on the download buttons.
@@ -1617,6 +1662,8 @@ __TABCSS__
 .card-other{color:#64748b;background:rgba(100,116,139,.14)}
 .comp-tag{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:10px;font-size:.6rem;
   font-weight:700;background:rgba(129,140,248,.18);color:#818cf8;white-space:nowrap}
+.with-tag{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:10px;font-size:.6rem;
+  font-weight:700;background:var(--accent-glow,rgba(56,189,248,.12));color:var(--accent);white-space:nowrap}
 .ledger-table tr.completed-row td{opacity:.62}
 .ledger-table tr.completed-row:hover td{opacity:.85}
 .overlay-bg{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:100;opacity:0;pointer-events:none;transition:opacity .2s}
@@ -1828,6 +1875,10 @@ __TABCSS__
     <div class="detail-row"><span class="key">Merchant</span>
       <span class="val" id="dMerchant">–</span>
       <input id="eMerchant" type="text" style="display:none;width:100%;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:.82rem;padding:2px 6px">
+    </div>
+    <div class="detail-row" title="Handwritten companion note — appended to the SAP purpose column"><span class="key">With (w/)</span>
+      <span class="val" id="dCompanions">–</span>
+      <input id="eCompanions" type="text" placeholder="e.g. sds" style="display:none;width:130px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:.82rem;padding:2px 6px">
     </div>
     <div class="detail-row"><span class="key">Printed $</span>
       <span class="val" id="dPrinted">–</span>
@@ -2094,7 +2145,8 @@ function rowHtml(e, i, opts){
     '<td data-label="Printed" style="color:var(--text-muted)">' + fmtAmt(e.ocr_printed_amount) + '</td>' +
     handCell.replace('<td','<td data-label="Handwritten"') +
     '<td data-label="Final" style="font-weight:700">' + fmtAmtFx(e, e.ocr_amount) + '</td>' +
-    '<td data-label="Merchant">' + (e.ocr_merchant||'–') + '</td>' +
+    '<td data-label="Merchant">' + (e.ocr_merchant||'–') +
+      (e.ocr_companions ? '<span class="with-tag" title="Companion note — appended to the SAP purpose">w/ ' + e.ocr_companions + '</span>' : '') + '</td>' +
     '<td data-label="Card">' + cardCell(e) + '</td>' +
     '<td data-label="Usage">' + usageCell(e) + '</td>' +
     '<td data-label="Receipt">' + thumb(e) + '</td>' +
@@ -2285,12 +2337,14 @@ function openPanel(e){
   $('dHand').textContent = hand ? '–' : (fmtAmt(e.ocr_handwritten_amount) + ' ✍️');
   $('dHand').style.color = hand ? '' : '#f59e0b';
   $('dMerchant').textContent = e.ocr_merchant || '–';
+  $('dCompanions').textContent = e.ocr_companions ? ('w/ ' + e.ocr_companions) : '–';
   $('dModel').textContent = e.ocr_model || '–';
   $('dCard').innerHTML = cardBadge(e.card_brand);
   $('dUsage').textContent = e.usage || 'Regular';
   // Pre-fill edit inputs
   $('eDate').value = e.ocr_date || '';
   $('eMerchant').value = e.ocr_merchant || '';
+  $('eCompanions').value = e.ocr_companions || '';
   $('ePrinted').value = (e.ocr_printed_amount != null) ? e.ocr_printed_amount : (e.ocr_amount || '');
   $('eHand').value = (e.ocr_handwritten_amount != null) ? e.ocr_handwritten_amount : '';
   $('eCard').value = e.card_brand || 'none';
@@ -2333,7 +2387,7 @@ function closePanel(){
   exitPanelEdit();
 }
 
-const PANEL_EDIT_FIELDS = ['dDate','dMerchant','dPrinted','dHand','dCard','dUsage'];
+const PANEL_EDIT_FIELDS = ['dDate','dMerchant','dCompanions','dPrinted','dHand','dCard','dUsage'];
 function exitPanelEdit(){
   PANEL_EDIT_FIELDS.forEach(function(id){
     var s = $(id); var e = $(id.replace('d','e')); if(!s||!e) return;
@@ -2359,6 +2413,7 @@ async function savePanelEdit(){
   var body = new URLSearchParams({
     ocr_date:                 $('eDate').value,
     ocr_merchant:             $('eMerchant').value,
+    ocr_companions:           $('eCompanions').value.trim() || '__clear__',
     ocr_printed_amount:       $('ePrinted').value,
     ocr_handwritten_amount:   $('eHand').value,
     card_brand:               $('eCard').value,
