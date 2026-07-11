@@ -1684,7 +1684,7 @@ def _handle_batch_run(username: str, ctx):
 def _apply_ledger_filters(entries: list, status: str, dfrom: str, dto: str,
                           card_brand: str = "", usage: str = "",
                           completed: str = "hide", merchant: str = "",
-                          sort: str = "date") -> list:
+                          sort: str = "date", settle: str = "all") -> list:
     """Filter + sort ledger entries by status, OCR-date range, card brand, usage,
     completion state and merchant text.
 
@@ -1716,6 +1716,12 @@ def _apply_ledger_filters(entries: list, status: str, dfrom: str, dto: str,
     if merchant:
         m = merchant.strip().lower()
         filtered = [e for e in filtered if m in (e.get("ocr_merchant") or "").lower()]
+    if settle and settle != "all":
+        # "open" also covers receipts not linked to any transaction yet.
+        if settle == "open":
+            filtered = [e for e in filtered if (e.get("settle_status") or "open") == "open"]
+        else:
+            filtered = [e for e in filtered if e.get("settle_status") == settle]
     if sort == "merchant":
         return sorted(filtered, key=lambda e: (e.get("ocr_merchant") or "￿").lower())
     return sorted(
@@ -2020,7 +2026,23 @@ def _parse_filter_params(query: dict) -> dict:
         "completed":  _q("completed", "hide"),
         "merchant":   _q("merchant", ""),
         "sort":       _q("sort", "date"),
+        "settle":     _q("settle", "all"),
     }
+
+
+def _annotate_settle_status(username: str, entries: list):
+    """Attach the linked transaction's settlement status (open / in_progress /
+    completed) to each matched receipt, live from the pool — Review changes
+    reflect in the Ledger immediately without duplicated state."""
+    pool = _load_tx_pool(username)
+    by_receipt = {}
+    for t in pool.get("entries", []):
+        rid = (t.get("receipt") or {}).get("id")
+        if rid:
+            by_receipt[rid] = t.get("status") or "open"
+    for e in entries:
+        e["settle_status"] = by_receipt.get(e.get("id"))
+    return entries
 
 
 def _handle_ledger_api(username: str, query: dict):
@@ -2038,9 +2060,10 @@ def _handle_ledger_api(username: str, query: dict):
     except ValueError:
         limit = 0
 
+    _annotate_settle_status(username, entries)
     filtered = _apply_ledger_filters(entries, f["status"], f["dfrom"], f["dto"],
                                      f["card_brand"], f["usage"], f["completed"],
-                                     f["merchant"], f["sort"])
+                                     f["merchant"], f["sort"], f["settle"])
     _mark_duplicates(filtered)
 
     stats   = _ledger_stats(filtered)
@@ -2360,9 +2383,9 @@ def _handle_ledger_pdf(username: str, query: dict):
         want = {r for r in rids_q.split(",") if r}
         entries = [e for e in _ledger_entries(username) if e.get("id") in want]
     else:
-        entries = _apply_ledger_filters(_ledger_entries(username), status, dfrom, dto,
+        entries = _apply_ledger_filters(_annotate_settle_status(username, _ledger_entries(username)), status, dfrom, dto,
                                         f["card_brand"], f["usage"], f["completed"],
-                                        f["merchant"], f["sort"])
+                                        f["merchant"], f["sort"], f["settle"])
     stats   = _ledger_stats(entries)
     service = _get_drive_service(username)
 
@@ -3117,10 +3140,10 @@ def _handle_ledger_xlsx(username: str, query: dict):
     28/29 for visibility. Honors all Ledger filters via the shared parser.
     """
     f = _parse_filter_params(query)
-    entries = _apply_ledger_filters(_ledger_entries(username),
+    entries = _apply_ledger_filters(_annotate_settle_status(username, _ledger_entries(username)),
                                     f["status"], f["dfrom"], f["dto"],
                                     f["card_brand"], f["usage"], f["completed"],
-                                    f["merchant"], f["sort"])
+                                    f["merchant"], f["sort"], f["settle"])
     if TEMPLATE.exists():
         template_path = TEMPLATE
     elif TEMPLATE_FALLBACK.exists():

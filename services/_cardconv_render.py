@@ -1700,6 +1700,14 @@ __TABCSS__
         <option value="all">All</option>
       </select>
     </div>
+    <div class="fb-field"><span>Settle</span>
+      <select id="fSettle" title="Settlement state of the linked transaction (set on the Review tab)">
+        <option value="all">All</option>
+        <option value="open">Open</option>
+        <option value="in_progress">⏳ In progress</option>
+        <option value="completed">✔ Completed</option>
+      </select>
+    </div>
     <div class="fb-group">
       <button class="preset-btn" id="viewToggle" title="Collapse duplicate receipts into one row">🔁 Group Duplicates</button>
       <span class="cc-info-wrap"><span class="cc-info" onclick="ccTipToggle(this)">ℹ</span><span class="cc-tip">같은 영수증이 여러 장 인식된 경우 그룹으로 묶어 표시합니다. 불필요한 중복은 삭제하세요.</span></span>
@@ -1950,6 +1958,17 @@ async function changeCard(sel){
   const e = ENTRIES.find(function(x){ return x.id===id; }); if(e) e.card_brand = (val==='none' ? null : val);
 }
 
+// Settlement state of the linked transaction (managed on the Review tab).
+function settleChip(e){
+  if(e.settle_status === 'in_progress')
+    return '<span style="display:inline-block;margin-left:4px;font-size:.62rem;font-weight:700;padding:1px 6px;' +
+           'border-radius:8px;background:rgba(245,158,11,.15);color:#f59e0b" title="Submitted to SAP, awaiting approval">⏳ In progress</span>';
+  if(e.settle_status === 'completed')
+    return '<span style="display:inline-block;margin-left:4px;font-size:.62rem;font-weight:700;padding:1px 6px;' +
+           'border-radius:8px;background:rgba(34,197,94,.15);color:#22c55e" title="Settlement completed">✔ Settled</span>';
+  return '';
+}
+
 function matchInfo(e){
   const mt = e.matched_transaction;
   if(!mt) return '';
@@ -2023,7 +2042,7 @@ function rowHtml(e, i, opts){
     '<td data-label="Usage">' + usageCell(e) + '</td>' +
     '<td data-label="Receipt">' + thumb(e) + '</td>' +
     '<td data-label="Status"><span class="status-badge status-' + (e.match_status||'unmatched') + '">' +
-      (STATUS_LABEL[e.match_status]||e.match_status||'–') + '</span>' + matchInfo(e) + '</td>' +
+      (STATUS_LABEL[e.match_status]||e.match_status||'–') + '</span>' + settleChip(e) + matchInfo(e) + '</td>' +
     '<td data-label="AI">' + aiBadge(e.ocr_model) + '</td>' +
     actionCell.replace('<td>','<td data-label="Action">') +
   '</tr>';
@@ -2119,6 +2138,7 @@ function filterParams(){
   p.set('card_brand', $('fCard').value);
   p.set('usage', $('fUsage').value);
   p.set('completed', $('fCompleted').value);
+  p.set('settle', $('fSettle').value);
   if($('fMerchant').value.trim()) p.set('merchant', $('fMerchant').value.trim());
   p.set('sort', $('fSort').value);
   return p;
@@ -2504,6 +2524,7 @@ $('fStatus').addEventListener('change', load);
 $('fCard').addEventListener('change', load);
 $('fUsage').addEventListener('change', load);
 $('fCompleted').addEventListener('change', load);
+$('fSettle').addEventListener('change', load);
 $('fSort').addEventListener('change', load);
 let _mDeb;
 $('fMerchant').addEventListener('input', () => { clearTimeout(_mDeb); _mDeb = setTimeout(load, 300); });
@@ -2514,7 +2535,8 @@ $('fMore').addEventListener('click', () => {
 });
 $('fReset').addEventListener('click', () => {
   $('fStatus').value='all'; $('fCard').value='all'; $('fUsage').value='all';
-  $('fCompleted').value='hide'; $('fMerchant').value=''; $('fSort').value='date';
+  $('fCompleted').value='hide'; $('fSettle').value='all';
+  $('fMerchant').value=''; $('fSort').value='date';
   setDefaultDates(); load();
 });
 // Both downloads respect the currently applied filters.
