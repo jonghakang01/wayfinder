@@ -906,6 +906,8 @@ def _render_review(user: str) -> str:
                      'title="SAP upload file (for_upload_*.xlsx)">⬇ xlsx (SAP)</button>'
                      '<button id="rvDownloadPdf" class="fb-menu-item" '
                      'title="Receipt images of the matched transactions">⬇ PDF</button>'
+                     '<button id="rvDownloadBoth" class="fb-menu-item" '
+                     'title="Download the SAP xlsx and the receipt PDF together">⬇ Both <small>xlsx + PDF</small></button>'
                      '</div></span>')
                     if total else '')
     if li:
@@ -1233,12 +1235,25 @@ if(rvDl){{
     rvCloseExport();
     window.location = '/cardconv/review/download.pdf?' + rvDlParams().toString();
   }});
+  // Both at once: hidden iframes so the two attachment downloads don't race.
+  $('rvDownloadBoth').addEventListener('click', () => {{
+    rvCloseExport();
+    const q = rvDlParams().toString();
+    ['/cardconv/review/download?', '/cardconv/review/download.pdf?'].forEach(u => {{
+      const f = document.createElement('iframe');
+      f.style.display = 'none';
+      f.src = u + q;
+      document.body.appendChild(f);
+      setTimeout(() => f.remove(), 60000);
+    }});
+  }});
   // Reflect the selection count on the download buttons.
   document.addEventListener('change', e => {{
     if(!e.target.classList || (!e.target.classList.contains('rv-cb') && e.target.id !== 'rvSelAll')) return;
     const n = document.querySelectorAll('.rv-cb:checked').length;
     rvDl.textContent = n ? ('⬇ xlsx (SAP · ' + n + ' selected)') : '⬇ xlsx (SAP)';
     $('rvDownloadPdf').textContent = n ? ('⬇ PDF (' + n + ' selected)') : '⬇ PDF';
+    $('rvDownloadBoth').innerHTML = '⬇ Both' + (n ? (' (' + n + ' selected)') : '') + ' <small>xlsx + PDF</small>';
   }});
 }}
 
