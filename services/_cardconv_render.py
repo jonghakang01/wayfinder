@@ -1566,9 +1566,10 @@ __TABCSS__
 .cc-toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 .cc-toast.warn{border-color:rgba(245,158,11,.5)}
 .ledger-table{width:100%;border-collapse:collapse;font-size:.83rem}
-.ledger-table th{padding:8px 12px;text-align:left;font-size:.72rem;font-weight:700;text-transform:uppercase;
+.ledger-table th{padding:8px 7px;text-align:left;font-size:.72rem;font-weight:700;text-transform:uppercase;
   letter-spacing:.07em;color:var(--text-muted);border-bottom:1px solid var(--border)}
-.ledger-table td{padding:10px 12px;border-bottom:1px solid var(--border);vertical-align:middle}
+.ledger-table td{padding:10px 7px;border-bottom:1px solid var(--border);vertical-align:middle}
+.ledger-scroll{overflow-x:auto}
 .ledger-table tbody tr:hover td{background:var(--surface-2);cursor:pointer}
 .ledger-table tr:last-child td{border-bottom:none}
 .ledger-table tr.dup-row td{background:rgba(250,204,21,.10)}
@@ -1789,11 +1790,11 @@ __TABCSS__
   </div>
 
   <div class="notepad-card">
-    <div class="notepad-body" style="padding:8px 16px 4px">
+    <div class="notepad-body ledger-scroll" style="padding:8px 16px 4px">
       <table class="ledger-table">
         <thead><tr>
           <th style="width:24px"><input type="checkbox" class="row-check" id="checkAll" title="Select all"></th>
-          <th class="th-sort on" id="thDate" title="Sort by date">Date ↓</th><th>Printed</th><th>Handwritten</th><th>Final</th><th class="th-sort" id="thMerchant" title="Sort by merchant A→Z">Merchant</th><th>Card</th><th>Usage</th><th>Receipt</th><th>Status</th><th>AI</th><th>Action</th>
+          <th class="th-sort on" id="thDate" title="Sort by date">Date ↓</th><th>Printed</th><th>Handwritten</th><th>Final</th><th class="th-sort" id="thMerchant" title="Sort by merchant A→Z">Merchant</th><th>Card</th><th>Usage</th><th>Receipt</th><th>Status</th><th>Action</th>
         </tr></thead>
         <tbody id="ledgerBody"></tbody>
       </table>
@@ -1940,13 +1941,6 @@ function thumb(e){
   const tn = 'https://drive.google.com/thumbnail?id=' + e.file_id + '&sz=w80';
   return '<img class="receipt-thumb" src="' + tn + '" loading="lazy" ' +
          'onerror="this.onerror=null;this.src=\'' + proxy + '\'">';
-}
-
-function aiBadge(m){
-  if(m==='Gemini') return '<span class="ai-badge gemini">Gemini</span>';
-  if(m==='Claude') return '<span class="ai-badge claude">Claude</span>';
-  if(m==='Manual') return '<span class="ai-badge" style="color:#34d399;background:rgba(52,211,153,.12)">Manual</span>';
-  return '<span style="color:var(--text-muted);font-size:.72rem">–</span>';
 }
 
 const CARD_LABEL = {amex:'AMEX', visa:'Visa', other:'Other'};
@@ -2106,7 +2100,6 @@ function rowHtml(e, i, opts){
     '<td data-label="Receipt">' + thumb(e) + '</td>' +
     '<td data-label="Status"><span class="status-badge status-' + (e.match_status||'unmatched') + '">' +
       (STATUS_LABEL[e.match_status]||e.match_status||'–') + '</span>' + settleChip(e) + matchInfo(e) + '</td>' +
-    '<td data-label="AI">' + aiBadge(e.ocr_model) + '</td>' +
     actionCell.replace('<td>','<td data-label="Action">') +
   '</tr>';
 }
@@ -2161,7 +2154,7 @@ function renderBody(entries){
 function rerender(){
   const body = $('ledgerBody');
   if(!ENTRIES.length){
-    body.innerHTML = '<tr><td colspan="12" style="text-align:center;color:var(--text-muted);padding:30px">No receipts</td></tr>';
+    body.innerHTML = '<tr><td colspan="11" style="text-align:center;color:var(--text-muted);padding:30px">No receipts</td></tr>';
   } else {
     body.innerHTML = renderBody(ENTRIES);
     body.querySelectorAll('tr[data-i]').forEach(tr =>
