@@ -215,15 +215,6 @@ details.bucket-section[open] .service-grid { margin-top:14px; }
   .stat-card { padding: 12px 16px; min-width: 80px; }
   .stat-card .stat-num { font-size: 1.6rem; }
   h1 { font-size: 1.4rem; }
-  /* PWA Install Banner */
-  .pwa-banner { display: none; background: white; border: 1px solid var(--slate-200); border-radius: var(--radius-lg); padding: 16px; margin-bottom: 24px; box-shadow: var(--shadow-lg); position: relative; align-items: center; gap: 16px; }
-  .pwa-banner.show { display: flex; }
-  .pwa-icon { font-size: 2rem; }
-  .pwa-text { flex: 1; }
-  .pwa-title { font-weight: 700; font-size: 0.95rem; color: var(--slate-900); margin-bottom: 4px; }
-  .pwa-desc { font-size: 0.8rem; color: var(--slate-500); line-height: 1.4; }
-  .pwa-close { position: absolute; top: 12px; right: 12px; background: none; border: none; color: var(--slate-400); font-size: 1.2rem; cursor: pointer; padding: 4px; line-height: 1; min-height: 32px; min-width: 32px; display: flex; align-items: center; justify-content: center; }
-  .pwa-close:hover { color: var(--slate-900); }
 }
 @media (max-width: 400px) {
   .service-grid { grid-template-columns: 1fr 1fr; }
@@ -575,45 +566,11 @@ def wayfinder(user):
   }})();
   </script>
 
-  <div id="pwa-banner" class="pwa-banner">
-    <div class="pwa-icon">📱</div>
-    <div class="pwa-text">
-      <div class="pwa-title">Install App</div>
-      <div id="pwa-desc" class="pwa-desc">Add to your home screen for quick access.</div>
-    </div>
-    <button class="pwa-close" onclick="closePwaBanner()">×</button>
-  </div>
-
   {'<a href="/todo" class="app-entry-card"><div class="app-entry-icon">🧭</div><div class="app-entry-text"><div class="app-entry-name">My Productivity App</div><div class="app-entry-tabs">✅ Tasks &nbsp;·&nbsp; 🏃 Habits &nbsp;·&nbsp; 📊 Overview</div></div><div class="app-entry-arrow">→</div></a>' if has_todo else ''}
 
   {sections_html}
   {projects_html}
 </div>
-<script>
-  function closePwaBanner() {{
-    document.getElementById('pwa-banner').classList.remove('show');
-    localStorage.setItem('pwa-banner-closed', 'true');
-  }}
-
-  document.addEventListener('DOMContentLoaded', () => {{
-    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
-    const isClosed = localStorage.getItem('pwa-banner-closed') === 'true';
-    const isMobile = window.innerWidth <= 600;
-
-    if (isMobile && !isStandalone && !isClosed) {{
-      const banner = document.getElementById('pwa-banner');
-      const desc = document.getElementById('pwa-desc');
-      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-      
-      if (isIOS) {{
-        desc.innerHTML = 'Tap the <b>Share</b> button in Safari,<br>then select <b>Add to Home Screen</b>.';
-      }} else {{
-        desc.innerHTML = 'Tap the Chrome menu (⋮)<br>and select <b>Add to Home Screen</b>.';
-      }}
-      banner.classList.add('show');
-    }}
-  }});
-</script>
 </body></html>'''
 
 
