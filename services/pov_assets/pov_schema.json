@@ -1,0 +1,159 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "POV",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_id",
+    "event_summary",
+    "who_what",
+    "fact_check",
+    "framing_spectrum",
+    "relevance",
+    "confidence",
+    "coverage_gaps"
+  ],
+  "properties": {
+    "event_id": { "type": "string" },
+    "event_summary": {
+      "type": "string",
+      "description": "1-2 neutral sentences: what actually happened, stripped of spin."
+    },
+    "who_what": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "one_line"],
+        "properties": {
+          "name": { "type": "string" },
+          "one_line": { "type": "string" }
+        }
+      }
+    },
+    "fact_check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["verified_core", "overstated", "disputed"],
+      "properties": {
+        "verified_core": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["claim", "sources"],
+            "properties": {
+              "claim": { "type": "string" },
+              "sources": { "type": "array", "items": { "type": "integer" } },
+              "primary_origin": { "type": "string" }
+            }
+          }
+        },
+        "overstated": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["headline_claim", "what_sources_support", "sources"],
+            "properties": {
+              "headline_claim": { "type": "string" },
+              "what_sources_support": { "type": "string" },
+              "sources": { "type": "array", "items": { "type": "integer" } }
+            }
+          }
+        },
+        "disputed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["claim", "asserted_by", "status"],
+            "properties": {
+              "claim": { "type": "string" },
+              "asserted_by": { "type": "array", "items": { "type": "integer" } },
+              "contested_by": { "type": "array", "items": { "type": "integer" } },
+              "status": { "type": "string", "enum": ["denied", "uncorroborated", "contested"] }
+            }
+          }
+        }
+      }
+    },
+    "framing_spectrum": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["shared_facts", "positions"],
+      "properties": {
+        "shared_facts": { "type": "string" },
+        "positions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["source_index", "lean", "spin"],
+            "properties": {
+              "source_index": { "type": "integer" },
+              "lean": {
+                "type": "string",
+                "description": "Inferable lean ONLY from the text: e.g. neutral, sensational, corrective, left, right, mixed."
+              },
+              "spin": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "relevance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["direct_score", "score_rationale", "layers"],
+      "properties": {
+        "direct_score": { "type": "integer", "minimum": 0, "maximum": 10 },
+        "score_rationale": { "type": "string" },
+        "layers": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "direct_impact",
+            "second_order",
+            "values_identity",
+            "good_to_know",
+            "horizon"
+          ],
+          "properties": {
+            "direct_impact": { "$ref": "#/$defs/conditional_layer" },
+            "second_order": { "$ref": "#/$defs/conditional_layer" },
+            "values_identity": { "$ref": "#/$defs/conditional_layer" },
+            "good_to_know": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["note"],
+              "properties": { "note": { "type": "string" } }
+            },
+            "horizon": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["note", "outside_profile"],
+              "properties": {
+                "note": { "type": "string" },
+                "outside_profile": { "type": "boolean" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "confidence": { "type": "string", "enum": ["high", "medium", "low"] },
+    "coverage_gaps": { "type": "string" }
+  },
+  "$defs": {
+    "conditional_layer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["applies", "note"],
+      "properties": {
+        "applies": { "type": "boolean" },
+        "note": { "type": "string" }
+      }
+    }
+  }
+}

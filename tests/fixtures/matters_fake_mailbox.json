@@ -1,0 +1,84 @@
+{
+  "_comment": "Fake mailbox for L2 pipeline dev. Threads map to seed matters via search_queries; a few carry fresh replies to prove the scan surfaces updates. me = jongha.kang@cheil.com.",
+  "threads": [
+    {
+      "id": "fake:t-samsung-contract",
+      "subject": "RE: Contract Structure Inquiry",
+      "outlook_link": "https://outlook.office.com/mail/id/t-samsung-contract",
+      "messages": [
+        {"sender": "jongha.kang@cheil.com", "sent_at": "2026-07-07T18:20:00", "body": "Sharing the original structure (Yashwanth/Saalim/Pratiksha, Cheil margin $7,424/mo)."},
+        {"sender": "ktier@wearebarbarian.com", "sent_at": "2026-07-12T09:15:00", "body": "Thanks Jongha. Samsung confirmed the traditional path. Can you send the revised structure reflecting that? We want to move this week."}
+      ]
+    },
+    {
+      "id": "fake:t-aie-sow",
+      "subject": "Cheil-AIE IOT Project SOW",
+      "outlook_link": "https://outlook.office.com/mail/id/t-aie-sow",
+      "messages": [
+        {"sender": "smohan@AIENTERPRISE.COM", "sent_at": "2026-07-10T14:00:00", "body": "We are holding invoices from April. Please send the SOW covering Apr through Dec so we can bill."},
+        {"sender": "smohan@AIENTERPRISE.COM", "sent_at": "2026-07-13T08:40:00", "body": "Gentle follow-up — any update on the SOW? This is now blocking several months of billing on our side."}
+      ]
+    },
+    {
+      "id": "fake:t-nendrasys",
+      "subject": "Resources for SEA spoke to work from Chennai",
+      "outlook_link": "https://outlook.office.com/mail/id/t-nendrasys",
+      "messages": [
+        {"sender": "yuva.veeramachaneni@nendrasys.com", "sent_at": "2026-07-09T11:30:00", "body": "Attached PR lists and resumes for MuniReddy and Manikandan. Note peer authors appear due to pair programming."}
+      ]
+    },
+    {
+      "id": "fake:t-hybris",
+      "subject": "RE: Hybris Operations Onboarding Direction",
+      "outlook_link": "https://outlook.office.com/mail/id/t-hybris",
+      "messages": [
+        {"sender": "jongha.kang@cheil.com", "sent_at": "2026-07-10T16:05:00", "body": "Re-confirming R&R with Kranthi/Ramesh on candidate re-align."},
+        {"sender": "kranthi@wearebarbarian.com", "sent_at": "2026-07-11T20:10:00", "body": "Aligned on our end. Ready to set up the call with 김민규 whenever works."}
+      ]
+    },
+    {
+      "id": "fake:t-ec-standardization",
+      "subject": "EC standardization — MSA SDSI + TP study",
+      "outlook_link": "https://outlook.office.com/mail/id/t-ec-standard",
+      "messages": [
+        {"sender": "monil.shah@helloec.com", "sent_at": "2026-07-08T13:00:00", "body": "Sending the salary benchmarking sheet for the TP study."}
+      ]
+    },
+    {
+      "id": "fake:t-accenture",
+      "subject": "SEA AEM Dev/Operations Discussion",
+      "outlook_link": "https://outlook.office.com/mail/id/t-accenture",
+      "messages": [
+        {"sender": "rhariharan@samsung.com", "sent_at": "2026-06-30T10:00:00", "body": "Confirming Accenture transition timeline."}
+      ]
+    },
+    {
+      "id": "fake:t-chatgpt",
+      "subject": "ChatGPT Account Rollout",
+      "outlook_link": "https://outlook.office.com/mail/id/t-chatgpt",
+      "messages": [
+        {"sender": "it@cheil.com", "sent_at": "2026-07-09T09:00:00", "body": "Action required before first use: accept the OpenAI Enterprise terms in your account settings."}
+      ]
+    },
+    {
+      "id": "fake:t-new-vendor-invoice",
+      "subject": "New PO request — Nendrasys additional resource",
+      "outlook_link": "https://outlook.office.com/mail/id/t-new-vendor",
+      "messages": [
+        {"sender": "krishna@nendrasys.com", "sent_at": "2026-07-13T07:55:00", "body": "Following up on the two approved resources — can we also discuss a PO for a third starting August? Woosuk suggested I reach out to you directly."}
+      ]
+    },
+    {
+      "id": "fake:t-newsletter",
+      "subject": "Your weekly Samsung Newsroom digest",
+      "outlook_link": "https://outlook.office.com/mail/id/t-newsletter",
+      "messages": [
+        {"sender": "newsroom@samsung.com", "sent_at": "2026-07-13T06:00:00", "body": "This week in Samsung news: new Galaxy launch, sustainability report..."}
+      ]
+    }
+  ],
+  "drafts": [
+    {"thread_id": "fake:d-ram-1", "subject": "Ram 앞 (제목 없음) — 작성 중", "last_sender": "jongha.kang@cheil.com", "last_message_at": "2026-07-11T15:31:00", "snippet": "I wanted to reach out regarding..."},
+    {"thread_id": "fake:d-contract", "subject": "RE: Contract Structure — Kai/Mark 앞 (미완성)", "last_sender": "jongha.kang@cheil.com", "last_message_at": "2026-07-08T21:34:00", "snippet": "Reflecting the traditional path decision, the revised structure is..."}
+  ]
+}

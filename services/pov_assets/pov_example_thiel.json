@@ -1,0 +1,98 @@
+{
+  "_comment": "Worked example for the POV analysis. `input` is what you feed the analysis call; `expected_output` is a hand-written reference of good output. Article snippets are paraphrased/synthetic for illustration — replace with real fetched metadata in production.",
+
+  "input": {
+    "event_id": "thiel-argentina-2026-06",
+    "articles": [
+      {
+        "index": 0,
+        "source": "Business Insider / AOL",
+        "headline": "Peter Thiel's move to Argentina reflects a growing trend among billionaires seeking a 'plan B' abroad",
+        "snippet": "Thiel is spending more time in Argentina; per NYT he bought a home in a wealthy Buenos Aires neighborhood and enrolled his kids in school. Advisors describe a broader pattern of 'sovereign diversification' among the ultra-wealthy.",
+        "url": "https://www.aol.com/articles/peter-thiels-move-argentina-...",
+        "published": "2026-05-30"
+      },
+      {
+        "index": 1,
+        "source": "Newser",
+        "headline": "Peter Thiel Has a New Plan B Abroad",
+        "snippet": "NYT reports Thiel quietly shifted his family's life to Buenos Aires — bought a mansion, enrolled kids, met repeatedly with President Milei. Part lifestyle, part ideological alignment with Milei's free-market program, part hedge against US tax/political risk.",
+        "url": "https://www.newser.com/story/390060/...",
+        "published": "2026-05-30"
+      },
+      {
+        "index": 2,
+        "source": "Local/wire (Reuters photo)",
+        "headline": "Peter Thiel Relocates Family to Argentina",
+        "snippet": "Thiel, 58, temporarily relocated his family to a $12M Buenos Aires mansion, exploring Argentina as a 'Plan B'. Motivations reported: California's proposed one-time wealth tax, plus concerns over nuclear war and AI risk.",
+        "url": "https://ground.news/article/...",
+        "published": "2026-05-31"
+      },
+      {
+        "index": 3,
+        "source": "Sunday Guardian (fact-check)",
+        "headline": "Fact Check: Has Peter Thiel Relocated from US to Argentina?",
+        "snippet": "Corrects the framing: the relocation is temporary. Thiel remains a US citizen, keeps 99%+ of assets in the US, Palantir keeps US government contracts, and he stays a mentor to VP JD Vance. The $12M mansion is his only known Argentina investment.",
+        "url": "https://sundayguardianlive.com/world/fact-check-...",
+        "published": "2026-05-29"
+      },
+      {
+        "index": 4,
+        "source": "The Daily Beast",
+        "headline": "Billionaire Trump Ally Peter Thiel Flees to Argentina Just Like the Nazis",
+        "snippet": "Frames the trip as 'fleeing' the US, invoking Argentina's history as a refuge for Nazis. Notes Thiel donated to Trump and cites concerns about nuclear war and AI. Says Argentina offered residence or citizenship, but Milei's office denied any such offer is on the table.",
+        "url": "https://www.thedailybeast.com/billionaire-trump-ally-peter-thiel-flees-...",
+        "published": "2026-05-31"
+      }
+    ],
+    "user_profile": {
+      "location": "California, US (state taxpayer)",
+      "occupation": "tech / marketing",
+      "wealth_stage": "salaried professional (not a high-net-worth individual)",
+      "interests": ["AI industry", "tax policy", "power and capital"]
+    },
+    "output_language": "ko"
+  },
+
+  "expected_output": {
+    "event_id": "thiel-argentina-2026-06",
+    "event_summary": "피터 틸이 부에노스아이레스에 저택을 사고 자녀를 현지 학교에 보내며 밀레이 대통령과 여러 차례 만난 사실이 NYT를 통해 보도됐다. 미국을 떠나는 '완전 이주'가 아니라, 세금·정치 리스크에 대비한 '플랜 B' 성격의 일시적 거점 마련으로 보도된다.",
+    "who_what": [
+      { "name": "Peter Thiel", "one_line": "페이팔·팔란티어 공동창업자, 대표적 자유지상주의 투자자이자 트럼프 후원자." },
+      { "name": "Javier Milei", "one_line": "급진 자유시장 노선을 내건 아르헨티나 대통령." }
+    ],
+    "fact_check": {
+      "verified_core": [
+        { "claim": "틸이 부에노스아이레스 부촌에 약 1,200만 달러 저택을 매입하고 자녀를 현지 학교에 등록시켰다.", "sources": [0, 1, 2, 3], "primary_origin": "NYT" },
+        { "claim": "틸이 밀레이 대통령과 여러 차례 회동했다.", "sources": [1, 4], "primary_origin": "NYT" }
+      ],
+      "overstated": [
+        { "headline_claim": "틸이 아르헨티나로 '이주(move/flee)'했다.", "what_sources_support": "일시적 거점 마련에 가깝다 — 여전히 미국 시민이고 자산 99% 이상을 미국에 두며, 팔란티어는 미 정부 계약을 유지한다.", "sources": [3] }
+      ],
+      "disputed": [
+        { "claim": "아르헨티나 정부가 틸에게 영주권 또는 시민권을 제안했다.", "asserted_by": [4], "contested_by": [4], "status": "denied" }
+      ]
+    },
+    "framing_spectrum": {
+      "shared_facts": "틸이 부에노스아이레스에 집을 사고 밀레이와 만났으며 아르헨티나를 '플랜 B'로 탐색 중이라는 점은 모든 매체가 공유한다.",
+      "positions": [
+        { "source_index": 0, "lean": "neutral", "spin": "초부유층의 '주권 분산' 트렌드로 차분하게 분석." },
+        { "source_index": 3, "lean": "corrective", "spin": "헤드라인의 '이주' 프레임을 바로잡고 실제 범위를 축소 제시." },
+        { "source_index": 4, "lean": "sensational", "spin": "'나치처럼 도망쳤다'는 자극적 프레임으로 도덕적 비난을 덧입힘." }
+      ]
+    },
+    "relevance": {
+      "direct_score": 3,
+      "score_rationale": "당신은 억만장자가 아니므로 틸 개인의 거취는 직접 영향이 없다. 다만 캘리포니아 납세자이자 AI·자본 흐름에 관심이 있어, 이 뉴스의 배경(부유세 주민투표·자본 이동)이 한 다리 건너 닿는다.",
+      "layers": {
+        "direct_impact": { "applies": false, "note": "이 세금/거취는 소수 억만장자에게만 적용 — 당신 일상엔 직접 영향 없음." },
+        "second_order": { "applies": true, "note": "캘리포니아의 억만장자 1회성 순자산세 주민투표가 진짜 관련 줄기이며, 틸의 이탈은 그 논쟁의 상징이다." },
+        "values_identity": { "applies": true, "note": "'권력과 자본'에 관심이 있다면, 자본이 과세를 피해 어떻게 움직이는지 보여주는 사례." },
+        "good_to_know": { "note": "초부유층이 시민권·거주지를 '여러 여권·여러 조세체계'처럼 분산 포트폴리오로 다루기 시작했다는 신호." },
+        "horizon": { "note": "틸과 무관하게, 밀레이의 급진 자유시장 실험 자체가 한 나라의 경제 정책 실험으로 지켜볼 만하다.", "outside_profile": true }
+      }
+    },
+    "confidence": "medium",
+    "coverage_gaps": "대부분의 보도가 단일 1차 출처(NYT)에 의존하며, 틸 본인·대변인의 직접 입장과 아르헨티나 정부의 공식 설명이 부족하다."
+  }
+}
