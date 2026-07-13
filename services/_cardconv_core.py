@@ -3087,12 +3087,29 @@ def _handle_ledger_bulk(username: str, body: dict):
     ids = set(body.get("ids") or [])
     action = body.get("action")
     value = body.get("value")
-    if not ids or action not in ("card", "usage", "companions", "rematch"):
+    if not ids or action not in ("card", "usage", "companions", "rematch", "settle"):
         return ("json", {"error": "bad request"}, 400)
 
     if action == "rematch":
         res = _rematch_pool(username, only_receipt_ids=ids)
         return ("json", {"ok": True, **res})
+
+    if action == "settle":
+        # Ledger → Review mirror: set the linked transaction's settlement status.
+        # Only matched receipts carry a transaction; unmatched ones are skipped.
+        status = str(value or "").strip()
+        if status not in ("open", "in_progress", "completed"):
+            return ("json", {"error": "bad status"}, 400)
+        pool = _load_tx_pool(username)
+        now = datetime.now().isoformat()
+        touched = 0
+        for t in pool["entries"]:
+            if (t.get("receipt") or {}).get("id") in ids:
+                t["status"] = status
+                t["completed_at"] = now if status == "completed" else None
+                touched += 1
+        _save_tx_pool(username, pool)
+        return ("json", {"ok": True, "updated": touched, "status": status})
 
     comp = _coerce_companions(str(value).strip()) if (action == "companions" and value) else None
     ledger = _load_ledger(username)

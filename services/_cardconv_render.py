@@ -1869,6 +1869,12 @@ select.sb-act{padding:5px 8px}
       </select>
       <button class="sb-act" id="fBulkWith" title="Set the w/ companion note on all selected">👥 w/ note</button>
       <button class="sb-act" id="fBulkRematch" title="Re-try CSV matching using only the selected receipts">↻ Re-match</button>
+      <select class="sb-act" id="fBulkSettle" title="Set settlement status on all selected (mirrors to Review)">
+        <option value="">⏳ Settle status</option>
+        <option value="open">Open</option>
+        <option value="in_progress">In progress</option>
+        <option value="completed">Completed</option>
+      </select>
     </div>
     <div class="fb-group fb-spacer" role="group" aria-label="Selection actions">
       <button class="btn btn-sm fb-act-complete" id="fComplete" disabled>✓ Complete (0)</button>
@@ -2750,6 +2756,7 @@ async function bulkApply(action, value){
   const d = await r.json().catch(() => ({}));
   if(!d.ok){ toast('Bulk update failed', true); return; }
   if(action === 'rematch') toast(d.matched + ' of ' + ids.length + ' selected matched' + (d.matched ? '' : ' — no CSV transaction fits'), !d.matched);
+  else if(action === 'settle') toast(d.updated ? ('Settlement status set on ' + d.updated + ' matched') : 'No matched transaction among selected', !d.updated);
   else toast('Updated ' + d.updated + ' receipts');
   load();
 }
@@ -2771,6 +2778,11 @@ $('fBulkWith').addEventListener('click', () => {
   bulkApply('companions', v.trim());
 });
 $('fBulkRematch').addEventListener('click', () => bulkApply('rematch', null));
+$('fBulkSettle').addEventListener('change', () => {
+  const v = $('fBulkSettle').value;
+  $('fBulkSettle').value = '';
+  if(v !== '') bulkApply('settle', v);
+});
 // Period select drives the date range; Custom… reveals the two date inputs.
 $('fPeriod').addEventListener('change', () => {
   const v = $('fPeriod').value;
