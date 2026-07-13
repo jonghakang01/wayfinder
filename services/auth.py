@@ -354,13 +354,20 @@ def render_login(error="", register_error="", app=""):
     svc_labels = APP_LABELS
     app = app if app in CONTROLLED_SERVICES else ""
 
+    # App-scoped links are shared with US colleagues → English copy.
+    # The bare login page is internal → Korean stays.
+    t = ({"email": "Email", "pw": "Password", "login": "Log in", "signup": "Sign up",
+          "lang": "en", "title": "Log in · Wayfinder"} if app else
+         {"email": "이메일", "pw": "비밀번호", "login": "로그인", "signup": "가입",
+          "lang": "ko", "title": "로그인 · Wayfinder"})
+
     # App-scoped signup: the link (/login?app=cardconv) fixes which service the new
     # account gets, so we drop the service picker and show the app name instead.
     if app:
         app_label = svc_labels.get(app, app)
         svc_html = (f'<input type="hidden" name="app" value="{app}">'
-                    f'<div class="app-scope">가입 서비스: <b>{app_label}</b></div>')
-        signup_title = f"{app_label} 가입"
+                    f'<div class="app-scope">You are signing up for <b>{app_label}</b></div>')
+        signup_title = f"New to {app_label}? Create an account"
         app_hidden = f'<input type="hidden" name="app" value="{app}">'
     else:
         # Bare signup: let the user pick which live service(s) to join.
@@ -384,10 +391,10 @@ def render_login(error="", register_error="", app=""):
     reg_err = f'<div class="error">{register_error}</div>' if register_error else ""
 
     return f'''<!DOCTYPE html>
-<html lang="ko"><head>
+<html lang="{t['lang']}"><head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>로그인 · Wayfinder</title>
+<title>{t['title']}</title>
 <style>
 *,*::before,*::after{{box-sizing:border-box;margin:0;padding:0}}
 body{{background:#0d1117;color:#e6edf3;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:40px 16px}}
@@ -419,9 +426,9 @@ input[type=text]:focus,input[type=password]:focus,input[type=email]:focus{{borde
     <form method="POST" action="/login">
       <input type="hidden" name="action" value="login">
       {app_hidden}
-      <div class="field"><label>이메일</label><input type="email" name="email" autofocus autocomplete="email" placeholder="you@example.com"></div>
-      <div class="field"><label>비밀번호</label><input type="password" name="password" autocomplete="current-password" placeholder="••••••••"></div>
-      <button class="btn-login" type="submit">로그인</button>
+      <div class="field"><label>{t["email"]}</label><input type="email" name="email" autofocus autocomplete="email" placeholder="you@example.com"></div>
+      <div class="field"><label>{t["pw"]}</label><input type="password" name="password" autocomplete="current-password" placeholder="••••••••"></div>
+      <button class="btn-login" type="submit">{t["login"]}</button>
     </form>
   </div>
   <hr class="divider">
@@ -430,10 +437,10 @@ input[type=text]:focus,input[type=password]:focus,input[type=email]:focus{{borde
     {reg_err}
     <form method="POST" action="/login">
       <input type="hidden" name="action" value="register">
-      <div class="field"><label>이메일</label><input type="email" name="email" autocomplete="email" placeholder="you@example.com"></div>
-      <div class="field"><label>비밀번호</label><input type="password" name="password" autocomplete="new-password" placeholder="••••••••"></div>
+      <div class="field"><label>{t["email"]}</label><input type="email" name="email" autocomplete="email" placeholder="you@example.com"></div>
+      <div class="field"><label>{t["pw"]}</label><input type="password" name="password" autocomplete="new-password" placeholder="••••••••"></div>
       {svc_html}
-      <button class="btn-register" type="submit">가입</button>
+      <button class="btn-register" type="submit">{t["signup"]}</button>
     </form>
   </div>
 </div>
