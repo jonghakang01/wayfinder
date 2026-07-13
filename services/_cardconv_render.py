@@ -1820,12 +1820,11 @@ select.sb-act{padding:5px 8px}
               <option value="all">All</option>
             </select>
           </div>
-          <div class="fb-field"><span>Settle</span>
-            <select id="fSettle" title="Settlement state of the linked transaction (set on the Review tab)">
+          <div class="fb-field"><span>Status</span>
+            <select id="fSettle" title="Settlement status (synced with Review). Completed rows live under the Completed filter.">
               <option value="all">All</option>
               <option value="open">Open</option>
               <option value="in_progress">⏳ In progress</option>
-              <option value="completed">✔ Completed</option>
             </select>
           </div>
           <div class="fb-field"><span>Duplicates</span>
@@ -1869,8 +1868,8 @@ select.sb-act{padding:5px 8px}
       </select>
       <button class="sb-act" id="fBulkWith" title="Set the w/ companion note on all selected">👥 w/ note</button>
       <button class="sb-act" id="fBulkRematch" title="Re-try CSV matching using only the selected receipts">↻ Re-match</button>
-      <select class="sb-act" id="fBulkSettle" title="Set settlement status on all selected (mirrors to Review)">
-        <option value="">⏳ Settle status</option>
+      <select class="sb-act" id="fBulkSettle" title="Set status on all selected — synced with Review; Completed also archives">
+        <option value="">📌 Status</option>
         <option value="open">Open</option>
         <option value="in_progress">In progress</option>
         <option value="completed">Completed</option>
@@ -2113,14 +2112,14 @@ async function changeCard(sel){
   const e = ENTRIES.find(function(x){ return x.id===id; }); if(e) e.card_brand = (val==='none' ? null : val);
 }
 
-// Settlement state of the linked transaction (managed on the Review tab).
+// Settlement state of the linked transaction (synced with the Review tab).
+// Completed is NOT chipped here — it shows as the completed row style + ✓ Done
+// tag, since receipt completion and transaction completion are kept in sync.
 function settleChip(e){
+  if(e.completed) return '';  // completed row style wins; legacy rows may hold a stale tx status
   if(e.settle_status === 'in_progress')
     return '<span style="display:inline-block;margin-left:4px;font-size:.62rem;font-weight:700;padding:1px 6px;' +
            'border-radius:8px;background:rgba(245,158,11,.15);color:#f59e0b" title="Submitted to SAP, awaiting approval">⏳ In progress</span>';
-  if(e.settle_status === 'completed')
-    return '<span style="display:inline-block;margin-left:4px;font-size:.62rem;font-weight:700;padding:1px 6px;' +
-           'border-radius:8px;background:rgba(34,197,94,.15);color:#22c55e" title="Settlement completed">✔ Settled</span>';
   return '';
 }
 
@@ -2756,7 +2755,11 @@ async function bulkApply(action, value){
   const d = await r.json().catch(() => ({}));
   if(!d.ok){ toast('Bulk update failed', true); return; }
   if(action === 'rematch') toast(d.matched + ' of ' + ids.length + ' selected matched' + (d.matched ? '' : ' — no CSV transaction fits'), !d.matched);
-  else if(action === 'settle') toast(d.updated ? ('Settlement status set on ' + d.updated + ' matched') : 'No matched transaction among selected', !d.updated);
+  else if(action === 'settle'){
+    toast('Status set on ' + d.updated + ' receipts' + (d.tx_updated ? ' (' + d.tx_updated + ' synced to Review)' : ''));
+    if(d.attempted && d.moved < d.attempted)
+      toast('Some Drive file moves did not apply. Settlement data was saved correctly.', true);
+  }
   else toast('Updated ' + d.updated + ' receipts');
   load();
 }
@@ -2781,7 +2784,10 @@ $('fBulkRematch').addEventListener('click', () => bulkApply('rematch', null));
 $('fBulkSettle').addEventListener('change', () => {
   const v = $('fBulkSettle').value;
   $('fBulkSettle').value = '';
-  if(v !== '') bulkApply('settle', v);
+  if(v === '') return;
+  // Completed archives receipts (same as ✓ Complete) — confirm like that path does.
+  if(v === 'completed' && !confirm('Mark selected receipts completed?\n(They leave the default list, Sync and Mapping; Drive originals move to the Completed folder. Synced to Review.)')) return;
+  bulkApply('settle', v);
 });
 // Period select drives the date range; Custom… reveals the two date inputs.
 $('fPeriod').addEventListener('change', () => {
@@ -2843,7 +2849,7 @@ function updateChips(){
   if($('fCompleted').value !== 'hide')
     chips.push({label:'Show: ' + optText('fCompleted'), clear: () => { $('fCompleted').value='hide'; clearStatRing(); load(); }});
   if($('fSettle').value !== 'all')
-    chips.push({label:'Settle: ' + optText('fSettle'), clear: () => { $('fSettle').value='all'; clearStatRing(); load(); }});
+    chips.push({label:'Status: ' + optText('fSettle'), clear: () => { $('fSettle').value='all'; clearStatRing(); load(); }});
 
   const advCount = ['fStatus','fCard','fUsage','fSettle'].filter(id => $(id).value !== 'all').length
                  + ($('fCompleted').value !== 'hide' ? 1 : 0);

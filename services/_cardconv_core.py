@@ -2015,27 +2015,21 @@ def _restore_from_completed(username: str, file_ids: set) -> int:
     return moved
 
 
-def _handle_ledger_complete(username: str, body: dict):
-    """POST /cardconv/ledger/complete — mark entries complete (or undo).
+def _apply_receipt_completion(username: str, ids: set, completed: bool) -> dict:
+    """Set the receipt-level completed flag on `ids` (+ best-effort Drive moves).
 
-    Body: {"ids": [...], "undo": bool}. Completing flags entries and moves their
-    Drive originals to the Completed folder; the ledger flag is authoritative so
-    Drive moves are best-effort. Multiple ledger entries can share one Drive file
+    Shared by every path that changes settlement state (Complete button, Ledger
+    status action, Review mirror) so the flag and the Drive folder location can
+    never drift apart. Multiple ledger entries can share one Drive file
     (multi-receipt page) — that file is only moved when ALL its entries agree.
     """
-    raw = body.get("ids", [])
-    ids = {str(i) for i in (raw if isinstance(raw, list) else [raw]) if i}
-    if not ids:
-        return ("json", {"error": "no ids"}, 400)
-    undo = bool(body.get("undo"))
-
     ledger = _load_ledger(username)
     now = datetime.now().isoformat()
     touched = []
     for e in ledger["entries"]:
         if e.get("id") in ids:
-            e["completed"] = not undo
-            e["completed_at"] = None if undo else now
+            e["completed"] = completed
+            e["completed_at"] = now if completed else None
             touched.append(e)
 
     # A Drive file's correct location is derived purely from its siblings: it
@@ -2053,10 +2047,13 @@ def _handle_ledger_complete(username: str, body: dict):
     to_archive, to_restore = set(), set()
     for fid in affected:
         sibs = by_file.get(fid, [])
-        if sibs and all(s.get("completed") for s in sibs):
-            to_archive.add(fid)
-        else:
-            to_restore.add(fid)
+        want_archived = bool(sibs) and all(s.get("completed") for s in sibs)
+        # Skip files already in the right place (all sibling flags agree) —
+        # status changes that don't cross the completed boundary shouldn't
+        # trigger Drive calls or "move failed" warnings.
+        if all(bool(s.get("archived_drive")) == want_archived for s in sibs):
+            continue
+        (to_archive if want_archived else to_restore).add(fid)
 
     moved = 0
     if to_archive:
@@ -2073,8 +2070,43 @@ def _handle_ledger_complete(username: str, body: dict):
     _save_ledger(username, ledger)
     # `attempted` = Drive moves we tried; the UI warns when moved < attempted
     # (e.g. Drive offline) while the ledger flag — the source of truth — is set.
-    return ("json", {"ok": True, "count": len(touched),
-                     "moved": moved, "attempted": len(to_archive) + len(to_restore)})
+    return {"count": len(touched),
+            "moved": moved, "attempted": len(to_archive) + len(to_restore)}
+
+
+def _set_linked_tx_status(username: str, receipt_ids: set, status: str) -> int:
+    """Set the settlement status on transactions matched to `receipt_ids`.
+
+    The other half of the receipt/transaction sync: unmatched receipts carry no
+    transaction and are skipped. Returns how many transactions were touched."""
+    pool = _load_tx_pool(username)
+    now = datetime.now().isoformat()
+    touched = 0
+    for t in pool["entries"]:
+        if (t.get("receipt") or {}).get("id") in receipt_ids:
+            t["status"] = status
+            t["completed_at"] = now if status == "completed" else None
+            touched += 1
+    if touched:
+        _save_tx_pool(username, pool)
+    return touched
+
+
+def _handle_ledger_complete(username: str, body: dict):
+    """POST /cardconv/ledger/complete — mark entries complete (or undo).
+
+    Body: {"ids": [...], "undo": bool}. Completing flags entries, moves their
+    Drive originals to the Completed folder (best-effort; the ledger flag is
+    authoritative) and mirrors the settlement status onto linked transactions
+    so Review agrees."""
+    raw = body.get("ids", [])
+    ids = {str(i) for i in (raw if isinstance(raw, list) else [raw]) if i}
+    if not ids:
+        return ("json", {"error": "no ids"}, 400)
+    undo = bool(body.get("undo"))
+    res = _apply_receipt_completion(username, ids, not undo)
+    _set_linked_tx_status(username, ids, "open" if undo else "completed")
+    return ("json", {"ok": True, **res})
 
 
 def _parse_filter_params(query: dict) -> dict:
@@ -3095,21 +3127,16 @@ def _handle_ledger_bulk(username: str, body: dict):
         return ("json", {"ok": True, **res})
 
     if action == "settle":
-        # Ledger → Review mirror: set the linked transaction's settlement status.
-        # Only matched receipts carry a transaction; unmatched ones are skipped.
+        # One settlement status, both surfaces: set the linked transaction's
+        # status (Review) AND the receipt completed flag (Ledger + Drive
+        # archive) so the two views can never disagree.
         status = str(value or "").strip()
         if status not in ("open", "in_progress", "completed"):
             return ("json", {"error": "bad status"}, 400)
-        pool = _load_tx_pool(username)
-        now = datetime.now().isoformat()
-        touched = 0
-        for t in pool["entries"]:
-            if (t.get("receipt") or {}).get("id") in ids:
-                t["status"] = status
-                t["completed_at"] = now if status == "completed" else None
-                touched += 1
-        _save_tx_pool(username, pool)
-        return ("json", {"ok": True, "updated": touched, "status": status})
+        tx_touched = _set_linked_tx_status(username, ids, status)
+        res = _apply_receipt_completion(username, ids, status == "completed")
+        return ("json", {"ok": True, "updated": res["count"], "tx_updated": tx_touched,
+                         "status": status, "moved": res["moved"], "attempted": res["attempted"]})
 
     comp = _coerce_companions(str(value).strip()) if (action == "companions" and value) else None
     ledger = _load_ledger(username)
@@ -3199,12 +3226,19 @@ def _handle_review_set_status(username: str, body: dict):
     pool = _load_tx_pool(username)
     now = datetime.now().isoformat()
     touched = 0
+    rids = set()
     for e in pool["entries"]:
         if e.get("id") in ids:
             e["status"] = status
             e["completed_at"] = now if status == "completed" else None
             touched += 1
+            rid = (e.get("receipt") or {}).get("id")
+            if rid:
+                rids.add(rid)
     _save_tx_pool(username, pool)
+    # Review → Ledger mirror: matched receipts follow the transaction.
+    if rids:
+        _apply_receipt_completion(username, rids, status == "completed")
     return ("json", {"ok": True, "touched": touched, "status": status})
 
 
@@ -3221,12 +3255,19 @@ def _handle_review_complete(username: str, body: dict):
     pool = _load_tx_pool(username)
     now = datetime.now().isoformat()
     touched = 0
+    rids = set()
     for e in pool["entries"]:
         if e.get("id") in ids:
             e["status"] = "open" if undo else "completed"
             e["completed_at"] = None if undo else now
             touched += 1
+            rid = (e.get("receipt") or {}).get("id")
+            if rid:
+                rids.add(rid)
     _save_tx_pool(username, pool)
+    # Review → Ledger mirror: matched receipts follow the transaction.
+    if rids:
+        _apply_receipt_completion(username, rids, not undo)
     return ("json", {"ok": True, "touched": touched, "undo": undo})
 
 
