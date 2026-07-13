@@ -120,3 +120,25 @@ def test_review_unmatched_tx_touches_no_receipt(monkeypatch):
     core._handle_review_set_status("u", {"ids": ["t1"], "status": "completed"})
     assert st["pool"]["entries"][0]["status"] == "completed"
     assert st["ledger"]["entries"][0]["completed"] is False
+
+
+def test_reconcile_heals_pre_sync_mismatches(monkeypatch):
+    """Legacy data: in_progress wins; otherwise the completed side wins."""
+    st = _isolate(monkeypatch,
+                  [_receipt("r1", completed=True),    # + open tx → tx completes
+                   _receipt("r2", completed=True),    # + in_progress tx → receipt reopens
+                   _receipt("r3"),                    # + completed tx → receipt completes
+                   _receipt("r4", completed=True)],   # unmatched — untouched
+                  [_tx("t1", "r1", status="open"),
+                   _tx("t2", "r2", status="in_progress"),
+                   _tx("t3", "r3", status="completed")])
+    fixed = core._reconcile_settle_status("u")
+    assert fixed == 3
+    by_rid = {e["id"]: e for e in st["ledger"]["entries"]}
+    by_tid = {t["id"]: t for t in st["pool"]["entries"]}
+    assert by_tid["t1"]["status"] == "completed" and by_rid["r1"]["completed"] is True
+    assert by_tid["t2"]["status"] == "in_progress" and by_rid["r2"]["completed"] is False
+    assert by_tid["t3"]["status"] == "completed" and by_rid["r3"]["completed"] is True
+    assert by_rid["r4"]["completed"] is True
+    # Idempotent: a second pass finds nothing.
+    assert core._reconcile_settle_status("u") == 0

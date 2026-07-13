@@ -2092,6 +2092,44 @@ def _set_linked_tx_status(username: str, receipt_ids: set, status: str) -> int:
     return touched
 
 
+def _reconcile_settle_status(username: str) -> int:
+    """Heal receipt.completed ↔ tx.status disagreements left by pre-sync eras
+    (the ✓ Complete button and Review statuses didn't mirror each other before
+    2026-07-14). Runs lazily on Ledger/Review loads; a no-op when consistent.
+
+    Per mismatched pair: in_progress wins (explicit workflow state → receipt
+    un-completed); otherwise the completed side wins (archived receipt closes
+    a stale open tx; a completed tx archives its active receipt)."""
+    pool = _load_tx_pool(username)
+    ledger = _load_ledger(username)
+    comp = {e.get("id"): bool(e.get("completed")) for e in ledger["entries"]}
+    now = datetime.now().isoformat()
+    to_complete, to_uncomplete = set(), set()
+    tx_fixed = 0
+    for t in pool["entries"]:
+        rid = (t.get("receipt") or {}).get("id")
+        if rid not in comp:
+            continue
+        status = t.get("status") or "open"
+        if (status == "completed") == comp[rid]:
+            continue
+        if status == "in_progress":
+            to_uncomplete.add(rid)
+        elif status == "open":
+            t["status"] = "completed"
+            t["completed_at"] = now
+            tx_fixed += 1
+        else:
+            to_complete.add(rid)
+    if tx_fixed:
+        _save_tx_pool(username, pool)
+    if to_complete:
+        _apply_receipt_completion(username, to_complete, True)
+    if to_uncomplete:
+        _apply_receipt_completion(username, to_uncomplete, False)
+    return tx_fixed + len(to_complete) + len(to_uncomplete)
+
+
 def _handle_ledger_complete(username: str, body: dict):
     """POST /cardconv/ledger/complete — mark entries complete (or undo).
 
@@ -2147,6 +2185,7 @@ def _annotate_settle_status(username: str, entries: list):
 
 def _handle_ledger_api(username: str, query: dict):
     """GET /cardconv/ledger/api — filtered JSON data."""
+    _reconcile_settle_status(username)   # self-heal pre-sync mismatches (no-op when consistent)
     ledger  = _load_ledger(username)
     entries = ledger["entries"]
     f = _parse_filter_params(query)

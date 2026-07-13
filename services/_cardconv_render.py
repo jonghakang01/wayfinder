@@ -790,6 +790,7 @@ def _render_keywords(user: str) -> str:
 
 def _render_review(user: str) -> str:
     from server import CSS_VER
+    _reconcile_settle_status(user)   # self-heal pre-sync mismatches (no-op when consistent)
     pool    = _load_tx_pool(user)
     # Newest transactions first; dateless rows sink to the bottom.
     rows    = sorted(pool.get("entries", []),
