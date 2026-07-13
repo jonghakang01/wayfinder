@@ -1614,8 +1614,6 @@ __TABCSS__
 .fb-group{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
 .fb-spacer{margin-left:auto}
 /* selection-action buttons: color via class, share one disabled treatment */
-.fb-act-complete{background:rgba(129,140,248,.15);color:#818cf8;border:1px solid rgba(129,140,248,.3)}
-.fb-act-uncomplete{background:rgba(148,163,184,.15);color:#94a3b8;border:1px solid rgba(148,163,184,.3)}
 .fb-act-delete{background:rgba(239,68,68,.15);color:#ef4444;border:1px solid rgba(239,68,68,.3)}
 .filter-bar .btn[disabled]{opacity:.45;cursor:default}
 /* inline usage + card-type editors in the ledger table */
@@ -1868,16 +1866,11 @@ select.sb-act{padding:5px 8px}
       </select>
       <button class="sb-act" id="fBulkWith" title="Set the w/ companion note on all selected">👥 w/ note</button>
       <button class="sb-act" id="fBulkRematch" title="Re-try CSV matching using only the selected receipts">↻ Re-match</button>
-      <select class="sb-act" id="fBulkSettle" title="Set status on all selected — synced with Review; Completed also archives">
-        <option value="">📌 Status</option>
-        <option value="open">Open</option>
-        <option value="in_progress">In progress</option>
-        <option value="completed">Completed</option>
-      </select>
     </div>
     <div class="fb-group fb-spacer" role="group" aria-label="Selection actions">
-      <button class="btn btn-sm fb-act-complete" id="fComplete" disabled>✓ Complete (0)</button>
-      <button class="btn btn-sm fb-act-uncomplete" id="fUncomplete" disabled>↩ Un-complete (0)</button>
+      <button class="btn btn-secondary btn-sm" id="fMarkProg" disabled title="Submitted to SAP, awaiting approval — synced with Review">⏳ Mark in progress</button>
+      <button class="btn btn-primary btn-sm" id="fMarkDone" disabled title="Completed receipts leave the default list; synced with Review">✔ Mark completed</button>
+      <button class="btn btn-ghost btn-sm" id="fMarkOpen" disabled>↩ Reopen</button>
       <button class="btn btn-sm fb-act-delete" id="fDelete" disabled>🗑 Delete (0)</button>
     </div>
   </div>
@@ -2597,41 +2590,18 @@ function updateDeleteBtn(){
   const n = ids.length;
   $('fDelete').textContent = '🗑 Delete (' + n + ')';
   $('fDelete').disabled = n === 0;
-  // Split selection into active vs already-completed to drive the two buttons.
-  const sel = new Set(ids);
-  let active = 0, done = 0;
-  ENTRIES.forEach(e => { if(sel.has(e.id)){ e.completed ? done++ : active++; } });
-  $('fComplete').textContent = '✓ Complete (' + active + ')';
-  $('fComplete').disabled = active === 0;
-  $('fUncomplete').textContent = '↩ Un-complete (' + done + ')';
-  $('fUncomplete').disabled = done === 0;
+  ['fMarkProg','fMarkDone','fMarkOpen'].forEach(id => { $(id).disabled = n === 0; });
   const sb = $('fSelBar'); if(sb) sb.classList.toggle('show', n > 0);
   const sc = $('fSelCount'); if(sc) sc.textContent = n + ' selected';
 }
 
-async function completeSelected(undo){
-  const sel = new Set(selectedIds());
-  // Only act on entries in the relevant state (active→complete, done→un-complete).
-  const ids = ENTRIES.filter(e => sel.has(e.id) && (undo ? e.completed : !e.completed))
-                     .map(e => e.id);
-  if(!ids.length) return;
-  const verb = undo ? 'incomplete' : 'complete';
-  if(!confirm('Mark ' + ids.length + ' receipts ' + verb + '?' +
-      (undo ? '' : '\n(Completed receipts leave the default list, Sync and Mapping; Drive originals move to the Completed folder)'))) return;
-  const r = await fetch('/cardconv/ledger/complete', {
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ids: ids, undo: !!undo})
-  });
-  const d = await r.json().catch(() => ({}));
-  if(!d.ok){ alert('Failed: ' + (d.error || r.status)); load(); return; }
-  toast(ids.length + ' receipts marked ' + verb, false);
-  // Warn when some Drive originals couldn't be moved (e.g. Drive offline);
-  // the ledger flag is already set so exclusion from Sync/Mapping still holds.
-  if(d.attempted && d.moved < d.attempted){
-    toast('Some Drive file moves did not apply. Settlement data was saved correctly.', true);
-  }
-  load();
+// Settlement status on the selection — one shared path (bulkApply 'settle')
+// that syncs the linked transaction, the completed flag and the Drive folder.
+function setStatusSelected(status){
+  const n = selectedIds().length;
+  if(!n) return;
+  if(status === 'completed' && !confirm('Mark ' + n + ' receipts completed?\n(They leave the default list, Sync and Mapping; Drive originals move to the Completed folder. Synced to Review.)')) return;
+  bulkApply('settle', status);
 }
 
 function deleteSelected(){
@@ -2737,8 +2707,9 @@ $('fDownloadXlsx').addEventListener('click', () => {
   window.location = '/cardconv/ledger/download.xlsx?' + filterParams().toString();
 });
 $('fDelete').addEventListener('click', deleteSelected);
-$('fComplete').addEventListener('click', () => completeSelected(false));
-$('fUncomplete').addEventListener('click', () => completeSelected(true));
+$('fMarkProg').addEventListener('click', () => setStatusSelected('in_progress'));
+$('fMarkDone').addEventListener('click', () => setStatusSelected('completed'));
+$('fMarkOpen').addEventListener('click', () => setStatusSelected('open'));
 $('checkAll').addEventListener('change', () => {
   document.querySelectorAll('.sel').forEach(c => { c.checked = $('checkAll').checked; });
   updateDeleteBtn();
@@ -2781,14 +2752,6 @@ $('fBulkWith').addEventListener('click', () => {
   bulkApply('companions', v.trim());
 });
 $('fBulkRematch').addEventListener('click', () => bulkApply('rematch', null));
-$('fBulkSettle').addEventListener('change', () => {
-  const v = $('fBulkSettle').value;
-  $('fBulkSettle').value = '';
-  if(v === '') return;
-  // Completed archives receipts (same as ✓ Complete) — confirm like that path does.
-  if(v === 'completed' && !confirm('Mark selected receipts completed?\n(They leave the default list, Sync and Mapping; Drive originals move to the Completed folder. Synced to Review.)')) return;
-  bulkApply('settle', v);
-});
 // Period select drives the date range; Custom… reveals the two date inputs.
 $('fPeriod').addEventListener('change', () => {
   const v = $('fPeriod').value;
