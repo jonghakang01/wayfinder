@@ -441,8 +441,10 @@ def wayfinder(user):
     svc_map = {}
     for path, svc in SERVICES.items():
         m = svc.META
-        if m.get("hidden") or path == "/pov":  # POV 보류 — 메뉴/탭 숨김 (pov.py는 미커밋 WIP, 라우트는 유지)
+        if m.get("hidden"):
             continue
+        if path == "/pov":  # POV inactive — show in dormant bucket (pov.py WIP stays uncommitted)
+            m = dict(m, bucket=True)
         if m.get("admin_only") and not user_is_admin:
             continue
         if not user_is_admin and not auth.has_service_access(user, path):
