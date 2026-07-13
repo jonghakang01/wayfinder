@@ -54,7 +54,7 @@ select.sm{border:1px solid var(--border-bright);border-radius:6px;padding:3px 6p
   color:var(--text);resize:vertical}
 .fgrid input:hover,.fgrid textarea:hover{background:var(--surface-3)}
 .fgrid input:focus,.fgrid textarea:focus{background:var(--surface);border-color:var(--border-bright);outline:none}
-.next-action input{font-weight:700;color:var(--accent)}
+.next-action input{font-weight:var(--fw-semibold)}
 .lastrow{display:flex;align-items:center;gap:8px}
 .ago{color:var(--muted);font-size:.72rem;white-space:nowrap}
 .touch-btn{border:1px solid var(--border-bright);background:var(--surface);border-radius:6px;padding:3px 9px;
@@ -143,11 +143,12 @@ PAGE_BODY = """<div class="mt-wrap">
 <div class="sub" id="sub">loading…</div>
 <div class="briefing" id="briefing" hidden></div>
 <div class="kpis" id="kpis"></div>
-<div class="cands nm-sugg" id="nmsuggs" hidden></div>
 <div class="cands" id="cands" hidden></div>
-<div class="drafts" id="drafts" hidden></div>
 <div id="sections"></div>
-<button class="add-btn" onclick="addMatter()">＋ 새 사안 추가</button>
+<div id="addPanel">
+  <button class="add-btn" onclick="toggleAdd()">＋ 새 사안 추가</button>
+  <div class="cands nm-sugg" id="addBody" hidden style="margin-top:10px"></div>
+</div>
 <div class="save-dot" id="saveDot">✓ 저장됨</div>
 
 <script>
@@ -170,8 +171,8 @@ function daysAgo(iso){
 async function load(){
   const d = await (await fetch('/matters/api')).json();
   DATA = d;
-  renderKpis(d.kpis); renderDrafts(d.drafts); renderSections(d.matters);
-  renderBriefing(d.briefing); renderNMSuggs(d.new_matter_suggestions || []);
+  renderKpis(d.kpis); renderSections(d.matters);
+  renderBriefing(d.briefing); renderAddPanel();
   const ls = d.last_scan;
   document.getElementById('sub').textContent =
     (ls ? `마지막 스캔: ${ls.finished_at} (${ls.source})${ls.changes_summary ? ' — ' + ls.changes_summary : ''}` : '스캔 이력 없음')
@@ -205,17 +206,61 @@ function renderBriefing(b){
   el.innerHTML = `<h2>🤖 AI 브리핑<span class="when">${esc(b.created_at || '')}</span></h2><p>${esc(b.text)}</p>`;
 }
 
-function renderNMSuggs(suggs){
-  const el = document.getElementById('nmsuggs');
-  if(!suggs.length){ el.hidden = true; return; }
-  el.hidden = false;
-  el.innerHTML = '<h2>🤖 AI가 감지한 신규 사안 ' + suggs.length + '건</h2><ul>'
-    + suggs.map(s => {
-        let d = {}; try { d = JSON.parse(s.proposed_value); } catch(e){}
-        return `<li><b>${esc(d.title || '?')}</b><span class="why">${esc(s.reason || '')}</span>
-          <button class="touch-btn" onclick="resolveSugg(${s.id}, true)">＋ 사안으로 추가</button>
-          <button class="touch-btn" onclick="resolveSugg(${s.id}, false)">무시</button></li>`;
-      }).join('') + '</ul>';
+function renderAddPanel(){
+  const body = document.getElementById('addBody');
+  if(body.hidden) return;               // closed — render on open
+  const suggs = DATA.new_matter_suggestions || [];
+  let html = '<h2>🤖 AI가 메일에서 감지한 사안 후보 ' + suggs.length + '건</h2>';
+  if(suggs.length){
+    html += '<ul>' + suggs.map(s => {
+      let d = {}; try { d = JSON.parse(s.proposed_value); } catch(e){}
+      return `<li><b>${esc(d.title || '?')}</b><span class="why">${esc(s.reason || '')}</span>
+        <button class="touch-btn" onclick="resolveSugg(${s.id}, true)">＋ 사안으로 추가</button>
+        <button class="touch-btn" onclick="resolveSugg(${s.id}, false)">무시</button></li>`;
+    }).join('') + '</ul>';
+  } else {
+    html += '<div style="color:var(--muted);font-size:.8rem;padding:4px 0">후보가 없습니다 — ↻ 지금 스캔을 돌리면 AI가 메일에서 후보를 찾습니다.</div>';
+  }
+  html += `<div style="display:flex;gap:8px;margin-top:12px">
+    <input id="proposeQuery" type="text" placeholder="검색어로 제안받기: 제목 키워드 또는 from:주소..."
+      style="flex:1;background:var(--surface);border:1px solid var(--border-bright);border-radius:8px;color:var(--text);padding:8px 10px;font-size:.82rem">
+    <button class="touch-btn" id="proposeBtn" onclick="proposeFromQuery()">🔍 AI 제안</button></div>
+  <div style="color:var(--dim);font-size:.7rem;margin-top:4px">메일함을 검색해 AI가 사안 카드를 만들어 후보에 올립니다 (약 1분)</div>
+  <div style="display:flex;gap:8px;margin-top:10px">
+    <input id="manualTitle" type="text" placeholder="직접 입력: 새 사안 제목..."
+      style="flex:1;background:var(--surface);border:1px solid var(--border-bright);border-radius:8px;color:var(--text);padding:8px 10px;font-size:.82rem">
+    <button class="touch-btn" onclick="addManual()">추가</button></div>`;
+  body.innerHTML = html;
+}
+
+function toggleAdd(){
+  const body = document.getElementById('addBody');
+  body.hidden = !body.hidden;
+  if(!body.hidden) renderAddPanel();
+}
+
+async function proposeFromQuery(){
+  const q = document.getElementById('proposeQuery').value.trim();
+  if(!q) return;
+  const btn = document.getElementById('proposeBtn');
+  btn.disabled = true; btn.textContent = '메일 검색 + AI 분석 중…';
+  try {
+    const r = await (await fetch('/matters/api/propose', {method:'POST',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify({query: q})})).json();
+    if(r.error){ alert(r.error); }
+  } finally {
+    await load();                       // refresh DATA with the new candidate
+    const body = document.getElementById('addBody');
+    body.hidden = false; renderAddPanel();
+  }
+}
+
+async function addManual(){
+  const title = document.getElementById('manualTitle').value.trim();
+  if(!title) return;
+  await fetch('/matters/api/matters', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({title: title, ball: '나', status: '진행중'})});
+  load();
 }
 
 async function refreshStructures(){
@@ -247,14 +292,6 @@ function renderKpis(k){
   ].map(([c,n,l]) => `<div class="kpi ${c}"><div class="num">${n}</div><div class="lbl">${l}</div></div>`).join('');
 }
 
-function renderDrafts(ds){
-  const el = document.getElementById('drafts');
-  if(!ds || !ds.length){ el.hidden = true; return; }
-  el.hidden = false;
-  el.innerHTML = '<h2>📝 미발송 초안 ' + ds.length + '건</h2><ul>'
-    + ds.map(d => `<li><span>${esc(d.subject)}</span><span class="d">${esc(d.saved_at)}</span></li>`).join('')
-    + '</ul>';
-}
 
 function card(m){
   const ago = daysAgo(m.last_contact);
@@ -275,7 +312,7 @@ function card(m){
     <div class="fgrid">
       ${f('People','people',m.people)}
       ${f('Waiting','waiting',m.waiting)}
-      <label>Next</label><span class="next-action"><input value="${esc(m.next_action)}" data-f="next_action" data-id="${m.id}"></span>
+      <label>Next</label><span class="next-action"><input type="text" value="${esc(m.next_action)}" data-f="next_action" data-id="${m.id}"></span>
       <label>Last</label>
       <span class="lastrow">
         <input type="date" value="${esc(m.last_contact)}" data-f="last_contact" data-id="${m.id}" style="width:150px">
@@ -401,12 +438,6 @@ function touch(id){ save(id, {last_contact: new Date().toISOString().slice(0,10)
 function archive(id){
   if(!confirm('이 사안을 보관할까요? (목록에서 숨겨집니다)')) return;
   save(id, {archived: 1}, true);
-}
-async function addMatter(){
-  const title = prompt('새 사안 제목:'); if(!title) return;
-  await fetch('/matters/api/matters', {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({title: title, ball: '나', status: '진행중'})});
-  load();
 }
 
 load();

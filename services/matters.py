@@ -91,6 +91,18 @@ def handle(method, path, body, ctx=None):
                                  "summary": res["summary"]})
             if path == "/matters/api/structures":
                 return ("json", {"ok": True, "updated": judge.refresh_structures(conn)})
+            if path == "/matters/api/propose":
+                query = str(data.get("query", "")).strip()
+                if not query:
+                    return ("json", {"error": "검색어를 입력하세요"})
+                days = 90  # user-driven search digs deeper than the scan window
+                threads = get_source().search_threads(
+                    query, date.today() - timedelta(days=days))
+                if not threads:
+                    return ("json", {"error": f"최근 {days}일 메일에서 '{query}' 검색 결과가 없습니다"})
+                created = judge.propose_from_search(conn, query, threads)
+                return ("json", {"ok": True, "created": len(created),
+                                 "threads_found": len(threads)})
             if path.startswith("/matters/api/suggestions/"):
                 sid = int(path.rsplit("/", 1)[1])
                 accept = data.get("action") == "accept"

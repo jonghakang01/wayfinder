@@ -15,7 +15,7 @@ import re
 import sys
 from datetime import date, datetime
 
-INBOX, SENT, DRAFTS = 6, 5, 16
+INBOX, SENT, DRAFTS, ARCHIVE = 6, 5, 16, 32  # 32 = olFolderArchive (Outlook 2016+)
 MAX_ITEMS = 1000
 SNIPPET = 200
 OL_MAIL = 43
@@ -66,9 +66,36 @@ class Collector:
     # -- folder walk (once per folder, queries matched in memory) ---------
 
     def _walk(self, folder_id: int, sort_key: str, since: date) -> list[dict]:
-        if folder_id in self._loaded:
-            return self._loaded[folder_id]
-        items = self._ns.GetDefaultFolder(folder_id).Items
+        key = f"default:{folder_id}"
+        if key not in self._loaded:
+            try:
+                folder = self._ns.GetDefaultFolder(folder_id)
+            except Exception:
+                self._loaded[key] = []
+                return []
+            self._loaded[key] = self._walk_folder(folder, sort_key, since)
+        return self._loaded[key]
+
+    def _archive(self, since: date) -> list[dict]:
+        """Mail in archive stores ("Online Archive - ...": own Inbox + Archive
+        folders). Aggressive archiving must not break matter tracking."""
+        if "archive" not in self._loaded:
+            out: list[dict] = []
+            try:
+                for store in self._ns.Stores:
+                    if "archive" not in str(store.DisplayName).lower():
+                        continue
+                    root = store.GetRootFolder()
+                    for f in root.Folders:
+                        if str(f.Name).lower() in ("archive", "inbox", "보관"):
+                            out.extend(self._walk_folder(f, "ReceivedTime", since))
+            except Exception:
+                pass
+            self._loaded["archive"] = out
+        return self._loaded["archive"]
+
+    def _walk_folder(self, folder, sort_key: str, since: date) -> list[dict]:
+        items = folder.Items
         items.Sort(f"[{sort_key}]", True)
         floor = datetime.combine(since, datetime.min.time())
         out: list[dict] = []
@@ -84,7 +111,6 @@ class Collector:
             if datetime.fromisoformat(when) < floor:
                 break
             out.append(self._record(mail, when))
-        self._loaded[folder_id] = out
         return out
 
     def _record(self, mail, when: str) -> dict:
@@ -120,13 +146,12 @@ class Collector:
     # -- public ------------------------------------------------------------
 
     def search(self, query: str, since: date) -> list[dict]:
+        received = self._walk(INBOX, "ReceivedTime", since) + self._archive(since)
         if query.lower().startswith("from:"):
             addr = query[5:].strip().lower()
-            pool = self._walk(INBOX, "ReceivedTime", since)
-            hits = [r for r in pool if addr in r["sender_email"].lower()]
+            hits = [r for r in received if addr in r["sender_email"].lower()]
         else:
-            pool = (self._walk(INBOX, "ReceivedTime", since)
-                    + self._walk(SENT, "SentOn", since))
+            pool = received + self._walk(SENT, "SentOn", since)
             hits = [r for r in pool if subject_matches(query, r["subject"])]
 
         threads: dict[str, dict] = {}
@@ -143,7 +168,7 @@ class Collector:
 
     def recent_inbox(self, since: date) -> list[dict]:
         latest: dict[str, dict] = {}
-        for r in self._walk(INBOX, "ReceivedTime", since):
+        for r in self._walk(INBOX, "ReceivedTime", since) + self._archive(since):
             cur = latest.get(r["conv"])
             if cur is None or r["when"] > cur["last_message_at"]:
                 latest[r["conv"]] = {
