@@ -85,8 +85,9 @@ def _recheck_queries(matter: dict, terms: list | None = None) -> list:
     sweep is scoped to just those People/keywords; otherwise it falls back to
     every person in People plus the title keywords. Always keeps the matter's own
     search_queries. The COM collector matches subject words (incl. Sent) or
-    from:addr, so this surfaces threads the routine scan missed — e.g. a mail I
-    sent to a non-listed person whose subject still carries the keywords."""
+    from:addr (either direction — sender, or my Sent's To), so this surfaces
+    threads the routine scan missed — e.g. a mail I sent to a non-listed person
+    whose subject still carries the keywords."""
     qs = list(matter.get("search_queries") or [])
     if terms:
         for t in terms:

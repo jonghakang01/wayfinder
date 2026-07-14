@@ -53,3 +53,43 @@ def test_no_write_apis_in_mail_module():
     text = (pathlib.Path("services/_matters_mail.py")).read_text()
     for token in (".Send(", ".Delete(", ".Move(", ".FlagRequest"):
         assert token not in text
+
+
+def test_scan_queries_derive_people_from_queries():
+    """Routine scan sweeps from: queries for every People email, so a matter's
+    correspondence (incl. my outbound — collector matches To on Sent) is seen
+    even when the stored search_queries miss it."""
+    m = {"search_queries": ["Cheil-AIE IOT Project SOW", "from:smohan@aie.com"],
+         "people": "S Mohan (smohan@aie.com), Ram Kumar <ram.kumar@aie.com> / 강프로"}
+    qs = scan._scan_queries(m)
+    assert qs[:2] == ["Cheil-AIE IOT Project SOW", "from:smohan@aie.com"]
+    assert "from:ram.kumar@aie.com" in qs
+    assert qs.count("from:smohan@aie.com") == 1  # no dup with stored query
+    assert scan._scan_queries({"search_queries": [], "people": ""}) == []
+
+
+def test_scan_conversation_refresh(tmp_path, monkeypatch):
+    """A new message in an already-attached conversation is reflected on the
+    next scan even when no stored query matches it any more (my outbound
+    replies included) — the conv: refresh derived from attached threads."""
+    conn = _conn(tmp_path, monkeypatch)
+    src = get_source("fake")
+    m = db.list_matters(conn)[0]
+    scan.run_scan(conn, src, SINCE, use_judge=False)
+    attached = db.threads_for_matter(conn, m["id"])
+    assert attached
+    tid = attached[0]["id"]
+
+    # Wipe the matter's queries (subject drift) and grow the conversation.
+    conn.execute("UPDATE matters SET search_queries='[]', people='' WHERE id=?", (m["id"],))
+    conn.commit()
+    thread = src.get_thread(tid)
+    from services._matters_mail import Message
+    thread.messages.append(Message(sender="me@cheil.com",
+                                   sent_at="2099-01-01T09:00:00", body="my reply"))
+
+    qs = scan._matter_queries(conn, src, {**m, "search_queries": [], "people": ""})
+    assert f"conv:{tid.removeprefix('fake:')}" in qs
+    scan.run_scan(conn, src, SINCE, use_judge=False)
+    refreshed = next(t for t in db.threads_for_matter(conn, m["id"]) if t["id"] == tid)
+    assert refreshed["last_message_at"] == "2099-01-01T09:00:00"

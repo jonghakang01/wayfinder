@@ -11,6 +11,7 @@ Usage:
   python3 -m scan               # same (matter edits are L3's job regardless)
   MAIL_SOURCE=fake python3 -m scan
 """
+import re
 import sys
 from datetime import date, timedelta
 
@@ -18,6 +19,33 @@ from services import _matters_db as db
 from services._matters_mail import get_source
 
 LOOKBACK_DAYS = 30
+
+
+def _scan_queries(matter: dict) -> list:
+    """Stored search_queries plus from: queries derived from People emails.
+    The collector matches from: on both directions (sender or my Sent's To),
+    so this catches my own outbound to a matter's People even when the
+    subject drifted away from the stored queries."""
+    qs = list(matter.get("search_queries") or [])
+    seen = {q.lower() for q in qs}
+    for email in re.findall(r"[\w.+-]+@[\w.-]+", matter.get("people") or ""):
+        q = f"from:{email}"
+        if q.lower() not in seen:
+            seen.add(q.lower())
+            qs.append(q)
+    return qs
+
+
+def _matter_queries(conn, source, matter: dict) -> list:
+    """_scan_queries plus a conv: refresh for every already-attached thread, so
+    new messages in a known conversation — my own outbound replies included —
+    are reflected even when the subject/sender queries would miss them."""
+    qs = _scan_queries(matter)
+    ns = source.name + ":"
+    for t in db.threads_for_matter(conn, matter["id"]):
+        if t["id"].startswith(ns):
+            qs.append(f"conv:{t['id'][len(ns):]}")
+    return qs
 
 
 def run_scan(conn, source, since: date, use_judge: bool = True) -> dict:
@@ -28,14 +56,14 @@ def run_scan(conn, source, since: date, use_judge: bool = True) -> dict:
     moved, seen_threads = [], set()
     threads_by_matter: dict[int, list] = {}
     try:
+        queries_by_matter = {m["id"]: _matter_queries(conn, source, m)
+                             for m in db.list_matters(conn)}
         # Batch sources (COM bridge) collect everything in one spawn.
         if hasattr(source, "prefetch"):
-            all_queries = [q for m in db.list_matters(conn)
-                           for q in (m.get("search_queries") or [])]
-            source.prefetch(all_queries, since)
+            source.prefetch([q for qs in queries_by_matter.values() for q in qs], since)
 
         for m in db.list_matters(conn):
-            queries = m.get("search_queries") or []
+            queries = queries_by_matter[m["id"]]
             matter_new = False
             for q in queries:
                 for t in source.search_threads(q, since):

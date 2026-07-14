@@ -105,7 +105,10 @@ class FakeMailSource(MailSource):
         for t in self._threads:
             if not t.messages or not self._after(t.summary().last_message_at, since):
                 continue
-            if q.startswith("from:"):
+            if q.startswith("conv:"):
+                cid = q[5:].strip()
+                hit = t.id.lower() in (cid, f"fake:{cid}")
+            elif q.startswith("from:"):
                 addr = q[5:].strip()
                 hit = any(addr in m.sender.lower() for m in t.messages)
             else:

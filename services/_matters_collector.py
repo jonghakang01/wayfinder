@@ -148,12 +148,22 @@ class Collector:
     # -- public ------------------------------------------------------------
 
     def search(self, query: str, since: date) -> list[dict]:
-        received = self._walk(INBOX, "ReceivedTime", since) + self._archive(since)
-        if query.lower().startswith("from:"):
+        pool = (self._walk(INBOX, "ReceivedTime", since) + self._archive(since)
+                + self._walk(SENT, "SentOn", since))
+        if query.lower().startswith("conv:"):
+            # Conversation refresh: every message in a known conversation counts,
+            # whatever its subject or sender — this is how my own replies (and
+            # forwards that kept the ConversationID) reach an attached thread.
+            cid = query[5:].strip()
+            hits = [r for r in pool if r["conv"] == cid]
+        elif query.lower().startswith("from:"):
+            # Correspondence with this person, both directions: they sent it,
+            # or I mailed them (Sent's To carries the SMTP address for external
+            # recipients — exactly the outbound mail routine scans used to miss).
             addr = query[5:].strip().lower()
-            hits = [r for r in received if addr in r["sender_email"].lower()]
+            hits = [r for r in pool
+                    if addr in r["sender_email"].lower() or addr in r["to"].lower()]
         else:
-            pool = received + self._walk(SENT, "SentOn", since)
             hits = [r for r in pool if subject_matches(query, r["subject"])]
 
         threads: dict[str, dict] = {}
