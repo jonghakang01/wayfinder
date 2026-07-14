@@ -67,7 +67,7 @@ class MailSource(ABC):
 
     @abstractmethod
     def list_recent_inbox(self, since: date) -> list[MessageSummary]:
-        """Recent inbox messages — feeds new-matter detection."""
+        """Recent messages (Inbox + Archive + Sent) — feeds new-matter detection."""
 
     @abstractmethod
     def list_drafts(self) -> list[MessageSummary]:
@@ -118,13 +118,10 @@ class FakeMailSource(MailSource):
         return next((t for t in self._threads if t.id == thread_id), None)
 
     def list_recent_inbox(self, since: date) -> list[MessageSummary]:
-        out = []
-        for t in self._threads:
-            s = t.summary()
-            # Inbound only (last sender is not me) and recent.
-            if s.last_sender.lower() != "jongha.kang@cheil.com" and self._after(s.last_message_at, since):
-                out.append(s)
-        return out
+        # Every recent thread counts — self-initiated ones (Sent) included,
+        # mirroring the COM collector's Inbox + Archive + Sent pool.
+        return [s for s in (t.summary() for t in self._threads)
+                if self._after(s.last_message_at, since)]
 
     def list_drafts(self) -> list[MessageSummary]:
         return [MessageSummary(**d, outlook_link="") for d in self._drafts]

@@ -167,8 +167,12 @@ class Collector:
         return list(threads.values())
 
     def recent_inbox(self, since: date) -> list[dict]:
+        """Latest message per conversation across Inbox + Archive + Sent —
+        threads the user started (no reply yet) are matter candidates too."""
         latest: dict[str, dict] = {}
-        for r in self._walk(INBOX, "ReceivedTime", since) + self._archive(since):
+        pool = (self._walk(INBOX, "ReceivedTime", since) + self._archive(since)
+                + self._walk(SENT, "SentOn", since))
+        for r in pool:
             cur = latest.get(r["conv"])
             if cur is None or r["when"] > cur["last_message_at"]:
                 latest[r["conv"]] = {
