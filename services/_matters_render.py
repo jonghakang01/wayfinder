@@ -190,7 +190,6 @@ PAGE_BODY = """<div class="mt-wrap">
 <div class="sub" id="sub">loading…</div>
 <div class="briefing" id="briefing" hidden></div>
 <div class="kpis" id="kpis"></div>
-<div class="cands" id="cands" hidden></div>
 <div id="sections"></div>
 <div id="addPanel">
   <button class="add-btn" onclick="toggleAdd()">＋ 새 사안 추가</button>
@@ -239,20 +238,11 @@ async function runScan(){
   const btn = document.getElementById('scanBtn');
   btn.disabled = true; btn.textContent = '스캔 중…';
   try {
-    const r = await (await fetch('/matters/api/scan', {method:'POST'})).json();
-    renderCandidates(r.candidates || []);
+    await (await fetch('/matters/api/scan', {method:'POST'})).json();
   } finally {
     btn.disabled = false; btn.textContent = '↻ 지금 스캔';
     load();
   }
-}
-
-function renderCandidates(cands){
-  const el = document.getElementById('cands');
-  if(!cands.length){ el.hidden = true; return; }
-  el.hidden = false;
-  el.innerHTML = '<h2>🔍 신규 사안 후보 ' + cands.length + '건 (검토 필요)</h2><ul>'
-    + cands.map(c => `<li>${esc(c)}</li>`).join('') + '</ul>';
 }
 
 function renderBriefing(b){
@@ -277,6 +267,14 @@ function renderAddPanel(){
     }).join('') + '</ul>';
   } else {
     html += '<div style="color:var(--muted);font-size:.8rem;padding:4px 0">후보가 없습니다 — ↻ 지금 스캔을 돌리면 AI가 메일에서 후보를 찾습니다.</div>';
+  }
+  const raw = DATA.last_candidates || [];
+  if(raw.length){
+    html += `<details style="margin-top:10px">
+      <summary style="cursor:pointer;font-size:.78rem;color:var(--muted)">🔍 최근 스캔 원시 후보 ${raw.length}건 (AI 필터 전 — 참고용)</summary>
+      <ul style="margin:6px 0 0;padding-left:18px;max-height:220px;overflow-y:auto">`
+      + raw.map(s => `<li style="font-size:.75rem;color:var(--muted);padding:1px 0">${esc(s)}</li>`).join('')
+      + '</ul></details>';
   }
   html += `<div style="display:flex;gap:8px;margin-top:12px">
     <input id="proposeQuery" type="text" placeholder="검색어로 제안받기: 제목 키워드 또는 from:주소..."
@@ -470,6 +468,14 @@ function structTree(m){
 
 const ME_EMAIL = 'jongha.kang@cheil.com';
 
+async function openMail(eid){
+  try {
+    const r = await (await fetch('/matters/api/open_mail', {method:'POST',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify({entryid: eid})})).json();
+    if(!r.ok) alert('Outlook 열기 실패: ' + (r.error || ''));
+  } catch(e){ alert('요청 실패 — 서버/Outlook 상태를 확인하세요'); }
+}
+
 function threadWho(t){
   return (t.last_sender || '').toLowerCase() !== ME_EMAIL
     ? (t.last_sender || '').split('@')[0] : '나';
@@ -513,8 +519,9 @@ function threadList(threads){
   const row = (t, child) => {
     const inbound = (t.last_sender || '').toLowerCase() !== ME_EMAIL;
     const when = (t.last_message_at || '').slice(5, 10);
-    const link = t.outlook_link
-      ? `<a href="${esc(t.outlook_link)}" target="_blank" title="${esc(t.subject)}">${esc(t.subject)}</a>`
+    const eid = (t.outlook_link || '').startsWith('outlook:') ? t.outlook_link.slice(8) : '';
+    const link = eid
+      ? `<a href="#" onclick="openMail('${eid}');return false" title="${esc(t.subject)} — 데스크톱 Outlook에서 열기">${esc(t.subject)}</a>`
       : `<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.subject)}</span>`;
     return `<div class="thread ${inbound ? 'inbound' : ''}${child ? ' side' : ''}">${child ? '↳' : '📧'} ${link}<span class="who">${esc(threadWho(t))} · ${when}</span></div>`;
   };

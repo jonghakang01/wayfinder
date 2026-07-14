@@ -51,10 +51,16 @@ def _api_payload(db, conn):
         # Badge fields the AI auto-applied last scan, unless the user re-locked them.
         locked = set(m.get("user_locked_fields") or [])
         m["ai_updated"] = [f for f in ai_updated.get(m["id"], []) if f not in locked]
+    cand_file = db.DB_PATH.parent / "last_candidates.json"
+    try:
+        last_candidates = json.loads(cand_file.read_text()) if cand_file.exists() else []
+    except Exception:
+        last_candidates = []
     return {
         "matters": matters, "kpis": db.kpis(conn),
         "drafts": _drafts(conn), "last_scan": _last_scan(conn),
         "new_matter_suggestions": [s for s in sugg if s["field"] == "new_matter"],
+        "last_candidates": last_candidates,
         "briefing": db.latest_briefing(conn),
     }
 
@@ -175,6 +181,28 @@ def _handle_recheck(db, judge, get_source, conn, mid: int, days: int,
             "scoped": bool(_parse_terms(terms))}
 
 
+def _open_in_outlook(entry_id: str):
+    """Pop the mail window in desktop Outlook via the Windows COM bridge."""
+    import shutil
+    import subprocess
+    from pathlib import Path
+    from services import _matters_mail as mail
+    dst_dir = Path(mail.WIN_DIR_MNT)
+    dst_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(Path(__file__).parent / "_matters_openmail.py", dst_dir / "open_mail.py")
+    cmd = f"python '{mail.WIN_DIR}\\open_mail.py' {entry_id}"
+    try:
+        p = subprocess.run(["powershell.exe", "-NoProfile", "-c", cmd],
+                           capture_output=True, timeout=30)
+    except subprocess.TimeoutExpired:
+        return False, "Outlook 응답 없음 (30초)"
+    out = p.stdout.decode("utf-8", "replace")
+    if "OK" in out:
+        return True, ""
+    err = (p.stderr.decode("utf-8", "replace") or out).strip()
+    return False, err[:200] or "열기 실패 — 메일이 이동/삭제됐을 수 있습니다"
+
+
 def handle(method, path, body, ctx=None):
     from services import _matters_render as render
 
@@ -213,11 +241,25 @@ def handle(method, path, body, ctx=None):
 
             if path == "/matters/api/scan":
                 src = get_source()
+                # Test fixtures must never land in the live DB again
+                # (fake:t-* threads once masqueraded as real mail on the cards).
+                if src.name == "fake":
+                    return ("json", {"error": "fake mail source는 라이브 DB에 스캔할 수 없습니다"})
                 since = date.today() - timedelta(days=LOOKBACK_DAYS)
                 res = scan.run_scan(conn, src, since)
+                cands = [c.subject for c in res["candidates"]]
+                # Kept for the add panel's raw-candidates section (survives reload).
+                (db.DB_PATH.parent / "last_candidates.json").write_text(
+                    json.dumps(cands, ensure_ascii=False))
                 return ("json", {"ok": True, "moved": res["moved"],
-                                 "candidates": [c.subject for c in res["candidates"]],
+                                 "candidates": cands,
                                  "summary": res["summary"]})
+            if path == "/matters/api/open_mail":
+                eid = str(data.get("entryid", "")).strip()
+                if not re.fullmatch(r"[0-9A-Fa-f]+", eid):
+                    return ("json", {"error": "bad entryid"})
+                ok, msg = _open_in_outlook(eid)
+                return ("json", {"ok": ok, "error": msg})
             if path == "/matters/api/structures":
                 return ("json", {"ok": True, "updated": judge.refresh_structures(conn)})
             if path == "/matters/api/propose":

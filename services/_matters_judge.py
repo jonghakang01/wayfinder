@@ -41,6 +41,10 @@ message was sent by Jongha, the ball likely moved to 상대 (회신대기) — b
 - Field values you propose: status/ball as above; last_contact as YYYY-MM-DD.
 - waiting and next_action MUST name the actor and the action: "<사람>의 <무엇> 대기" / \
 "<사람>에게 <무엇>" style. Never a bare action with no person.
+- people: propose ONLY to ADD a stakeholder the mail evidence shows participating but \
+not yet listed. proposed_value = the FULL updated list — keep every existing entry \
+verbatim and append the new person as 이름(소속) (both names if known, e.g. \
+임근철/Danny Lim(Samsung)). Never remove or rewrite existing entries.
 - new_matters: AT MOST 5, only clearly substantive work items worth tracking (contracts, \
 onboarding, SOW, vendor/client requests). NEVER newsletters, digests, system notifications, \
 benefits mail, event invites, weekly reports.
@@ -53,7 +57,7 @@ content clearly asks Jongha himself to act.
 first. 존댓말.
 
 Respond with ONLY a JSON object, no prose, matching:
-{"suggestions": [{"matter_title": str, "field": "status|ball|waiting|next_action|last_contact",
+{"suggestions": [{"matter_title": str, "field": "status|ball|waiting|next_action|last_contact|people",
                   "proposed_value": str, "reason": str (short Korean)}],
  "new_matters": [{"title": str (Korean, concise), "people": str, "next_action": str,
                   "ball": "나|공동|상대", "urgency": "urgent|normal|low",
@@ -191,7 +195,7 @@ def parse_output(text: str) -> dict:
     return out
 
 
-VALID_FIELDS = {"status", "ball", "waiting", "next_action", "last_contact"}
+VALID_FIELDS = {"status", "ball", "waiting", "next_action", "last_contact", "people"}
 
 
 def store_results(conn, run_id: int, out: dict, matters: list) -> dict:
@@ -215,6 +219,12 @@ def store_results(conn, run_id: int, out: dict, matters: list) -> dict:
             skipped += 1  # no-op suggestion
             continue
         proposed = str(s.get("proposed_value", ""))
+        # people is append-only: refuse a proposal that drops any existing entry
+        if field == "people":
+            existing = [p.strip() for p in str(m.get("people") or "").split(",") if p.strip()]
+            if not all(p in proposed for p in existing):
+                skipped += 1
+                continue
         # Auto-apply: the AI derived this from mail evidence, so reflect it directly
         # instead of gating every field behind a manual 반영. The user stays in
         # control by editing (a direct edit locks the field, filtered out above);

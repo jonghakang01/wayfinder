@@ -382,7 +382,7 @@ def resolve_suggestion(conn, sid: int, accept: bool) -> dict:
     return result
 
 
-AUTO_FIELDS = {"status", "ball", "waiting", "next_action", "last_contact"}
+AUTO_FIELDS = {"status", "ball", "waiting", "next_action", "last_contact", "people"}
 
 
 def apply_pending_suggestions(conn) -> dict:
