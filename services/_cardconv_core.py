@@ -3005,6 +3005,16 @@ def _handle_manual_receipt_add(username: str, body: dict):
     return ("json", {"ok": True, "id": entry["id"]})
 
 
+def _is_nasca_drm(data: bytes) -> bool:
+    """A NASCA-encrypted file still carries a plaintext magic header even though
+    the body is ciphertext. Catch it before parsing so the user gets a friendly
+    'convert to normal document first' notice instead of a parser crash."""
+    if not data:
+        return False
+    head = data.lstrip()[:64].upper()
+    return head.startswith(b"<## NASCA") or b"NASCA DRM FILE" in head
+
+
 def _handle_upload(body, user=None):
     raw = body.get("__raw_handler__")
     if raw is None:
@@ -3039,6 +3049,11 @@ def _handle_upload(body, user=None):
 
     if not user:
         return ("redirect", "/cardconv/ledger")
+
+    # DRM guard: a still-encrypted NASCA file would otherwise blow up the parser
+    # and surface as a raw red error. Bounce it to a friendly notice instead.
+    if _is_nasca_drm(csv_bytes):
+        return ("drm_blocked", csv_name)
     try:
         # AMEX Master xlsx uploads are adapted to CSV shape, then flow through
         # the same pipeline. Stored converted so Re-run works unchanged.

@@ -393,6 +393,59 @@ if(rcptZone){
 
 # ── Convert page ───────────────────────────────────────────────────────────────
 
+def _render_drm_alert(user: str, filename: str) -> str:
+    """Friendly guidance shown when a still-encrypted NASCA DRM file is uploaded.
+    Reads as an intentional 'one more step' notice, never a crash."""
+    from server import CSS_VER
+    return f'''<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>💳 Convert · Wayfinder</title>
+<link rel="stylesheet" href="/static/style.css?v={CSS_VER}">
+<style>{_CC_TAB_CSS}{_UPLOAD_CSS}</style>
+</head><body>
+<nav>
+  <span class="nav-brand">💳 Cheil AMEX Expense Assistant</span>
+  <span class="nav-user">👤 {_esc(user)} &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
+</nav>
+<div class="container" style="max-width:1100px">
+  {_tab_bar("convert", user)}
+
+  <div class="notepad-card" style="margin-bottom:20px;border:1px solid var(--warning,#f59e0b)">
+    <div class="notepad-body" style="padding:28px 24px;text-align:center">
+      <div style="font-size:2.6rem;margin-bottom:10px">🔒</div>
+      <div style="font-size:1.15rem;font-weight:800;color:var(--text);margin-bottom:8px">
+        This file is still DRM-protected
+      </div>
+      <div style="font-size:.9rem;color:var(--text-muted);margin-bottom:4px">
+        <b style="color:var(--text)">{_esc(filename)}</b> is a NASCA-encrypted document,
+        so it can't be read yet.
+      </div>
+      <div style="font-size:.9rem;color:var(--text-muted);margin-bottom:20px">
+        Convert it to a normal document first, then upload again.
+      </div>
+
+      <div style="text-align:left;max-width:560px;margin:0 auto 22px;background:var(--surface-2);
+                  border:1px solid var(--border);border-radius:var(--radius-md);padding:16px 20px">
+        <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;
+                    color:var(--accent);margin-bottom:10px">How to convert</div>
+        <ol style="margin:0;padding-left:20px;font-size:.86rem;color:var(--text);line-height:1.8">
+          <li>In File Explorer, <b>right-click</b> the file.</li>
+          <li>Open the <b>NASCA</b> menu → choose <b>일반문서로 변환</b> (Convert to normal document).</li>
+          <li>Upload the converted <b>.csv</b> here.</li>
+        </ol>
+        <div style="font-size:.76rem;color:var(--text-muted);margin-top:12px">
+          The conversion runs on your PC through NASCA — this tool never sees the encrypted file.
+        </div>
+      </div>
+
+      <a href="/cardconv/convert" class="btn btn-primary">← Back to Convert</a>
+    </div>
+  </div>
+</div>
+</body></html>'''
+
+
 def _render_convert(user: str) -> str:
     from server import CSS_VER
     uploads = _load_uploads(user)
@@ -475,12 +528,19 @@ def _render_convert(user: str) -> str:
           <button type="submit" class="btn btn-primary">Convert → Review</button>
         </div>
       </form>
+      <div id="drmWarn" style="display:none;margin-top:14px;padding:12px 16px;background:var(--surface-2);border:1px solid var(--warning,#f59e0b);border-radius:var(--radius-md)">
+        <div style="font-size:.86rem;font-weight:700;color:var(--text)">🔒 <span id="drmWarnName"></span> is still DRM-protected</div>
+        <div style="font-size:.8rem;color:var(--text-muted);margin-top:4px">
+          Right-click the file → <b>NASCA</b> menu → <b>일반문서로 변환</b>, then upload the converted .csv.
+        </div>
+      </div>
       <div id="nameSuggest" style="display:none;margin-top:14px;padding:10px 14px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md)">
         <div style="font-size:.76rem;color:var(--text-muted);margin-bottom:8px">👤 Found in CSV — click to add to My Card Names:</div>
         <div id="nameChips" style="display:flex;flex-wrap:wrap;gap:6px"></div>
       </div>
       <p style="font-size:.78rem;color:var(--text-muted);margin-top:14px">
         Conversion matches receipts from the Ledger and opens the <b>Review</b> page before download.
+        <br>🔒 DRM-locked file? Right-click → <b>NASCA</b> → <b>일반문서로 변환</b> first, then upload the .csv.
       </p>
     </div>
   </div>
@@ -554,16 +614,35 @@ function addSuggestedName(btn, name) {{
   }});
 }}
 
-function handleCsvFile(input) {{
-  if (!input.files[0]) return;
-  csvName.textContent = input.files[0].name;
-  csvInfo.style.display = 'flex';
-  csvZone.style.display = 'none';
-  if (/[.]xlsx$/i.test(input.files[0].name)) return;  // binary — no name suggest
-  const reader = new FileReader();
-  reader.onload = e => parseCsvSuggest(e.target.result);
-  reader.readAsText(input.files[0]);
+function showDrmWarning(name) {{
+  csvInfo.style.display = 'none';
+  csvZone.style.display = '';
+  document.getElementById('csvFile').value = '';
+  document.getElementById('drmWarnName').textContent = name;
+  document.getElementById('drmWarn').style.display = 'block';
 }}
+
+// Catch a still-encrypted NASCA DRM file before it ever submits — read the first
+// bytes; NASCA keeps a plaintext magic header even though the body is ciphertext.
+function presentCsvFile(f) {{
+  if (!f) return;
+  document.getElementById('drmWarn').style.display = 'none';
+  f.slice(0, 64).text().then(head => {{
+    if (/^\\s*<##\\s*NASCA/i.test(head) || /NASCA DRM FILE/i.test(head)) {{
+      showDrmWarning(f.name);
+      return;
+    }}
+    csvName.textContent = f.name;
+    csvInfo.style.display = 'flex';
+    csvZone.style.display = 'none';
+    if (/[.]xlsx$/i.test(f.name)) return;  // binary — no name suggest
+    const reader = new FileReader();
+    reader.onload = e => parseCsvSuggest(e.target.result);
+    reader.readAsText(f);
+  }});
+}}
+
+function handleCsvFile(input) {{ presentCsvFile(input.files[0]); }}
 csvZone.addEventListener('dragover', e => {{ e.preventDefault(); csvZone.classList.add('drag-over'); }});
 csvZone.addEventListener('dragleave', () => csvZone.classList.remove('drag-over'));
 csvZone.addEventListener('drop', e => {{
@@ -571,12 +650,7 @@ csvZone.addEventListener('drop', e => {{
   const f = e.dataTransfer.files[0];
   if (f) {{
     document.getElementById('csvFile').files = e.dataTransfer.files;
-    csvName.textContent = f.name;
-    csvInfo.style.display = 'flex';
-    csvZone.style.display = 'none';
-    const reader = new FileReader();
-    reader.onload = e2 => parseCsvSuggest(e2.target.result);
-    reader.readAsText(f);
+    presentCsvFile(f);
   }}
 }});
 </script>

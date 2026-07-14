@@ -153,7 +153,11 @@ def handle(method, path, body, ctx=None):
 
     # CSV upload
     if method == "POST" and path == "/cardconv/upload":
-        return _handle_upload(body, user)
+        res = _handle_upload(body, user)
+        # Still-encrypted NASCA DRM file — show a guided notice, not an error.
+        if isinstance(res, tuple) and res and res[0] == "drm_blocked":
+            return ("html", _render_drm_alert(user, res[1]))
+        return res
 
     # Uploaded CSV reuse (re-run / delete)
     if method == "POST" and path == "/cardconv/upload/rerun":
