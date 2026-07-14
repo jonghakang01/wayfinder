@@ -1850,9 +1850,15 @@ select.sb-act{padding:5px 8px}
   <!-- Non-default filters stay visible as chips even while the popover is closed -->
   <div class="fb-chips" id="fChips" hidden></div>
 
-  <!-- Bulk-action bar, appears only while rows are selected -->
+  <!-- Bulk-action bar, appears only while rows are selected.
+       Status actions sit left like the Review tab; edits + delete follow. -->
   <div class="fb-selbar" id="fSelBar">
     <span class="fb-selcount" id="fSelCount">0 selected</span>
+    <div class="fb-group" role="group" aria-label="Selection actions">
+      <button class="btn btn-secondary btn-sm" id="fMarkProg" disabled title="Submitted to SAP, awaiting approval — synced with Review">⏳ Mark in progress</button>
+      <button class="btn btn-primary btn-sm" id="fMarkDone" disabled title="Completed receipts leave the default list; synced with Review">✔ Mark completed</button>
+      <button class="btn btn-ghost btn-sm" id="fMarkOpen" disabled>↩ Reopen</button>
+    </div>
     <div class="sb-edit-group" role="group" aria-label="Bulk edits">
       <span class="sb-label">Edit selected</span>
       <select class="sb-act" id="fBulkCard" title="Set card type on all selected">
@@ -1868,10 +1874,7 @@ select.sb-act{padding:5px 8px}
       <button class="sb-act" id="fBulkWith" title="Set the w/ companion note on all selected">👥 w/ note</button>
       <button class="sb-act" id="fBulkRematch" title="Re-try CSV matching using only the selected receipts">↻ Re-match</button>
     </div>
-    <div class="fb-group fb-spacer" role="group" aria-label="Selection actions">
-      <button class="btn btn-secondary btn-sm" id="fMarkProg" disabled title="Submitted to SAP, awaiting approval — synced with Review">⏳ Mark in progress</button>
-      <button class="btn btn-primary btn-sm" id="fMarkDone" disabled title="Completed receipts leave the default list; synced with Review">✔ Mark completed</button>
-      <button class="btn btn-ghost btn-sm" id="fMarkOpen" disabled>↩ Reopen</button>
+    <div class="fb-group fb-spacer" role="group" aria-label="Destructive actions">
       <button class="btn btn-sm fb-act-delete" id="fDelete" disabled>🗑 Delete (0)</button>
     </div>
   </div>
