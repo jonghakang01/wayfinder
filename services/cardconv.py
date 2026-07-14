@@ -178,7 +178,7 @@ def handle(method, path, body, ctx=None):
         name = (body.get("name", [""])[0]).strip().upper()
         if name:
             s = _load_user_settings(user)
-            names = s.get("card_member_names") or list(DEFAULT_CARD_NAMES)
+            names = s.get("card_member_names") or []
             if name not in [n.strip().upper() for n in names]:
                 names.append(name)
             s["card_member_names"] = names
@@ -187,7 +187,7 @@ def handle(method, path, body, ctx=None):
     if method == "POST" and path == "/cardconv/cardnames/delete":
         name = (body.get("name", [""])[0]).strip().upper()
         s = _load_user_settings(user)
-        names = s.get("card_member_names") or list(DEFAULT_CARD_NAMES)
+        names = s.get("card_member_names") or []
         s["card_member_names"] = [n for n in names if n.strip().upper() != name]
         _save_user_settings(user, s)
         return ("redirect", "/cardconv/convert")

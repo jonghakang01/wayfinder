@@ -493,6 +493,15 @@ def _render_convert(user: str) -> str:
     # My Card Names section (moved from Keywords page)
     names = _get_card_member_names(user)
     name_chips = ""
+    if not names:
+        name_chips = (
+            '<div id="noNamesBanner" style="width:100%;background:color-mix(in srgb, var(--warning,#f59e0b) 10%, transparent);'
+            'border:1px solid var(--warning,#f59e0b);border-radius:var(--radius-md,8px);'
+            'padding:12px 16px;font-size:.84rem;color:var(--text);line-height:1.6">'
+            '⚠️ <b>No card names registered yet.</b> Add your name exactly as it appears in the '
+            'AMEX CSV\'s <b>Card Member Name</b> column (e.g. ' + _esc(EXAMPLE_CARD_NAME) + ' — example only). '
+            'Statement uploads won\'t convert until at least one name is added.'
+            '</div>')
     for n in names:
         name_chips += (
             '<form method="POST" action="/cardconv/cardnames/delete" '
@@ -524,7 +533,7 @@ def _render_convert(user: str) -> str:
     <div class="notepad-body" style="padding:12px 16px">
       <p style="font-size:.78rem;color:var(--text-muted);margin-bottom:12px">Only transactions whose CSV 'Card Member Name' matches a name below are converted.</p>
       <form method="POST" action="/cardconv/cardnames/add" style="display:flex;gap:8px;margin-bottom:14px">
-        <input name="name" placeholder="e.g. JOHN DOE" required style="flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);color:var(--text);font-size:.82rem">
+        <input name="name" placeholder="e.g. {_esc(EXAMPLE_CARD_NAME)}" required style="flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);color:var(--text);font-size:.82rem">
         <button type="submit" class="btn btn-primary btn-sm">+ Add</button>
       </form>
       <div id="cardNamesWrap" style="display:flex;flex-wrap:wrap;gap:8px">{name_chips}</div>
@@ -625,6 +634,8 @@ function addSuggestedName(btn, name) {{
       // Immediately add to the My Card Names section above
       var wrap = document.getElementById('cardNamesWrap');
       if(wrap) {{
+        var banner = document.getElementById('noNamesBanner');
+        if(banner) banner.remove();
         var chip = document.createElement('form');
         chip.method = 'POST'; chip.action = '/cardconv/cardnames/delete';
         chip.style.cssText = 'display:inline-flex;align-items:center;gap:6px;background:var(--surface-2);border:1px solid var(--border);border-radius:999px;padding:4px 6px 4px 12px;margin:0';

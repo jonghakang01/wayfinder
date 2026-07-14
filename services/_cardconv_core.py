@@ -69,7 +69,6 @@ SCOPES = [
     'https://www.googleapis.com/auth/drive.readonly',
 ]
 ADMIN  = "jongha.kang"
-TARGET_NAMES = {"JONG KANG", "JONGHA KANG"}
 
 META = {
     "name": "Cheil AMEX Expense Assistant",
@@ -438,7 +437,9 @@ def _handle_ocr_staging_confirm(username: str, body: dict):
 
 # ── User settings: card member names ──────────────────────────────────────────
 
-DEFAULT_CARD_NAMES = ["JONG KANG", "JONGHA KANG"]
+# Shown as a placeholder example only — names are per-account with no built-in
+# default, so each user must register their own before converting.
+EXAMPLE_CARD_NAME = "JONGHA KANG"
 
 
 def _user_settings_file(username: str) -> Path:
@@ -461,12 +462,11 @@ def _save_user_settings(username: str, data: dict):
 
 
 def _get_card_member_names(username: str) -> list:
-    """User's card member names (uppercased). Defaults to JONG/JONGHA KANG."""
+    """User's saved card member names (uppercased). Empty until the user adds
+    their own — there is no account-independent default."""
     if not username:
-        return list(DEFAULT_CARD_NAMES)
-    names = _load_user_settings(username).get("card_member_names")
-    if not names:
-        return list(DEFAULT_CARD_NAMES)
+        return []
+    names = _load_user_settings(username).get("card_member_names") or []
     return [n.strip().upper() for n in names if str(n).strip()]
 
 
@@ -3056,6 +3056,11 @@ def _handle_upload(body, user=None):
 
     if not user:
         return ("redirect", "/cardconv/ledger")
+
+    # Without registered card names every row would be filtered out silently;
+    # send the user back to Convert, whose empty-state banner explains the fix.
+    if not _get_card_member_names(user):
+        return ("redirect", "/cardconv/convert")
 
     # DRM guard: a still-encrypted NASCA file would otherwise blow up the parser
     # and surface as a raw red error. Bounce it to a friendly notice instead.
