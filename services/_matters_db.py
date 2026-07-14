@@ -24,7 +24,9 @@ CREATE TABLE IF NOT EXISTS matters (
     user_locked_fields TEXT DEFAULT '[]',       -- JSON list
     archived INTEGER DEFAULT 0,
     created_at TEXT DEFAULT (datetime('now','localtime')),
-    updated_at TEXT DEFAULT (datetime('now','localtime'))
+    updated_at TEXT DEFAULT (datetime('now','localtime')),
+    ball_since TEXT DEFAULT '',                 -- when the ball landed on me (SLA clock)
+    urgency TEXT DEFAULT 'normal'               -- urgent|normal|low
 );
 CREATE TABLE IF NOT EXISTS threads (
     id TEXT PRIMARY KEY,                        -- 'com:...' | 'graph:...' | 'fake:...'
@@ -58,7 +60,72 @@ CREATE TABLE IF NOT EXISTS briefings (
 
 MATTER_FIELDS = ("title", "status", "ball", "people", "waiting", "next_action",
                  "last_contact", "notes", "search_queries", "user_locked_fields",
-                 "archived", "structure")
+                 "archived", "structure", "ball_since", "urgency")
+
+# --- attention model ----------------------------------------------------------
+# The tracker is a "needs my action within 24h" dashboard: the clock runs only
+# while the ball is on my side, and urgency sets the SLA.
+ON_PLATE_BALL = {"나", "공동"}
+CLOSED_STATUS = {"완료", "보류"}
+URGENCY_SLA = {"urgent": 4, "normal": 24, "low": None}  # hours; None = reference only
+
+
+def _now_str():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _parse_dt(s):
+    if not s:
+        return None
+    s = str(s)
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(s[:19], fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def annotate_attention(matters, now=None):
+    """Add an `att` block to each matter: tier (action|waiting|reference),
+    hours on my plate, SLA, and whether it has breached (overdue)."""
+    now = now or datetime.now()
+    for m in matters:
+        urg = m.get("urgency") or "normal"
+        closed = m.get("status") in CLOSED_STATUS
+        on_plate = m.get("ball") in ON_PLATE_BALL and not closed
+        base = _parse_dt(m.get("ball_since")) or _parse_dt(m.get("last_contact"))
+        hours = (now - base).total_seconds() / 3600 if base else None
+        sla = URGENCY_SLA.get(urg, 24)
+        if on_plate and urg != "low":
+            tier = "action"
+            overdue = sla is not None and hours is not None and hours >= sla
+        elif m.get("ball") == "상대" and not closed:
+            tier, overdue = "waiting", False
+        else:
+            tier, overdue = "reference", False
+        m["att"] = {
+            "tier": tier, "urgency": urg, "sla_hours": sla, "overdue": overdue,
+            "hours_on_plate": round(hours, 1) if hours is not None else None,
+        }
+    return matters
+
+
+def _attention_sort_key(m):
+    a = m["att"]
+    h = a["hours_on_plate"] or 0
+    sla = a["sla_hours"] or 24
+    urg_rank = {"urgent": 0, "normal": 1, "low": 2}.get(a["urgency"], 1)
+    # overdue first (most-overdue on top), then urgency, then longest on plate.
+    return (0 if a["overdue"] else 1, -(h - sla) if a["overdue"] else 0, urg_rank, -h)
+
+
+def attention_queue(conn, now=None):
+    """Ordered 'needs you now' list — the reminder feed for the scheduler."""
+    ms = annotate_attention(list_matters(conn), now)
+    action = [m for m in ms if m["att"]["tier"] == "action"]
+    action.sort(key=_attention_sort_key)
+    return action
 
 
 def get_conn():
@@ -68,8 +135,22 @@ def get_conn():
     conn.executescript(SCHEMA)
     # idempotent column adds (schema evolves without a version table)
     cols = {r[1] for r in conn.execute("PRAGMA table_info(matters)")}
-    if "structure" not in cols:
-        conn.execute("ALTER TABLE matters ADD COLUMN structure TEXT DEFAULT ''")
+    adds = {
+        "structure": "TEXT DEFAULT ''",
+        "ball_since": "TEXT DEFAULT ''",
+        "urgency": "TEXT DEFAULT 'normal'",
+    }
+    changed = False
+    for col, decl in adds.items():
+        if col not in cols:
+            conn.execute(f"ALTER TABLE matters ADD COLUMN {col} {decl}")
+            changed = True
+    # Backfill the SLA clock for pre-existing on-plate matters so they don't all
+    # read as instantly overdue: seed ball_since from last_contact.
+    if "ball_since" not in cols:
+        conn.execute("UPDATE matters SET ball_since=last_contact "
+                     "WHERE (ball_since='' OR ball_since IS NULL) AND last_contact!=''")
+    if changed:
         conn.commit()
     return conn
 
@@ -99,6 +180,10 @@ def create_matter(conn, data: dict) -> int:
             values.append(v)
     if "title" not in fields:
         raise ValueError("title required")
+    # Start the SLA clock: a new matter defaults to ball='나' (on my plate).
+    if "ball_since" not in fields and data.get("ball", "나") in ON_PLATE_BALL:
+        fields.append("ball_since")
+        values.append(_now_str())
     sql = f"INSERT INTO matters ({','.join(fields)}) VALUES ({','.join('?' * len(fields))})"
     cur = conn.execute(sql, values)
     conn.commit()
@@ -122,6 +207,11 @@ def update_matter(conn, mid: int, data: dict, lock_edited=True) -> bool:
         # A direct user edit locks the field against future AI suggestions.
         if lock_edited and k not in ("user_locked_fields", "archived"):
             locked.add(k)
+    # Restart the SLA clock whenever the ball newly lands on my side.
+    if "ball" in data and data["ball"] in ON_PLATE_BALL \
+            and data["ball"] != row["ball"] and "ball_since" not in data:
+        sets.append("ball_since=?")
+        values.append(_now_str())
     if not sets:
         return True
     sets.append("user_locked_fields=?")
@@ -181,28 +271,19 @@ def replace_drafts_snapshot(conn, run_id: int, drafts: list):
 
 
 def kpis(conn):
-    ms = list_matters(conn)
-    today = date.today()
-
-    def days_ago(m):
-        try:
-            return (today - date.fromisoformat(m["last_contact"])).days
-        except (ValueError, TypeError):
-            return None
-
-    active = [m for m in ms if m["status"] != "완료"]
-    stale = [m for m in active
-             if (lambda d: d is not None and d >= 5)(days_ago(m))]
+    ms = annotate_attention(list_matters(conn))
+    action = [m for m in ms if m["att"]["tier"] == "action"]
     drafts_n = conn.execute("""
         SELECT COUNT(*) FROM drafts_snapshot WHERE scan_run_id =
         (SELECT COALESCE(MAX(scan_run_id), 0) FROM drafts_snapshot)
     """).fetchone()[0]
     return {
-        "my_action": len([m for m in active if m["ball"] == "나"]),
-        "waiting_reply": len([m for m in active if m["ball"] == "상대"]),
+        # Hero: what actually needs me now, and how much has breached SLA.
+        "needs_now": len(action),
+        "overdue": len([m for m in action if m["att"]["overdue"]]),
         "drafts": drafts_n,
-        "stale": len(stale),
-        "in_progress": len([m for m in ms if m["status"] == "진행중"]),
+        "waiting": len([m for m in ms if m["att"]["tier"] == "waiting"]),
+        "reference": len([m for m in ms if m["att"]["tier"] == "reference"]),
     }
 
 
@@ -291,6 +372,49 @@ def resolve_suggestion(conn, sid: int, accept: bool) -> dict:
     conn.execute("UPDATE suggestions SET status='accepted' WHERE id=?", (sid,))
     conn.commit()
     return result
+
+
+AUTO_FIELDS = {"status", "ball", "waiting", "next_action", "last_contact"}
+
+
+def apply_pending_suggestions(conn) -> dict:
+    """Revisit leftover pending field-suggestions from older scans and apply them
+    under the new auto-apply rule: unlocked fields are written and marked
+    accepted; locked ones are dismissed. new_matter proposals are left pending
+    (creating a matter stays a user decision)."""
+    rows = conn.execute(
+        "SELECT * FROM suggestions WHERE status='pending' AND field!='new_matter' "
+        "ORDER BY scan_run_id, id").fetchall()
+    applied = dismissed = 0
+    for r in rows:
+        m = conn.execute("SELECT * FROM matters WHERE id=?", (r["matter_id"],)).fetchone()
+        locked = set(json.loads(m["user_locked_fields"] or "[]")) if m else set()
+        if not m or r["field"] not in AUTO_FIELDS or r["field"] in locked:
+            conn.execute("UPDATE suggestions SET status='dismissed' WHERE id=?", (r["id"],))
+            dismissed += 1
+            continue
+        update_matter(conn, r["matter_id"], {r["field"]: r["proposed_value"]}, lock_edited=False)
+        conn.execute("UPDATE suggestions SET status='accepted' WHERE id=?", (r["id"],))
+        applied += 1
+    conn.commit()
+    return {"applied": applied, "dismissed": dismissed}
+
+
+def ai_updated_fields(conn) -> dict:
+    """{matter_id: [field, ...]} that the AI auto-applied in the most recent scan —
+    used to badge those fields 🤖 until the user edits them."""
+    run = conn.execute(
+        "SELECT MAX(scan_run_id) FROM suggestions WHERE status='accepted' "
+        "AND field!='new_matter'").fetchone()[0]
+    if not run:
+        return {}
+    rows = conn.execute(
+        "SELECT matter_id, field FROM suggestions WHERE status='accepted' "
+        "AND field!='new_matter' AND scan_run_id=?", (run,)).fetchall()
+    out = {}
+    for r in rows:
+        out.setdefault(r["matter_id"], []).append(r["field"])
+    return out
 
 
 def latest_briefing(conn):

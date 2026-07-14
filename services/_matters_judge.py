@@ -204,14 +204,20 @@ def store_results(conn, run_id: int, out: dict, matters: list) -> dict:
         if field in (m.get("user_locked_fields") or []):
             skipped += 1
             continue
-        if str(m.get(field if field != "next_action" else "next_action", "")) == str(s.get("proposed_value", "")):
+        if str(m.get(field, "")) == str(s.get("proposed_value", "")):
             skipped += 1  # no-op suggestion
             continue
+        proposed = str(s.get("proposed_value", ""))
+        # Auto-apply: the AI derived this from mail evidence, so reflect it directly
+        # instead of gating every field behind a manual 반영. The user stays in
+        # control by editing (a direct edit locks the field, filtered out above);
+        # applied changes are recorded as 'accepted' so the card can flag them 🤖.
+        from services import _matters_db as _db
+        _db.update_matter(conn, m["id"], {field: proposed}, lock_edited=False)
         conn.execute(
-            "INSERT INTO suggestions (matter_id, field, proposed_value, reason, scan_run_id)"
-            " VALUES (?,?,?,?,?)",
-            (m["id"], field, str(s.get("proposed_value", "")),
-             str(s.get("reason", "")), run_id))
+            "INSERT INTO suggestions (matter_id, field, proposed_value, reason,"
+            " scan_run_id, status) VALUES (?,?,?,?,?, 'accepted')",
+            (m["id"], field, proposed, str(s.get("reason", "")), run_id))
         stored += 1
     for nm in out["new_matters"]:
         conn.execute(
@@ -224,6 +230,38 @@ def store_results(conn, run_id: int, out: dict, matters: list) -> dict:
                      (run_id, out["briefing"]))
     conn.commit()
     return {"stored": stored, "skipped": skipped, "briefing": bool(out["briefing"])}
+
+
+def rejudge_matter(conn, run_id: int, matter: dict, threads: list) -> dict:
+    """Deep-recheck for a single matter: judge it against a fuller thread set
+    (e.g. gathered by sweeping all its People) and auto-apply the field changes.
+    Unlike the batch scan this touches only this one matter."""
+    from services import _matters_db as _db
+    user_input = build_input([matter], {matter["id"]: threads}, [], [])
+    try:
+        out, _ = call_claude(user_input)
+    except RuntimeError:
+        out, _ = call_claude(user_input)  # one retry
+    locked = set(matter.get("user_locked_fields") or [])
+    applied = []
+    for s in out.get("suggestions", []):
+        if s.get("matter_title") != matter["title"]:
+            continue
+        field = s.get("field", "")
+        if field not in VALID_FIELDS or field in locked:
+            continue
+        proposed = str(s.get("proposed_value", ""))
+        if str(matter.get(field, "")) == proposed:
+            continue
+        _db.update_matter(conn, matter["id"], {field: proposed}, lock_edited=False)
+        conn.execute(
+            "INSERT INTO suggestions (matter_id, field, proposed_value, reason,"
+            " scan_run_id, status) VALUES (?,?,?,?,?, 'accepted')",
+            (matter["id"], field, proposed, str(s.get("reason", "")), run_id))
+        applied.append({"field": field, "value": proposed, "reason": s.get("reason", "")})
+        matter[field] = proposed  # so a later suggestion for the same field no-ops
+    conn.commit()
+    return {"applied": applied, "briefing": out.get("briefing", "")}
 
 
 def run(conn, run_id: int, matters, threads_by_matter, candidates, drafts) -> dict:

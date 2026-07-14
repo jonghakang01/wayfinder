@@ -22,6 +22,9 @@ LOOKBACK_DAYS = 30
 
 def run_scan(conn, source, since: date, use_judge: bool = True) -> dict:
     run_id = db.start_scan_run(conn, source.name)
+    # Revisit any field-suggestions left pending by older scans — apply them under
+    # the auto-apply rule before this run generates fresh judgement.
+    db.apply_pending_suggestions(conn)
     moved, seen_threads = [], set()
     threads_by_matter: dict[int, list] = {}
     try:

@@ -30,9 +30,50 @@ PAGE_CSS = """
 .sect h2{font-size:.78rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);
   margin-bottom:10px;display:flex;align-items:center;gap:8px}
 .sect h2::before{content:"";width:4px;height:1em;border-radius:99px;flex-shrink:0}
-.sect.s-me h2::before{background:var(--me)} .sect.s-joint h2::before{background:var(--joint)}
-.sect.s-them h2::before{background:var(--them)} .sect.s-done h2::before{background:var(--dim)}
+.sect.s-now h2::before{background:var(--me)}
 .sect h2 .cnt{color:var(--dim);font-weight:600}
+/* ⚡ Needs You Now — the hero band */
+.sect.s-now{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+  padding:14px 16px 18px;margin-bottom:26px}
+.sect.s-now h2{margin-bottom:12px}
+.allclear{color:var(--good);font-size:.9rem;font-weight:700;padding:22px;text-align:center;
+  background:rgba(52,211,153,.06);border-radius:var(--radius)}
+/* Collapsed reference tiers */
+details.sect{margin-bottom:14px}
+details.sect>summary{font-size:.78rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--muted);cursor:pointer;padding:8px 0;list-style:none;display:flex;align-items:center;gap:8px}
+details.sect>summary::-webkit-details-marker{display:none}
+details.sect>summary::before{content:"▸";color:var(--dim);font-size:.9rem}
+details.sect[open]>summary::before{content:"▾"}
+details.sect .grid2{margin-top:10px}
+.sect .cnt{color:var(--dim);font-weight:600}
+/* SLA clock chip */
+.clk{font-size:.68rem;font-weight:700;border-radius:99px;padding:2px 9px;white-space:nowrap;
+  background:var(--surface-3);color:var(--muted)}
+.clk.overdue{background:rgba(248,113,113,.16);color:var(--me)}
+.card.overdue{border-left-color:var(--me);box-shadow:inset 3px 0 0 var(--me)}
+/* 🤖 AI auto-applied marker */
+.ai-mark{font-size:.72rem;opacity:.85;cursor:help}
+select.sm.ai-set{border-color:var(--them);box-shadow:0 0 0 1px rgba(56,189,248,.4)}
+/* 🔎 deep recheck */
+.rc-row{display:flex;align-items:center;gap:8px;margin-top:10px}
+.rc-btn{border:1px solid var(--border-bright);background:var(--surface);color:var(--text);
+  font-size:.74rem;font-weight:700;border-radius:7px;padding:4px 10px;cursor:pointer}
+.rc-btn:hover{border-color:var(--them);color:var(--them)}
+.rc-input{flex:1;min-width:120px;border:1px solid var(--border-bright);border-radius:7px;
+  padding:4px 9px;font-size:.74rem;background:var(--surface);color:var(--text)}
+.rc-input::placeholder{color:var(--dim)}
+.rc-input:focus{outline:none;border-color:var(--them)}
+.recheck:empty{display:none}
+.recheck{margin-top:8px;font-size:.76rem;line-height:1.7}
+.rc-load{color:var(--muted)} .rc-err{color:var(--me)}
+.rc-res{color:var(--text)} .rc-res b{color:var(--them)}
+.rc-sugg{margin-top:4px;color:var(--muted)}
+.rc-chip{border:1px dashed var(--border-bright);background:transparent;color:var(--them);
+  font-size:.72rem;border-radius:99px;padding:2px 9px;cursor:pointer;margin:2px}
+.rc-chip:hover{background:rgba(56,189,248,.12)}
+.rc-more{margin-top:4px;color:var(--dim);font-size:.72rem}
+.rc-more a{color:var(--them);cursor:pointer;text-decoration:underline;margin:0 2px}
 .grid2{display:grid;grid-template-columns:repeat(auto-fill,minmax(460px,1fr));gap:12px}
 @media(max-width:1000px){.grid2{grid-template-columns:1fr}}
 .card{background:var(--surface-2);border:1px solid var(--border);border-left:4px solid var(--border-bright);
@@ -154,12 +195,21 @@ PAGE_BODY = """<div class="mt-wrap">
 <script>
 const BALLS = ['나','공동','상대'];
 const STATUSES = ['진행중','회신대기','보류','완료'];
-const SECTS = [
-  {key:'나',   cls:'s-me',    label:'🔴 공: 나 — 내 액션 필요'},
-  {key:'공동', cls:'s-joint', label:'🟠 공: 공동'},
-  {key:'상대', cls:'s-them',  label:'🔵 공: 상대 — 회신 대기'},
-];
+const URGENCIES = [['urgent','🔴 긴급 (4h)'],['normal','🟡 보통 (24h)'],['low','⚪ 레퍼런스']];
 let DATA = {matters:[]};
+
+// hours on my plate → human chip; overdue reads loud.
+function clockChip(att){
+  if(!att || att.tier !== 'action') return '';
+  const h = att.hours_on_plate;
+  if(h === null || h === undefined) return '';
+  const txt = h < 1 ? '방금' : h < 24 ? Math.round(h)+'h' : Math.floor(h/24)+'d';
+  if(att.overdue){
+    const over = att.sla_hours ? Math.round(h - att.sla_hours) : 0;
+    return `<span class="clk overdue">⚠ ${over}h 초과</span>`;
+  }
+  return `<span class="clk">⏱ ${txt} 경과</span>`;
+}
 
 function esc(s){ return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;'); }
 function daysAgo(iso){
@@ -284,36 +334,39 @@ async function resolveSugg(id, accept){
 
 function renderKpis(k){
   document.getElementById('kpis').innerHTML = [
-    ['red',   k.my_action,     '내 액션 필요'],
-    ['blue',  k.waiting_reply, '상대 회신 대기'],
-    ['amber', k.drafts,        '미발송 초안'],
-    ['red',   k.stale,         '5일+ 무응답'],
-    ['green', k.in_progress,   '진행 중'],
+    ['red',   k.needs_now,  '지금 내 액션'],
+    ['amber', k.overdue,    'SLA 초과'],
+    ['amber', k.drafts,     '미발송 초안'],
+    ['blue',  k.waiting,    '상대 대기'],
+    ['green', k.reference,  '레퍼런스'],
   ].map(([c,n,l]) => `<div class="kpi ${c}"><div class="num">${n}</div><div class="lbl">${l}</div></div>`).join('');
 }
 
 
 function card(m){
+  const att = m.att || {};
   const ago = daysAgo(m.last_contact);
-  const stale = ago !== null && ago >= 5 && m.status !== '완료';
+  const ai = new Set(m.ai_updated || []);
+  const mark = field => ai.has(field) ? ' <span class="ai-mark" title="AI가 지난 스캔에서 갱신함">🤖</span>' : '';
   const f = (label, field, val, opts={}) => `
-    <label>${label}</label>
+    <label>${label}${mark(field)}</label>
     ${opts.area
       ? `<textarea rows="${opts.rows||1}" data-f="${field}" data-id="${m.id}">${esc(val)}</textarea>`
       : `<input type="${opts.type||'text'}" value="${esc(val)}" data-f="${field}" data-id="${m.id}">`}`;
-  return `<div class="card b-${m.ball}${m.status==='완료' ? ' done' : ''}">
+  return `<div class="card b-${m.ball}${m.status==='완료' ? ' done' : ''}${att.overdue ? ' overdue' : ''}">
     <button class="del" title="보관 (archive)" onclick="archive(${m.id})">✕</button>
     <div class="row1">
       <input class="title-input" value="${esc(m.title)}" data-f="title" data-id="${m.id}">
-      <select class="sm" data-f="status" data-id="${m.id}">${STATUSES.map(s=>`<option${s===m.status?' selected':''}>${s}</option>`).join('')}</select>
-      <select class="sm" data-f="ball" data-id="${m.id}">${BALLS.map(b=>`<option${b===m.ball?' selected':''}>${b}</option>`).join('')}</select>
-      ${stale ? `<span class="stale-badge">⏰ ${ago}일 무응답</span>` : ''}
+      ${clockChip(att)}
+      <select class="sm${ai.has('status')?' ai-set':''}" data-f="status" data-id="${m.id}">${STATUSES.map(s=>`<option${s===m.status?' selected':''}>${s}</option>`).join('')}</select>
+      <select class="sm${ai.has('ball')?' ai-set':''}" data-f="ball" data-id="${m.id}">${BALLS.map(b=>`<option${b===m.ball?' selected':''}>${b}</option>`).join('')}</select>
+      <select class="sm" data-f="urgency" data-id="${m.id}" title="긴급도 (SLA)">${URGENCIES.map(([v,l])=>`<option value="${v}"${v===(m.urgency||'normal')?' selected':''}>${l}</option>`).join('')}</select>
     </div>
     <div class="fgrid">
       ${f('People','people',m.people)}
       ${f('Waiting','waiting',m.waiting)}
-      <label>Next</label><span class="next-action"><input type="text" value="${esc(m.next_action)}" data-f="next_action" data-id="${m.id}"></span>
-      <label>Last</label>
+      <label>Next${mark('next_action')}</label><span class="next-action"><input type="text" value="${esc(m.next_action)}" data-f="next_action" data-id="${m.id}"></span>
+      <label>Last${mark('last_contact')}</label>
       <span class="lastrow">
         <input type="date" value="${esc(m.last_contact)}" data-f="last_contact" data-id="${m.id}" style="width:150px">
         <button class="touch-btn" onclick="touch(${m.id})">↻ 오늘</button>
@@ -321,10 +374,50 @@ function card(m){
       </span>
       ${f('Notes','notes',m.notes,{area:true,rows:2})}
     </div>
-    ${suggList(m.suggestions)}
+    <div class="rc-row">
+      <button class="rc-btn" onclick="recheckMatter(${m.id},3)" title="아래 칸에 사람/키워드를 넣으면 그 기준으로, 비우면 People 전원+제목으로 최근 메일(내 발신 포함)을 다시 훑어 재판단합니다">🔎 재점검</button>
+      <input class="rc-input" id="rcq-${m.id}" placeholder="사람·키워드 (예: Ram, SOW) — 비우면 People 전원"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();recheckMatter(${m.id},3);}">
+    </div>
+    <div class="recheck" id="rc-${m.id}"></div>
     ${structTree(m)}
     ${threadList(m.threads)}
   </div>`;
+}
+
+async function recheckMatter(id, days){
+  const box = document.getElementById('rc-'+id);
+  const inp = document.getElementById('rcq-'+id);
+  const terms = inp ? inp.value.trim() : '';
+  const scope = terms ? `"${esc(terms)}"` : 'People 전원';
+  if(box) box.innerHTML = `<span class="rc-load">🔎 재점검 중… (최근 ${days}일 · ${scope})</span>`;
+  let r;
+  try {
+    r = await (await fetch('/matters/api/matters/'+id+'/recheck',{method:'POST',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify({days, terms})})).json();
+  } catch(e){ if(box) box.innerHTML = '<span class="rc-err">⚠ 요청 실패</span>'; return; }
+  if(!box) return;
+  if(r.error){ box.innerHTML = `<span class="rc-err">⚠ ${esc(r.error)}</span>`; return; }
+  let html = `<div class="rc-res">✓ 새 스레드 ${r.found}개 · ${r.threads_total}개 검토${r.scoped ? ' · 지정 기준' : ''}`;
+  html += (r.applied && r.applied.length)
+    ? ' · 갱신: ' + r.applied.map(a=>`<b>${esc(a.field)}→${esc(a.value)}</b>`).join(', ')
+    : ' · 변경 없음';
+  html += '</div>';
+  if(r.suggested_queries && r.suggested_queries.length)
+    html += '<div class="rc-sugg">🔑 검색어 제안: ' + r.suggested_queries.map(q=>
+      `<button class="rc-chip" onclick="addQuery(${id},this.dataset.q,this)" data-q="${esc(q)}">＋ ${esc(q)}</button>`).join(' ') + '</div>';
+  html += `<div class="rc-more">더 넓게: <a onclick="recheckMatter(${id},7)">7일</a> · <a onclick="recheckMatter(${id},30)">30일</a>`
+        + (r.applied && r.applied.length ? ` · <a onclick="load()">🔄 반영 보기</a>` : '') + '</div>';
+  box.innerHTML = html;
+}
+
+async function addQuery(id, q, btn){
+  const m = DATA.matters.find(x=>x.id===id); if(!m) return;
+  const qs = (m.search_queries||[]).concat([q]);
+  await fetch('/matters/api/matters/'+id,{method:'POST',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify({search_queries: qs})});
+  m.search_queries = qs;
+  btn.disabled = true; btn.style.opacity = .4; btn.textContent = '✓ '+q;
 }
 
 function structTree(m){
@@ -363,18 +456,9 @@ function structTree(m){
   return `<div class="struct">${inner}</div>`;
 }
 
-function suggList(suggs){
-  if(!suggs || !suggs.length) return '';
-  const rows = suggs.map(s => `
-    <div class="sugg">
-      <span class="tag">🤖 ${esc(s.field)}</span>
-      <span class="val">${esc(s.proposed_value)}</span>
-      <span class="why">${esc(s.reason || '')}</span>
-      <button class="ok" onclick="resolveSugg(${s.id}, true)">✓ 반영</button>
-      <button onclick="resolveSugg(${s.id}, false)">✕ 무시</button>
-    </div>`).join('');
-  return `<div class="suggs">${rows}</div>`;
-}
+// Per-matter field suggestions are auto-applied now (no manual 반영 gate); the
+// card badges AI-touched fields with 🤖 instead. new_matter proposals still get
+// an explicit accept/dismiss in the add panel (renderAddPanel).
 
 function threadList(threads){
   if(!threads || !threads.length) return '';
@@ -393,20 +477,42 @@ function threadList(threads){
   return `<div class="threads">${rows}${more}</div>`;
 }
 
+function tierOf(m){ return (m.att || {}).tier || 'reference'; }
+
 function renderSections(ms){
   const root = document.getElementById('sections');
+  const action = ms.filter(m => tierOf(m) === 'action').sort(attSort);
+  const waiting = ms.filter(m => tierOf(m) === 'waiting');
+  const reference = ms.filter(m => tierOf(m) === 'reference');
   let html = '';
-  for(const s of SECTS){
-    const list = ms.filter(m => m.ball === s.key && m.status !== '완료');
-    if(list.length)
-      html += `<div class="sect ${s.cls}"><h2>${s.label} <span class="cnt">${list.length}</span></h2>
-        <div class="grid2">${list.map(card).join('')}</div></div>`;
-  }
-  const done = ms.filter(m => m.status === '완료');
-  if(done.length)
-    html += `<div class="sect s-done"><h2>✅ 완료 <span class="cnt">${done.length}</span></h2>
-      <div class="grid2">${done.map(card).join('')}</div></div>`;
-  root.innerHTML = html || '<div style="color:var(--muted);padding:30px;text-align:center">사안이 없습니다 — 아래에서 추가하세요.</div>';
+
+  // ⚡ Needs You Now — the whole point of the dashboard.
+  html += `<div class="sect s-now"><h2>⚡ 지금 내 액션 <span class="cnt">${action.length}</span></h2>`;
+  html += action.length
+    ? `<div class="grid2">${action.map(card).join('')}</div>`
+    : `<div class="allclear">✓ 막힌 것 없음 — 지금 당장 할 액션이 없습니다.</div>`;
+  html += `</div>`;
+
+  // ⏳ Waiting on others — reference; collapsed.
+  if(waiting.length)
+    html += `<details class="sect s-wait"><summary>⏳ 상대 대기 <span class="cnt">${waiting.length}</span></summary>
+      <div class="grid2">${waiting.map(card).join('')}</div></details>`;
+
+  // 📁 Reference — 보류·완료·레퍼런스; collapsed.
+  if(reference.length)
+    html += `<details class="sect s-ref"><summary>📁 레퍼런스 <span class="cnt">${reference.length}</span></summary>
+      <div class="grid2">${reference.map(card).join('')}</div></details>`;
+
+  root.innerHTML = html;
+}
+
+// overdue first (most-breached on top), then urgency, then longest on plate.
+function attSort(a, b){
+  const A = a.att || {}, B = b.att || {};
+  if(!!A.overdue !== !!B.overdue) return A.overdue ? -1 : 1;
+  const rank = u => ({urgent:0, normal:1, low:2}[u] ?? 1);
+  if(rank(A.urgency) !== rank(B.urgency)) return rank(A.urgency) - rank(B.urgency);
+  return (B.hours_on_plate || 0) - (A.hours_on_plate || 0);
 }
 
 // Debounced autosave per field; select/date save immediately and re-render.
