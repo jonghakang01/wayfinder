@@ -93,3 +93,22 @@ def test_scan_conversation_refresh(tmp_path, monkeypatch):
     scan.run_scan(conn, src, SINCE, use_judge=False)
     refreshed = next(t for t in db.threads_for_matter(conn, m["id"]) if t["id"] == tid)
     assert refreshed["last_message_at"] == "2099-01-01T09:00:00"
+
+
+def test_oversight_new_matter_lands_in_monitoring_tier(tmp_path, monkeypatch):
+    """A CC/oversight proposal (ball=상대, urgency=low) must not start an
+    action-queue SLA clock when accepted."""
+    conn = _conn(tmp_path, monkeypatch)
+    import json as _json
+    conn.execute("INSERT INTO suggestions (matter_id, field, proposed_value, reason)"
+                 " VALUES (NULL, 'new_matter', ?, 'oversight')",
+                 (_json.dumps({"title": "감시 사안", "people": "A, B",
+                               "ball": "상대", "urgency": "low"}),))
+    conn.commit()
+    sid = [s for s in db.pending_suggestions(conn) if s["field"] == "new_matter"][0]["id"]
+    res = db.resolve_suggestion(conn, sid, accept=True)
+    m = next(x for x in db.list_matters(conn) if x["id"] == res["matter_id"])
+    db.annotate_attention([m])
+    assert m["ball"] == "상대" and m["urgency"] == "low"
+    assert not m["ball_since"]
+    assert m["att"]["tier"] != "action"

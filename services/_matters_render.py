@@ -264,7 +264,8 @@ function renderAddPanel(){
   if(suggs.length){
     html += '<ul>' + suggs.map(s => {
       let d = {}; try { d = JSON.parse(s.proposed_value); } catch(e){}
-      return `<li><b>${esc(d.title || '?')}</b><span class="why">${esc(s.reason || '')}</span>
+      const watch = (d.urgency === 'low') ? ' <span class="why">📡 모니터링</span>' : '';
+      return `<li><b>${esc(d.title || '?')}</b>${watch}<span class="why">${esc(s.reason || '')}</span>
         <button class="touch-btn" onclick="resolveSugg(${s.id}, true)">＋ 사안으로 추가</button>
         <button class="touch-btn" onclick="resolveSugg(${s.id}, false)">무시</button></li>`;
     }).join('') + '</ul>';

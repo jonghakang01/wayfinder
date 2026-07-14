@@ -43,6 +43,10 @@ message was sent by Jongha, the ball likely moved to 상대 (회신대기) — b
 - new_matters: AT MOST 5, only clearly substantive work items worth tracking (contracts, \
 onboarding, SOW, vendor/client requests). NEVER newsletters, digests, system notifications, \
 benefits mail, event invites, weekly reports.
+- Jongha also OVERSEES ongoing work: threads where he is only CC'd, or a recipient but not \
+the one being asked to act, are NOT noise. When substantive, propose them as new_matters \
+with ball=상대 and urgency=low (monitoring — kept out of the action queue) unless the \
+content clearly asks Jongha himself to act.
 - Keep every reason under 15 Korean words. Suggest at most 10 field changes total.
 - briefing: 2–4 Korean sentences summarizing what moved and what needs Jongha's attention \
 first. 존댓말.
@@ -51,6 +55,7 @@ Respond with ONLY a JSON object, no prose, matching:
 {"suggestions": [{"matter_title": str, "field": "status|ball|waiting|next_action|last_contact",
                   "proposed_value": str, "reason": str (short Korean)}],
  "new_matters": [{"title": str (Korean, concise), "people": str, "next_action": str,
+                  "ball": "나|공동|상대", "urgency": "urgent|normal|low",
                   "search_queries": [str], "reason": str, "source_subject": str}],
  "briefing": str}"""
 
@@ -122,9 +127,10 @@ def call_claude(user_input: str) -> tuple[dict, dict]:
 GEMINI_MODEL = os.environ.get("JUDGE_GEMINI_MODEL", "gemini-2.5-flash")
 REVIEW_PROMPT = """Below is a draft judgement produced by another model for the same evidence. \
 Review it critically: remove suggestions the evidence does not clearly support, fix wrong \
-values, drop new_matters that are noise (newsletters, digests, notifications). Keep the \
-briefing but improve it if inaccurate. Respond with ONLY the corrected JSON in the exact \
-same schema.
+values, drop new_matters that are noise (newsletters, digests, notifications). Substantive \
+threads where Jongha is only CC'd are NOT noise — he oversees ongoing work; keep them as \
+low-urgency monitoring items. Keep the briefing but improve it if inaccurate. Respond with \
+ONLY the corrected JSON in the exact same schema.
 
 # Draft judgement
 """

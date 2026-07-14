@@ -351,12 +351,20 @@ def resolve_suggestion(conn, sid: int, accept: bool) -> dict:
 
     if row["field"] == "new_matter":
         data = json.loads(row["proposed_value"])
-        mid = create_matter(conn, {
+        fields = {
             "title": data.get("title", "(제목 없음)"),
             "people": data.get("people", ""),
             "next_action": data.get("next_action", ""),
             "search_queries": data.get("search_queries", []),
-        })
+        }
+        # Oversight proposals (Jongha only CC'd / not the one asked to act)
+        # arrive as ball=상대 + urgency=low so they land in the monitoring
+        # tiers instead of starting an action-queue SLA clock.
+        if data.get("ball") in ("나", "공동", "상대"):
+            fields["ball"] = data["ball"]
+        if data.get("urgency") in ("urgent", "normal", "low"):
+            fields["urgency"] = data["urgency"]
+        mid = create_matter(conn, fields)
         result = {"ok": True, "status": "accepted", "matter_id": mid}
     else:
         m = conn.execute("SELECT * FROM matters WHERE id=?", (row["matter_id"],)).fetchone()
