@@ -128,6 +128,15 @@ def _handle_recheck(db, judge, get_source, conn, mid: int, days: int,
     matter["user_locked_fields"] = json.loads(matter["user_locked_fields"] or "[]")
 
     queries = _recheck_queries(matter, _parse_terms(terms))
+    # Side-thread net: normalized subjects of already-attached threads catch
+    # forks (FW/RE spawning a new conversation) that conv:/from: can't see.
+    from services._matters_scan import _norm_subject
+    seen_q = {q.lower() for q in queries}
+    for t in db.threads_for_matter(conn, mid):
+        subj = _norm_subject(t["subject"])
+        if len(subj.split()) >= 3 and subj.lower() not in seen_q:
+            seen_q.add(subj.lower())
+            queries.append(subj)
     src = get_source()
     since = date.today() - timedelta(days=max(1, days))
     if hasattr(src, "prefetch"):

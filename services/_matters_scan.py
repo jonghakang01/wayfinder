@@ -36,15 +36,35 @@ def _scan_queries(matter: dict) -> list:
     return qs
 
 
+_SUBJ_PREFIX = re.compile(
+    r"^\s*(?:(?:re|fw|fwd|회신|전달)\s*:|\[external\s*email\]|\[외부\s*메일\])\s*", re.I)
+
+
+def _norm_subject(s: str) -> str:
+    """Strip RE:/FW:/[EXTERNAL EMAIL] shells (repeatedly) to the core subject."""
+    s, prev = (s or "").strip(), None
+    while s != prev:
+        prev = s
+        s = _SUBJ_PREFIX.sub("", s).strip()
+    return s
+
+
 def _matter_queries(conn, source, matter: dict) -> list:
-    """_scan_queries plus a conv: refresh for every already-attached thread, so
-    new messages in a known conversation — my own outbound replies included —
-    are reflected even when the subject/sender queries would miss them."""
+    """_scan_queries plus, per already-attached thread: a conv: refresh (new
+    messages in the same conversation) and a normalized-subject query (forks —
+    a FW/RE that spawned a NEW conversation keeps the subject words, so this is
+    what surfaces side threads like my forward to a new person)."""
     qs = _scan_queries(matter)
+    seen = {q.lower() for q in qs}
     ns = source.name + ":"
     for t in db.threads_for_matter(conn, matter["id"]):
         if t["id"].startswith(ns):
             qs.append(f"conv:{t['id'][len(ns):]}")
+        subj = _norm_subject(t["subject"])
+        # ≥3 words keeps the word-AND match specific enough to be safe
+        if len(subj.split()) >= 3 and subj.lower() not in seen:
+            seen.add(subj.lower())
+            qs.append(subj)
     return qs
 
 

@@ -113,7 +113,13 @@ select.sm{border:1px solid var(--border-bright);border-radius:6px;padding:3px 6p
 .thread a:hover{text-decoration:underline}
 .thread .who{color:var(--muted);white-space:nowrap;font-size:.7rem}
 .thread.inbound .who{color:var(--them)}
+.thread.side{margin-left:20px;opacity:.88}
 .thread-more{color:var(--dim);font-size:.72rem}
+/* latest communication line */
+.latest-comm{margin-top:8px;padding:7px 10px;background:var(--surface);border:1px solid var(--border);
+  border-radius:8px;font-size:.76rem;color:var(--muted);overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap}
+.latest-comm b{color:var(--text)}
 /* top bar */
 .topbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:4px}
 .scan-btn{border:1px solid var(--accent);background:var(--accent-glow);color:var(--accent);border-radius:8px;
@@ -375,6 +381,7 @@ function card(m){
       </span>
       ${f('Notes','notes',m.notes,{area:true,rows:2})}
     </div>
+    ${latestComm(m.threads)}
     <div class="rc-row">
       <button class="rc-btn" onclick="recheckMatter(${m.id},3)" title="아래 칸에 사람/키워드를 넣으면 그 기준으로, 비우면 People 전원+제목으로 최근 메일(내 발신 포함)을 다시 훑어 재판단합니다">🔎 재점검</button>
       <input class="rc-input" id="rcq-${m.id}" placeholder="사람·키워드 (예: Ram, SOW) — 비우면 People 전원"
@@ -461,21 +468,64 @@ function structTree(m){
 // card badges AI-touched fields with 🤖 instead. new_matter proposals still get
 // an explicit accept/dismiss in the add panel (renderAddPanel).
 
+const ME_EMAIL = 'jongha.kang@cheil.com';
+
+function threadWho(t){
+  return (t.last_sender || '').toLowerCase() !== ME_EMAIL
+    ? (t.last_sender || '').split('@')[0] : '나';
+}
+
+// Mirror of the server-side _norm_subject: peel RE:/FW:/[EXTERNAL EMAIL] shells.
+function normSubj(s){
+  s = (s || '').trim(); let prev = null;
+  const re = /^\s*((re|fw|fwd|회신|전달)\s*:|\[external\s*email\]|\[외부\s*메일\])\s*/i;
+  while (s !== prev){ prev = s; s = s.replace(re, '').trim(); }
+  return s;
+}
+
+// Latest communication across every attached thread: who · when — what.
+function latestComm(threads){
+  if(!threads || !threads.length) return '';
+  const t = threads.slice().sort((a,b)=>(b.last_message_at||'').localeCompare(a.last_message_at||''))[0];
+  const when = (t.last_message_at || '').slice(5, 16).replace('T', ' ');
+  const snip = (t.snippet || '').slice(0, 140);
+  return `<div class="latest-comm" title="${esc(t.subject)}">📨 <b>${esc(threadWho(t))}</b> · ${when} — ${esc(snip)}</div>`;
+}
+
+// Threads grouped into conversation families: the direct thread as parent and
+// forks that spawned separate conversations (my FW to a new person, split
+// RE: chains) indented under it as ↳ side threads.
 function threadList(threads){
   if(!threads || !threads.length) return '';
-  const me = 'jongha.kang@cheil.com';
-  const show = threads.slice(0, 4);
-  const rows = show.map(t => {
-    const inbound = (t.last_sender || '').toLowerCase() !== me;
-    const who = inbound ? (t.last_sender || '').split('@')[0] : '나';
+  const fams = {};
+  threads.forEach(t => {
+    const k = normSubj(t.subject).toLowerCase() || t.id;
+    (fams[k] = fams[k] || []).push(t);
+  });
+  const famList = Object.values(fams).map(list => {
+    list.sort((a,b) => a.subject.length - b.subject.length);  // fewest shells = the direct thread
+    const [main, ...side] = list;
+    side.sort((a,b)=>(b.last_message_at||'').localeCompare(a.last_message_at||''));
+    const latest = list.reduce((mx,t)=> (t.last_message_at||'') > mx ? t.last_message_at : mx, '');
+    return {main, side, latest};
+  }).sort((a,b)=> b.latest.localeCompare(a.latest));
+
+  const row = (t, child) => {
+    const inbound = (t.last_sender || '').toLowerCase() !== ME_EMAIL;
     const when = (t.last_message_at || '').slice(5, 10);
     const link = t.outlook_link
       ? `<a href="${esc(t.outlook_link)}" target="_blank" title="${esc(t.subject)}">${esc(t.subject)}</a>`
       : `<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.subject)}</span>`;
-    return `<div class="thread ${inbound ? 'inbound' : ''}">📧 ${link}<span class="who">${esc(who)} · ${when}</span></div>`;
-  }).join('');
-  const more = threads.length > 4 ? `<div class="thread-more">+${threads.length - 4} more</div>` : '';
-  return `<div class="threads">${rows}${more}</div>`;
+    return `<div class="thread ${inbound ? 'inbound' : ''}${child ? ' side' : ''}">${child ? '↳' : '📧'} ${link}<span class="who">${esc(threadWho(t))} · ${when}</span></div>`;
+  };
+  const rows = [];
+  famList.forEach(fam => {
+    rows.push(row(fam.main, false));
+    fam.side.forEach(t => rows.push(row(t, true)));
+  });
+  const shown = rows.slice(0, 6).join('');
+  const more = rows.length > 6 ? `<div class="thread-more">+${rows.length - 6} more</div>` : '';
+  return `<div class="threads">${shown}${more}</div>`;
 }
 
 function tierOf(m){ return (m.att || {}).tier || 'reference'; }

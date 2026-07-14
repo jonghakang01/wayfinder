@@ -112,3 +112,18 @@ def test_oversight_new_matter_lands_in_monitoring_tier(tmp_path, monkeypatch):
     assert m["ball"] == "상대" and m["urgency"] == "low"
     assert not m["ball_since"]
     assert m["att"]["tier"] != "action"
+
+
+def test_matter_queries_include_thread_subject_for_forks(tmp_path, monkeypatch):
+    """A FW/RE that spawned a NEW conversation keeps the subject words, so the
+    scan derives a normalized-subject query from each attached thread."""
+    conn = _conn(tmp_path, monkeypatch)
+    src = get_source("fake")
+    m = db.list_matters(conn)[0]
+    db.upsert_thread(conn, {
+        "id": "fake:t-fork", "subject": "[EXTERNAL EMAIL] RE: Cheil-AIE Contract Reconfirm",
+        "last_message_at": "2026-07-14T09:00:00", "last_sender": "x@y.com",
+        "snippet": "", "outlook_link": ""}, matter_id=m["id"])
+    qs = scan._matter_queries(conn, src, m)
+    assert "Cheil-AIE Contract Reconfirm" in qs
+    assert scan._norm_subject("FW: RE: [External Email] 전달: Hello World") == "Hello World"

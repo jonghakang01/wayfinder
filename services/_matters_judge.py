@@ -38,8 +38,9 @@ Rules:
 - Suggest a field change ONLY when the mail evidence clearly supports it. If the last \
 message was sent by Jongha, the ball likely moved to 상대 (회신대기) — but judge from content.
 - status is one of: 진행중, 회신대기, 보류, 완료. ball is one of: 나, 공동, 상대.
-- Field values you propose: status/ball as above; waiting/next_action concise Korean \
-(person + what, like the existing values); last_contact as YYYY-MM-DD.
+- Field values you propose: status/ball as above; last_contact as YYYY-MM-DD.
+- waiting and next_action MUST name the actor and the action: "<사람>의 <무엇> 대기" / \
+"<사람>에게 <무엇>" style. Never a bare action with no person.
 - new_matters: AT MOST 5, only clearly substantive work items worth tracking (contracts, \
 onboarding, SOW, vendor/client requests). NEVER newsletters, digests, system notifications, \
 benefits mail, event invites, weekly reports.

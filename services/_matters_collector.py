@@ -166,8 +166,15 @@ class Collector:
         else:
             hits = [r for r in pool if subject_matches(query, r["subject"])]
 
+        # A hit marks the conversation as relevant; the returned thread carries
+        # EVERY pool message of that conversation, not just the hit records —
+        # otherwise a narrow query (e.g. from:addr) yields a partial thread
+        # that can mask my own later reply from a broader query's full view.
+        hit_convs = {r["conv"] for r in hits}
         threads: dict[str, dict] = {}
-        for r in hits:
+        for r in pool:
+            if r["conv"] not in hit_convs:
+                continue
             t = threads.setdefault(r["conv"], {
                 "id": r["conv"], "subject": r["topic"],
                 "outlook_link": f"outlook:{r['entryid']}", "messages": []})
