@@ -172,12 +172,17 @@ class Collector:
         # that can mask my own later reply from a broader query's full view.
         hit_convs = {r["conv"] for r in hits}
         threads: dict[str, dict] = {}
+        latest: dict[str, str] = {}
         for r in pool:
             if r["conv"] not in hit_convs:
                 continue
             t = threads.setdefault(r["conv"], {
                 "id": r["conv"], "subject": r["topic"],
                 "outlook_link": f"outlook:{r['entryid']}", "messages": []})
+            # The link opens the newest mail of the conversation (click-to-open).
+            if r["when"] > latest.get(r["conv"], ""):
+                latest[r["conv"]] = r["when"]
+                t["outlook_link"] = f"outlook:{r['entryid']}"
             t["messages"].append({
                 "sender": r["sender_email"] or r["sender_name"],
                 "sent_at": r["when"], "body": r["body"]})

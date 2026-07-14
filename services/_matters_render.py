@@ -115,11 +115,21 @@ select.sm{border:1px solid var(--border-bright);border-radius:6px;padding:3px 6p
 .thread.inbound .who{color:var(--them)}
 .thread.side{margin-left:20px;opacity:.88}
 .thread-more{color:var(--dim);font-size:.72rem}
-/* latest communication line */
-.latest-comm{margin-top:8px;padding:7px 10px;background:var(--surface);border:1px solid var(--border);
-  border-radius:8px;font-size:.76rem;color:var(--muted);overflow:hidden;text-overflow:ellipsis;
+/* latest communication line — leads the card, click opens the mail */
+.latest-comm{margin:8px 0 2px;padding:8px 11px;background:var(--surface);border:1px solid var(--border);
+  border-radius:8px;font-size:.78rem;color:var(--muted);overflow:hidden;text-overflow:ellipsis;
   white-space:nowrap}
+.latest-comm:hover{border-color:var(--accent)}
 .latest-comm b{color:var(--text)}
+/* people role chips */
+.people-cell{display:flex;flex-direction:column;gap:5px}
+.pchips{display:flex;flex-wrap:wrap;gap:5px}
+.pchip{display:inline-flex;align-items:baseline;gap:5px;background:var(--surface);border:1px solid var(--border);
+  border-radius:999px;padding:2px 9px;font-size:.73rem;color:var(--text)}
+.pchip i{font-style:normal;color:var(--muted);font-size:.67rem}
+.pchip em{font-style:normal;color:#f5b642;font-size:.65rem;font-weight:700}
+.pchip.pic{border-color:rgba(245,182,66,.5)}
+.people-cell input{font-size:.72rem;color:var(--muted)}
 /* top bar */
 .topbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:4px}
 .scan-btn{border:1px solid var(--accent);background:var(--accent-glow);color:var(--accent);border-radius:8px;
@@ -367,10 +377,12 @@ function card(m){
       <select class="sm${ai.has('ball')?' ai-set':''}" data-f="ball" data-id="${m.id}">${BALLS.map(b=>`<option${b===m.ball?' selected':''}>${b}</option>`).join('')}</select>
       <select class="sm" data-f="urgency" data-id="${m.id}" title="긴급도 (SLA)">${URGENCIES.map(([v,l])=>`<option value="${v}"${v===(m.urgency||'normal')?' selected':''}>${l}</option>`).join('')}</select>
     </div>
+    ${latestComm(m.threads)}
     <div class="fgrid">
-      ${f('People','people',m.people)}
       ${f('Waiting','waiting',m.waiting)}
       <label>Next${mark('next_action')}</label><span class="next-action"><input type="text" value="${esc(m.next_action)}" data-f="next_action" data-id="${m.id}"></span>
+      <label>People${mark('people')}</label>
+      <span class="people-cell">${peopleChips(m)}<input type="text" value="${esc(m.people)}" data-f="people" data-id="${m.id}"></span>
       <label>Last${mark('last_contact')}</label>
       <span class="lastrow">
         <input type="date" value="${esc(m.last_contact)}" data-f="last_contact" data-id="${m.id}" style="width:150px">
@@ -379,7 +391,6 @@ function card(m){
       </span>
       ${f('Notes','notes',m.notes,{area:true,rows:2})}
     </div>
-    ${latestComm(m.threads)}
     <div class="rc-row">
       <button class="rc-btn" onclick="recheckMatter(${m.id},3)" title="아래 칸에 사람/키워드를 넣으면 그 기준으로, 비우면 People 전원+제목으로 최근 메일(내 발신 포함)을 다시 훑어 재판단합니다">🔎 재점검</button>
       <input class="rc-input" id="rcq-${m.id}" placeholder="사람·키워드 (예: Ram, SOW) — 비우면 People 전원"
@@ -490,12 +501,40 @@ function normSubj(s){
 }
 
 // Latest communication across every attached thread: who · when — what.
+// Clicking opens that mail in desktop Outlook (link carries the newest
+// message's EntryID since the collector tracks it per conversation).
 function latestComm(threads){
   if(!threads || !threads.length) return '';
   const t = threads.slice().sort((a,b)=>(b.last_message_at||'').localeCompare(a.last_message_at||''))[0];
   const when = (t.last_message_at || '').slice(5, 16).replace('T', ' ');
   const snip = (t.snippet || '').slice(0, 140);
-  return `<div class="latest-comm" title="${esc(t.subject)}">📨 <b>${esc(threadWho(t))}</b> · ${when} — ${esc(snip)}</div>`;
+  const eid = (t.outlook_link || '').startsWith('outlook:') ? t.outlook_link.slice(8) : '';
+  const open = eid ? ` onclick="openMail('${eid}')" style="cursor:pointer"` : '';
+  return `<div class="latest-comm"${open} title="${esc(t.subject)}${eid ? ' — 클릭하면 Outlook에서 열립니다' : ''}">📨 <b>${esc(threadWho(t))}</b> · ${when} — ${esc(snip)}</div>`;
+}
+
+// People as per-person role chips: roles come from the bridge map (structure
+// sides — PIC vs member per org); people-field entries outside the map fall
+// back to their (소속) annotation. The raw input below stays editable.
+function peopleChips(m){
+  let s = {};
+  try { s = JSON.parse(m.structure || '{}'); } catch(e){}
+  const chips = [], seen = [];
+  (s.sides || []).forEach(side => {
+    if(side.pic){ chips.push({name: side.pic, role: side.label || '', pic: true}); seen.push(side.pic.toLowerCase()); }
+    (side.members || []).forEach(mb => { chips.push({name: mb, role: side.label || '', pic: false}); seen.push(mb.toLowerCase()); });
+  });
+  (m.people || '').split(',').map(p => p.trim()).filter(Boolean).forEach(p => {
+    const mm = p.match(/^(.*?)\((.*?)\)\s*$/);
+    const nm = (mm ? mm[1] : p).trim();
+    const lo = nm.toLowerCase();
+    if(seen.some(sn => lo.includes(sn) || sn.includes(lo))) return;
+    chips.push({name: nm, role: mm ? mm[2] : '', pic: false});
+  });
+  if(!chips.length) return '';
+  return `<div class="pchips">` + chips.map(c =>
+    `<span class="pchip${c.pic ? ' pic' : ''}">${esc(c.name)}${c.pic ? ' <em>★PIC</em>' : ''}${c.role ? `<i>${esc(c.role)}</i>` : ''}</span>`
+  ).join('') + '</div>';
 }
 
 // Threads grouped into conversation families: the direct thread as parent and
