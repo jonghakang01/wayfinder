@@ -31,11 +31,13 @@ def snippet(body: str) -> str:
 
 
 def to_iso(dt) -> str:
+    # Outlook COM datetimes carry the local wall-clock value mislabeled as
+    # GMT (pywintypes TimeZoneInfo('GMT Standard Time')), so astimezone()
+    # would shift them by the real UTC offset (-7h observed). Keep the wall
+    # clock and just drop the bogus tzinfo.
     if dt is None:
         return ""
     try:
-        if getattr(dt, "tzinfo", None) is not None:
-            dt = dt.astimezone().replace(tzinfo=None)
         return datetime(dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second).isoformat()
     except (ValueError, OSError, OverflowError):
         return ""
