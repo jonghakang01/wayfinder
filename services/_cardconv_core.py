@@ -1245,7 +1245,8 @@ _OCR_PROMPT = (
     'return it as handwritten_amount, and keep printed_amount as the pre-tip '
     'base Amount. '
     'For each receipt extract: '
-    '1) date (YYYY-MM-DD), '
+    '1) date (YYYY-MM-DD; if the receipt only shows a relative date such as "today", '
+    'return the literal string "today" — do not guess an absolute date), '
     '2) merchant name, '
     '3) printed_amount: the PRINTED/typed total (number only), '
     '4) handwritten_amount: any HAND-WRITTEN final amount including tip (number only, '
@@ -1553,11 +1554,22 @@ def _sub_entry_id(file_id: str, sub_index: int) -> str:
     return f"rcpt_{base}_{sub_index}"
 
 
-def _ocr_entry_fields(ocr: dict) -> dict:
-    """Map a normalized OCR dict to the ledger entry's ocr_* fields."""
+_ISO_DATE_RE    = re.compile(r'^\d{4}-\d{2}-\d{2}$')
+_TODAY_TOKEN_RE = re.compile(r'today|오늘', re.IGNORECASE)
+
+
+def _ocr_entry_fields(ocr: dict, upload_date: str = None) -> dict:
+    """Map a normalized OCR dict to the ledger entry's ocr_* fields.
+
+    Some receipts carry only a relative date (they literally print "today");
+    `upload_date` (YYYY-MM-DD) fills those in — the first upload date is the
+    closest absolute anchor we have. Any other non-ISO junk becomes None so
+    the CSV-match backfill can supply the date instead."""
     ocr_date = ocr.get("date")
     if ocr_date == "YYYY-MM-DD":  # treat placeholder as missing
         ocr_date = None
+    if isinstance(ocr_date, str) and not _ISO_DATE_RE.match(ocr_date):
+        ocr_date = upload_date if _TODAY_TOKEN_RE.search(ocr_date) else None
     has_ocr = ocr.get("amount") is not None
     currency = ocr.get("currency")
     usd_est, fx_rate = _fx_usd_estimate(ocr.get("amount"), currency, ocr_date)
@@ -1711,7 +1723,7 @@ def _run_batch_ocr(username: str) -> dict:
                     "uploaded_at":  now_disp,
                     "synced_at":    now_iso,
                 }
-                entry.update(_ocr_entry_fields(ocr))
+                entry.update(_ocr_entry_fields(ocr, upload_date=now_iso[:10]))
                 new_staged.append(entry)
 
         # Accumulate into staging queue — never replace, always append.
@@ -2396,8 +2408,9 @@ def _handle_reocr(username: str, entry_id: str):
     now_iso = datetime.now().isoformat()
     updated = []
     for sub_index, ocr in enumerate(ocr_list):
-        fields  = _ocr_entry_fields(ocr)
         sibling = siblings.get(sub_index, {})
+        # Re-OCR keeps the FIRST upload date as the "today" anchor.
+        fields  = _ocr_entry_fields(ocr, upload_date=str(sibling.get("uploaded_at") or now_iso)[:10])
         entry   = {
             "id":           _sub_entry_id(file_id, sub_index),
             "file_id":      file_id,
@@ -2853,7 +2866,7 @@ def _do_drive_sync_work(username: str, job_id: str):
                     "uploaded_at":  now_disp,
                     "synced_at":    now_iso,
                 }
-                entry.update(_ocr_entry_fields(ocr))
+                entry.update(_ocr_entry_fields(ocr, upload_date=now_iso[:10]))
                 new_staged.append(entry)
 
         # Accumulate — append to existing staging queue, never replace.
@@ -2929,7 +2942,7 @@ def _handle_receipt_upload(username: str, body):
                 "match_status": "pending_match",
                 "multi_ocr":    True,
             }
-            entry.update(_ocr_entry_fields(ocr))
+            entry.update(_ocr_entry_fields(ocr, upload_date=now_iso[:10]))
             staged_entries.append(entry)
 
     # Stage for visual review; only confirmed entries go to the ledger.
