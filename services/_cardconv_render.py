@@ -318,7 +318,12 @@ def _register_section(user: str) -> str:
           <div style="font-size:2rem;margin-bottom:8px">🧾</div>
           <div style="font-weight:700;color:var(--text);margin-bottom:4px">Drop receipts here</div>
           <div style="font-size:.8rem;color:var(--text-muted)">JPG · PNG · PDF &nbsp;·&nbsp; Multiple files supported &nbsp;·&nbsp; OCR runs automatically</div>
+          <div style="font-size:.74rem;color:var(--text-muted);margin-top:4px">🔒 DRM-locked file? Right-click → NASCA → 일반문서로 변환 first.</div>
           <input type="file" id="rcptFiles" name="files" multiple accept=".jpg,.jpeg,.png,.pdf" onchange="handleRcptFiles(this)">
+        </div>
+        <div id="rcptDrm" style="display:none;margin-top:12px;padding:12px 16px;background:var(--surface-2);border:1px solid var(--warning,#f59e0b);border-radius:var(--radius-md)">
+          <div style="font-size:.86rem;font-weight:700;color:var(--text)">🔒 <span id="rcptDrmName"></span> is still DRM-protected</div>
+          <div style="font-size:.8rem;color:var(--text-muted);margin-top:4px">Right-click the file → <b>NASCA</b> → <b>일반문서로 변환</b>, then upload the converted receipt.</div>
         </div>
         <div id="rcptInfo" style="display:none;margin-top:12px;padding:12px 16px;background:var(--surface-2);border-radius:var(--radius-md)">
           <div id="rcptFileList" style="font-size:.82rem;color:var(--text);margin-bottom:10px;display:flex;flex-wrap:wrap;gap:6px"></div>
@@ -372,12 +377,23 @@ const rcptZone = document.getElementById('rcptZone');
 const rcptInfo = document.getElementById('rcptInfo');
 const rcptList = document.getElementById('rcptFileList');
 function handleRcptFiles(input){
-  if(input.files.length>0){
-    rcptList.innerHTML = Array.from(input.files).map(f =>
+  const files = Array.from(input.files);
+  if(!files.length) return;
+  const warn = document.getElementById('rcptDrm');
+  if(warn) warn.style.display='none';
+  // Catch a still-encrypted NASCA file before it uploads ciphertext to Drive.
+  Promise.all(files.map(f => f.slice(0,64).text())).then(heads => {
+    const bad = files.find((f,i) => /^\s*<##\s*NASCA/i.test(heads[i]) || /NASCA DRM FILE/i.test(heads[i]));
+    if(bad){
+      if(warn){ document.getElementById('rcptDrmName').textContent = bad.name; warn.style.display='block'; }
+      input.value=''; rcptInfo.style.display='none'; rcptZone.style.borderColor='';
+      return;
+    }
+    rcptList.innerHTML = files.map(f =>
       '<span style="background:var(--surface-3);padding:3px 8px;border-radius:4px;font-size:.78rem">'+f.name+'</span>').join('');
     rcptInfo.style.display='block';
     rcptZone.style.borderColor='var(--accent)';
-  }
+  });
 }
 if(rcptZone){
   rcptZone.addEventListener('dragover', e => { e.preventDefault(); rcptZone.classList.add('drag-over'); });
@@ -393,14 +409,21 @@ if(rcptZone){
 
 # ── Convert page ───────────────────────────────────────────────────────────────
 
-def _render_drm_alert(user: str, filename: str) -> str:
+def _render_drm_alert(user: str, filename: str, context: str = "convert") -> str:
     """Friendly guidance shown when a still-encrypted NASCA DRM file is uploaded.
-    Reads as an intentional 'one more step' notice, never a crash."""
+    Reads as an intentional 'one more step' notice, never a crash. `context`
+    tailors the wording/back-link for the Convert (CSV) vs Ledger (receipt) path."""
     from server import CSS_VER
+    if context == "receipt":
+        tab, back_href, back_label = "ledger", "/cardconv/ledger", "← Back to Ledger"
+        file_word = "the converted receipt (.jpg / .pdf)"
+    else:
+        tab, back_href, back_label = "convert", "/cardconv/convert", "← Back to Convert"
+        file_word = "the converted <b>.csv</b>"
     return f'''<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>💳 Convert · Wayfinder</title>
+<title>💳 Cheil AMEX Expense Assistant · Wayfinder</title>
 <link rel="stylesheet" href="/static/style.css?v={CSS_VER}">
 <style>{_CC_TAB_CSS}{_UPLOAD_CSS}</style>
 </head><body>
@@ -409,7 +432,7 @@ def _render_drm_alert(user: str, filename: str) -> str:
   <span class="nav-user">👤 {_esc(user)} &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
 </nav>
 <div class="container" style="max-width:1100px">
-  {_tab_bar("convert", user)}
+  {_tab_bar(tab, user)}
 
   <div class="notepad-card" style="margin-bottom:20px;border:1px solid var(--warning,#f59e0b)">
     <div class="notepad-body" style="padding:28px 24px;text-align:center">
@@ -432,14 +455,14 @@ def _render_drm_alert(user: str, filename: str) -> str:
         <ol style="margin:0;padding-left:20px;font-size:.86rem;color:var(--text);line-height:1.8">
           <li>In File Explorer, <b>right-click</b> the file.</li>
           <li>Open the <b>NASCA</b> menu → choose <b>일반문서로 변환</b> (Convert to normal document).</li>
-          <li>Upload the converted <b>.csv</b> here.</li>
+          <li>Upload {file_word} here.</li>
         </ol>
         <div style="font-size:.76rem;color:var(--text-muted);margin-top:12px">
           The conversion runs on your PC through NASCA — this tool never sees the encrypted file.
         </div>
       </div>
 
-      <a href="/cardconv/convert" class="btn btn-primary">← Back to Convert</a>
+      <a href="{back_href}" class="btn btn-primary">{back_label}</a>
     </div>
   </div>
 </div>

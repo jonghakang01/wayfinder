@@ -4,6 +4,15 @@
 from services._cardconv_core import *  # noqa: F401,F403
 from services._cardconv_render import *  # noqa: F401,F403
 
+def _drm_guard(res, user):
+    """Translate a ('drm_blocked', filename, context) sentinel from an upload
+    handler into a friendly DRM-notice page; pass anything else through."""
+    if isinstance(res, tuple) and res and res[0] == "drm_blocked":
+        _, filename, context = (res + ("convert",))[:3]
+        return ("html", _render_drm_alert(user, filename, context))
+    return res
+
+
 def handle(method, path, body, ctx=None):
     user = (ctx or {}).get("user")
     # Service-level access is already enforced by server.py (has_service_access);
@@ -107,7 +116,7 @@ def handle(method, path, body, ctx=None):
 
     # Receipt upload
     if method == "POST" and path == "/cardconv/receipts/upload":
-        return _handle_receipt_upload(user, body)
+        return _drm_guard(_handle_receipt_upload(user, body), user)
 
     # Manual receipt addition (for OCR-missed sub-receipts on an existing image)
     if method == "POST" and path == "/cardconv/receipts/manual-add":
@@ -153,11 +162,7 @@ def handle(method, path, body, ctx=None):
 
     # CSV upload
     if method == "POST" and path == "/cardconv/upload":
-        res = _handle_upload(body, user)
-        # Still-encrypted NASCA DRM file — show a guided notice, not an error.
-        if isinstance(res, tuple) and res and res[0] == "drm_blocked":
-            return ("html", _render_drm_alert(user, res[1]))
-        return res
+        return _drm_guard(_handle_upload(body, user), user)
 
     # Uploaded CSV reuse (re-run / delete)
     if method == "POST" and path == "/cardconv/upload/rerun":

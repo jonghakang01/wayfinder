@@ -2917,6 +2917,13 @@ def _handle_receipt_upload(username: str, body):
     if not files:
         return ("redirect", "/cardconv/ledger")
 
+    # DRM guard: a NASCA receipt keeps its original .jpg/.pdf extension, so it
+    # would pass the mime check and upload ciphertext to Drive. Block the batch
+    # with a friendly notice instead of silently storing an unreadable file.
+    drm = next((fn for fn, content, _ in files if _is_nasca_drm(content)), None)
+    if drm:
+        return ("drm_blocked", drm, "receipt")
+
     receipts  = _load_receipts(username)
     supported = {'image/jpeg', 'image/png', 'application/pdf', 'image/gif', 'image/webp'}
 
@@ -3053,7 +3060,7 @@ def _handle_upload(body, user=None):
     # DRM guard: a still-encrypted NASCA file would otherwise blow up the parser
     # and surface as a raw red error. Bounce it to a friendly notice instead.
     if _is_nasca_drm(csv_bytes):
-        return ("drm_blocked", csv_name)
+        return ("drm_blocked", csv_name, "convert")
     try:
         # AMEX Master xlsx uploads are adapted to CSV shape, then flow through
         # the same pipeline. Stored converted so Re-run works unchanged.
