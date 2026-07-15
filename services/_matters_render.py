@@ -233,7 +233,7 @@ body.panel-open .panel{transform:none}
   font-size:1.15rem;cursor:pointer;z-index:2}
 .pclose:hover{color:var(--me)}
 /* the full card renders inside the panel — flatten its chrome, breathe more */
-.panel .card{background:none;border:none;border-left:none;padding:0}
+.panel .card{background:none;border:none;border-left:none;padding:0;box-shadow:none}
 .panel .row1{margin-bottom:18px}
 .panel .fgrid{row-gap:14px}
 .panel .latest-comm{margin:16px 0 8px;padding:12px 14px}
