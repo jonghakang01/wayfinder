@@ -3476,39 +3476,48 @@ def _build_expense_report(username: str, entries: list) -> bytes:
     tc.font = bold
     tc.number_format = "#,##0.00"
 
-    # ── Receipt blocks: one row per item — label in col A, image beside it ──
+    # ── Receipt blocks: 2-across grid (label line above each image) so the
+    #    sheet doesn't scroll forever — was one full-width image per row ──
     r += 2
-    ws.cell(row=r, column=1, value="RECEIPTS    one block per expense").font = bold
+    ws.cell(row=r, column=1, value="RECEIPTS    2 per row").font = bold
     service = _get_drive_service(username)
     img_refs = []  # keep BytesIO alive until save
-    for n, e in enumerate(entries, 1):
-        r += 1
-        label = (f"#{n} · {e.get('date', '')}\n{purpose(e)}\n{e.get('merchant', '')}\n"
-                 f"{category(e)}\n{e.get('amount', '')} USD")
-        c = ws.cell(row=r, column=1, value=label)
-        c.alignment = Alignment(wrap_text=True, vertical="top")
-        fid = (e.get("receipt") or {}).get("file_id") if e.get("matched") else None
-        raw = _fetch_drive_image(service, fid) if fid else None
-        if not raw:
-            ws.cell(row=r, column=2,
-                    value="(no receipt image)" if not fid else "(image unavailable)")
-            ws.row_dimensions[r].height = 60
-            continue
-        try:
-            im = ImageOps.exif_transpose(PILImage.open(io.BytesIO(raw)))
-            im = im.convert("RGB")
-            im.thumbnail((640, 400))
-            buf = io.BytesIO()
-            im.save(buf, format="JPEG", quality=72)
-            buf.seek(0)
-            xi = XLImage(buf)
-            xi.width, xi.height = im.width, im.height
-            ws.add_image(xi, f"B{r}")
-            img_refs.append(buf)
-            ws.row_dimensions[r].height = max(80, im.height * 0.75 + 8)  # px→pt
-        except Exception:
-            ws.cell(row=r, column=2, value="(image decode failed)")
-            ws.row_dimensions[r].height = 60
+    ANCHORS = ((1, 4, "A"), (5, 7, "E"))  # (label span start, span end, image col)
+    for i in range(0, len(entries), 2):
+        label_row, img_row = r + 1, r + 2
+        max_h = 60.0
+        for slot, e in enumerate(entries[i:i + 2]):
+            col0, col1, img_col = ANCHORS[slot]
+            label = (f"#{i + slot + 1} · {e.get('date', '')} · {e.get('merchant', '')} · "
+                     f"{category(e)} · {e.get('amount', '')} USD\n{purpose(e)}")
+            ws.merge_cells(start_row=label_row, start_column=col0,
+                           end_row=label_row, end_column=col1)
+            c = ws.cell(row=label_row, column=col0, value=label)
+            c.alignment = Alignment(wrap_text=True, vertical="top")
+            c.font = Font(bold=True, size=9)
+            fid = (e.get("receipt") or {}).get("file_id") if e.get("matched") else None
+            raw = _fetch_drive_image(service, fid) if fid else None
+            if not raw:
+                ws.cell(row=img_row, column=col0,
+                        value="(no receipt image)" if not fid else "(image unavailable)")
+                continue
+            try:
+                im = ImageOps.exif_transpose(PILImage.open(io.BytesIO(raw)))
+                im = im.convert("RGB")
+                im.thumbnail((340, 300))
+                buf = io.BytesIO()
+                im.save(buf, format="JPEG", quality=70)
+                buf.seek(0)
+                xi = XLImage(buf)
+                xi.width, xi.height = im.width, im.height
+                ws.add_image(xi, f"{img_col}{img_row}")
+                img_refs.append(buf)
+                max_h = max(max_h, im.height * 0.75 + 8)  # px→pt
+            except Exception:
+                ws.cell(row=img_row, column=col0, value="(image decode failed)")
+        ws.row_dimensions[label_row].height = 28
+        ws.row_dimensions[img_row].height = max_h
+        r = img_row + 1  # one default-height spacer row between pairs
 
     r += 2
     ws.cell(row=r, column=1,
