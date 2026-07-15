@@ -55,6 +55,8 @@ def handle(method, path, body, ctx=None):
         return _handle_review_download(user, body)  # GET passes query dict as body
     if method == "GET" and path == "/cardconv/review/download.pdf":
         return _handle_review_pdf(user, body)
+    if method == "GET" and path == "/cardconv/review/expense_report":
+        return _handle_expense_report(user, body)  # GET passes query dict as body
 
     # Ledger
     if method == "GET" and path == "/cardconv/ledger":

@@ -1020,6 +1020,8 @@ def _render_review(user: str) -> str:
                      'title="Receipt images of the matched transactions">⬇ PDF</button>'
                      '<button id="rvDownloadBoth" class="fb-menu-item" '
                      'title="Download the SAP xlsx and the receipt PDF together">⬇ Both <small>xlsx + PDF</small></button>'
+                     '<button id="rvDownloadReport" class="fb-menu-item" '
+                     'title="Human-readable report: expense table + labeled receipt images">📋 Expense Report</button>'
                      '</div></span>')
                     if total else '')
     if li:
@@ -1346,6 +1348,10 @@ if(rvDl){{
   $('rvDownloadPdf').addEventListener('click', () => {{
     rvCloseExport();
     window.location = '/cardconv/review/download.pdf?' + rvDlParams().toString();
+  }});
+  $('rvDownloadReport').addEventListener('click', () => {{
+    rvCloseExport();
+    window.location = '/cardconv/review/expense_report?' + rvDlParams().toString();
   }});
   // Both at once: hidden iframes so the two attachment downloads don't race.
   $('rvDownloadBoth').addEventListener('click', () => {{

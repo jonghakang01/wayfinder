@@ -3395,6 +3395,130 @@ def _handle_review_pdf(username: str, query: dict):
     return _handle_ledger_pdf(username, {"rids": [",".join(rids)]})
 
 
+# GL account → human category for the expense report (fallback: Other).
+GL_CATEGORY = {
+    "53270377": "Transportation",
+    "53410177": "Meals",
+    "53470177": "Meals",
+    "53410103": "Client",
+    "53210177": "Office",
+    "53290177": "Office",
+    "53311577": "Subscription",
+}
+
+
+def _handle_expense_report(username: str, query: dict):
+    """GET /cardconv/review/expense_report — human-readable report:
+    summary table + one labeled receipt-image block per item (modeled on the
+    reference trip report; single USD column, single Rcpt flag, no FX)."""
+    entries = _select_review_entries(username, query)
+    if not entries:
+        return ("html", "<h2 style='padding:40px'>No transactions to export.</h2>", 404)
+    xlsx = _build_expense_report(username, entries)
+    fn = f"expense_report_{date.today().isoformat()}.xlsx"
+    return ("file_inline", xlsx,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fn)
+
+
+def _build_expense_report(username: str, entries: list) -> bytes:
+    import openpyxl
+    from openpyxl.drawing.image import Image as XLImage
+    from openpyxl.styles import Alignment, Font
+    from PIL import Image as PILImage
+    from PIL import ImageOps
+
+    entries = sorted(entries, key=lambda e: e.get("date") or "", reverse=True)
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Expense Report"
+    for col, w in {"A": 26, "B": 12, "C": 16, "D": 44, "E": 30, "F": 7, "G": 12}.items():
+        ws.column_dimensions[col].width = w
+
+    bold = Font(bold=True)
+    ws["A1"] = "EXPENSE REPORT"
+    ws["A1"].font = Font(bold=True, size=16)
+    ws.merge_cells("A1:G1")
+    dates = sorted(e["date"] for e in entries if e.get("date"))
+    ws["A2"], ws["B2"] = "Dates", (f"{dates[0]} → {dates[-1]}" if dates else "")
+    ws["A3"], ws["B3"] = "Company", "Cheil"
+    ws["A2"].font = ws["A3"].font = bold
+
+    def category(e) -> str:
+        return GL_CATEGORY.get(str(e.get("gl", "")), "Other")
+
+    def purpose(e) -> str:
+        p = str(e.get("purpose", "") or "")
+        comp = (e.get("receipt") or {}).get("companions", "")
+        return f"{p} w/ {comp}" if comp else p
+
+    r = 5
+    ws.cell(row=r, column=1, value=f"EXPENSES    {len(entries)} items").font = bold
+    r += 1
+    for ci, h in enumerate(["#", "Date", "Category", "Purpose", "Vendor", "Rcpt", "USD"], 1):
+        c = ws.cell(row=r, column=ci, value=h)
+        c.font = bold
+    total = 0.0
+    for n, e in enumerate(entries, 1):
+        r += 1
+        try:
+            amt = float(e.get("amount", 0))
+        except (TypeError, ValueError):
+            amt = 0.0
+        total += amt
+        has_rcpt = bool(e.get("matched") and (e.get("receipt") or {}).get("file_id"))
+        for ci, v in enumerate([n, e.get("date", ""), category(e), purpose(e),
+                                e.get("merchant", ""), "✓" if has_rcpt else "—", amt], 1):
+            ws.cell(row=r, column=ci, value=v)
+        ws.cell(row=r, column=7).number_format = "#,##0.00"
+    r += 1
+    ws.cell(row=r, column=6, value="TOTAL").font = bold
+    tc = ws.cell(row=r, column=7, value=round(total, 2))
+    tc.font = bold
+    tc.number_format = "#,##0.00"
+
+    # ── Receipt blocks: one row per item — label in col A, image beside it ──
+    r += 2
+    ws.cell(row=r, column=1, value="RECEIPTS    one block per expense").font = bold
+    service = _get_drive_service(username)
+    img_refs = []  # keep BytesIO alive until save
+    for n, e in enumerate(entries, 1):
+        r += 1
+        label = (f"#{n} · {e.get('date', '')}\n{purpose(e)}\n{e.get('merchant', '')}\n"
+                 f"{category(e)}\n{e.get('amount', '')} USD")
+        c = ws.cell(row=r, column=1, value=label)
+        c.alignment = Alignment(wrap_text=True, vertical="top")
+        fid = (e.get("receipt") or {}).get("file_id") if e.get("matched") else None
+        raw = _fetch_drive_image(service, fid) if fid else None
+        if not raw:
+            ws.cell(row=r, column=2,
+                    value="(no receipt image)" if not fid else "(image unavailable)")
+            ws.row_dimensions[r].height = 60
+            continue
+        try:
+            im = ImageOps.exif_transpose(PILImage.open(io.BytesIO(raw)))
+            im = im.convert("RGB")
+            im.thumbnail((640, 400))
+            buf = io.BytesIO()
+            im.save(buf, format="JPEG", quality=72)
+            buf.seek(0)
+            xi = XLImage(buf)
+            xi.width, xi.height = im.width, im.height
+            ws.add_image(xi, f"B{r}")
+            img_refs.append(buf)
+            ws.row_dimensions[r].height = max(80, im.height * 0.75 + 8)  # px→pt
+        except Exception:
+            ws.cell(row=r, column=2, value="(image decode failed)")
+            ws.row_dimensions[r].height = 60
+
+    r += 2
+    ws.cell(row=r, column=1,
+            value=f"Generated by Cheil AMEX Expense Assistant · {date.today().isoformat()}")
+
+    out = io.BytesIO()
+    wb.save(out)
+    return out.getvalue()
+
+
 _CARD_BRAND_LABEL = {"amex": "AMEX", "visa": "Visa", "other": "Other"}
 
 
