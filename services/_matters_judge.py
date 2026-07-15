@@ -421,10 +421,14 @@ def derive_structures(matters: list, threads_by_matter: dict) -> dict:
     return {s.get("matter_title", ""): s for s in out.get("structures", [])}
 
 
-def refresh_structures(conn) -> int:
-    """Regenerate the bridge map for all active matters and store on each row."""
+def refresh_structures(conn, matter_id=None) -> int:
+    """Regenerate the bridge map and store on each row (one matter, or all)."""
     from services import _matters_db as _db
     matters = _db.list_matters(conn)
+    if matter_id is not None:
+        matters = [m for m in matters if m["id"] == matter_id]
+        if not matters:
+            raise RuntimeError("사안을 찾을 수 없습니다")
     threads = {m["id"]: _db.threads_for_matter(conn, m["id"]) for m in matters}
     structs = derive_structures(matters, threads)
     updated = 0

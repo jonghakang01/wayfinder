@@ -261,7 +261,9 @@ def handle(method, path, body, ctx=None):
                 ok, msg = _open_in_outlook(eid)
                 return ("json", {"ok": ok, "error": msg})
             if path == "/matters/api/structures":
-                return ("json", {"ok": True, "updated": judge.refresh_structures(conn)})
+                mid = data.get("id")
+                return ("json", {"ok": True, "updated": judge.refresh_structures(
+                    conn, int(mid) if mid else None)})
             if path == "/matters/api/propose":
                 query = str(data.get("query", "")).strip()
                 if not query:

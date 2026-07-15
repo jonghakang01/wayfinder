@@ -56,9 +56,9 @@ details.sect .grid2{margin-top:10px}
 .ai-mark{font-size:.72rem;opacity:.85;cursor:help}
 select.sm.ai-set{border-color:var(--them);box-shadow:0 0 0 1px rgba(56,189,248,.4)}
 /* 🔎 deep recheck */
-.rc-row{display:flex;align-items:center;gap:8px;margin-top:10px}
+.rc-row{display:flex;align-items:center;gap:8px;margin-top:10px;flex-wrap:wrap}
 .rc-btn{border:1px solid var(--border-bright);background:var(--surface);color:var(--text);
-  font-size:.74rem;font-weight:700;border-radius:7px;padding:4px 10px;cursor:pointer}
+  font-size:.74rem;font-weight:700;border-radius:7px;padding:4px 10px;cursor:pointer;white-space:nowrap}
 .rc-btn:hover{border-color:var(--them);color:var(--them)}
 .rc-input{flex:1;min-width:120px;border:1px solid var(--border-bright);border-radius:7px;
   padding:4px 9px;font-size:.74rem;background:var(--surface);color:var(--text)}
@@ -136,6 +136,11 @@ select.sm{border:1px solid var(--border-bright);border-radius:6px;padding:3px 6p
   padding:7px 14px;font-size:.82rem;font-weight:700;cursor:pointer}
 .scan-btn:hover{background:rgba(56,189,248,.2)}
 .scan-btn:disabled{opacity:.5;cursor:default}
+/* scanning banner — visible while a scan runs so a quiet page isn't mistaken for a fresh one */
+.scan-note{background:var(--accent-glow);border:1px solid var(--accent);color:var(--accent);
+  border-radius:8px;padding:9px 14px;font-size:.8rem;font-weight:700;margin-bottom:16px;
+  animation:scanPulse 1.6s ease-in-out infinite}
+@keyframes scanPulse{0%,100%{opacity:1}50%{opacity:.55}}
 /* new-matter candidates */
 .cands{background:rgba(56,189,248,.06);border:1px solid rgba(56,189,248,.25);border-radius:var(--radius);
   padding:12px 16px;margin-bottom:22px}
@@ -243,11 +248,11 @@ PAGE_BODY = """<div class="mt-wrap">
 <div class="topbar">
   <h1>🧭 Matter Tracker</h1>
   <span style="display:flex;gap:8px">
-    <button class="scan-btn" id="structBtn" onclick="refreshStructures()" title="AI가 사안별 관계도를 다시 그립니다">🌳 관계도 갱신</button>
     <button class="scan-btn" id="scanBtn" onclick="runScan()">↻ 지금 스캔</button>
   </span>
 </div>
 <div class="sub" id="sub">loading…</div>
+<div class="scan-note" id="scanNote" hidden>↻ 메일 스캔 중… 최신 메일을 반영하고 있습니다 — 완료되면 화면이 자동 갱신됩니다</div>
 <div class="briefing" id="briefing" hidden></div>
 <div class="kpis" id="kpis"></div>
 <div id="sections"></div>
@@ -301,11 +306,14 @@ async function load(){
 
 async function runScan(){
   const btn = document.getElementById('scanBtn');
+  const note = document.getElementById('scanNote');
   btn.disabled = true; btn.textContent = '스캔 중…';
+  note.hidden = false;
   try {
     await (await fetch('/matters/api/scan', {method:'POST'})).json();
   } finally {
     btn.disabled = false; btn.textContent = '↻ 지금 스캔';
+    note.hidden = true;
     load();
   }
 }
@@ -383,16 +391,17 @@ async function addManual(){
   load();
 }
 
-async function refreshStructures(){
-  const btn = document.getElementById('structBtn');
-  btn.disabled = true; btn.textContent = '관계도 생성 중…';
+// Per-matter bridge-map refresh; progress and errors land in the card's rc box.
+async function refreshStructure(id){
+  const box = document.getElementById('rc-' + id);
+  if(box) box.innerHTML = '<span class="rc-load">🌳 관계도 생성 중… (AI가 스레드를 검토합니다)</span>';
+  let r;
   try {
-    const r = await (await fetch('/matters/api/structures', {method:'POST'})).json();
-    if(r.error) alert('관계도 생성 실패: ' + r.error);
-  } finally {
-    btn.disabled = false; btn.textContent = '🌳 관계도 갱신';
-    load();
-  }
+    r = await (await fetch('/matters/api/structures', {method:'POST',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify({id})})).json();
+  } catch(e){ if(box) box.innerHTML = '<span class="rc-err">⚠ 요청 실패</span>'; return; }
+  if(r.error){ if(box) box.innerHTML = `<span class="rc-err">⚠ ${esc(r.error)}</span>`; return; }
+  load();
 }
 
 async function resolveSugg(id, accept){
@@ -449,6 +458,7 @@ function card(m){
     <div class="rc-row">
       <button class="rc-btn" onclick="recheckMatter(${m.id},3)" title="아래 칸에 사람/키워드를 넣으면 그 기준으로, 비우면 People 전원+제목으로 최근 메일(내 발신 포함)을 다시 훑어 재판단합니다">🔎 재점검</button>
       <button class="rc-btn" onclick="splitMatter(${m.id})" title="여러 건이 한 사안에 뭉쳐 있으면 AI가 분리안을 제안합니다 (실행 전 확인)">✂ 분리</button>
+      <button class="rc-btn" onclick="refreshStructure(${m.id})" title="AI가 이 사안의 관계도를 다시 그립니다">🌳 관계도</button>
       <input class="rc-input" id="rcq-${m.id}" placeholder="사람·키워드 (예: Ram, SOW) — 비우면 People 전원"
         onkeydown="if(event.key==='Enter'){event.preventDefault();recheckMatter(${m.id},3);}">
     </div>
@@ -801,7 +811,9 @@ function archive(id){
   save(id, {archived: 1}, true);
 }
 
-load();
+// Show last-known state immediately, then auto-scan once so the page always
+// reflects fresh mail — the banner makes the in-between state unmistakable.
+load().then(() => runScan());
 </script>
 </div>"""
 
