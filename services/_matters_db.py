@@ -56,11 +56,18 @@ CREATE TABLE IF NOT EXISTS briefings (
     scan_run_id INTEGER, text TEXT,
     created_at TEXT DEFAULT (datetime('now','localtime'))
 );
+CREATE TABLE IF NOT EXISTS todos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    done INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now','localtime')),
+    done_at TEXT DEFAULT ''
+);
 """
 
 MATTER_FIELDS = ("title", "status", "ball", "people", "waiting", "next_action",
                  "last_contact", "notes", "search_queries", "user_locked_fields",
-                 "archived", "structure", "ball_since", "urgency")
+                 "archived", "structure", "ball_since", "urgency", "oversight")
 
 # --- attention model ----------------------------------------------------------
 # The tracker is a "needs my action within 24h" dashboard: the clock runs only
@@ -97,7 +104,11 @@ def annotate_attention(matters, now=None):
         base = _parse_dt(m.get("ball_since")) or _parse_dt(m.get("last_contact"))
         hours = (now - base).total_seconds() / 3600 if base else None
         sla = URGENCY_SLA.get(urg, 24)
-        if on_plate and urg != "low":
+        if m.get("oversight") and not closed:
+            # Oversee-only: I'm not a stakeholder, just following closely —
+            # no SLA clock, never in the action queue.
+            tier, overdue = "monitor", False
+        elif on_plate and urg != "low":
             tier = "action"
             overdue = sla is not None and hours is not None and hours >= sla
         elif m.get("ball") == "상대" and not closed:
@@ -139,6 +150,7 @@ def get_conn():
         "structure": "TEXT DEFAULT ''",
         "ball_since": "TEXT DEFAULT ''",
         "urgency": "TEXT DEFAULT 'normal'",
+        "oversight": "INTEGER DEFAULT 0",   # 지점장 oversee: not a stakeholder, closely follow up
     }
     changed = False
     for col, decl in adds.items():
@@ -283,6 +295,7 @@ def kpis(conn):
         "overdue": len([m for m in action if m["att"]["overdue"]]),
         "drafts": drafts_n,
         "waiting": len([m for m in ms if m["att"]["tier"] == "waiting"]),
+        "monitor": len([m for m in ms if m["att"]["tier"] == "monitor"]),
         "reference": len([m for m in ms if m["att"]["tier"] == "reference"]),
     }
 
@@ -337,6 +350,43 @@ def pending_suggestions(conn) -> list:
     return [dict(r) for r in rows]
 
 
+def list_todos(conn):
+    return [dict(r) for r in conn.execute(
+        "SELECT * FROM todos ORDER BY done, id DESC").fetchall()]
+
+
+def create_todo(conn, title: str) -> int:
+    cur = conn.execute("INSERT INTO todos (title) VALUES (?)", (title,))
+    conn.commit()
+    return cur.lastrowid
+
+
+def set_todo_done(conn, tid: int, done: bool) -> bool:
+    cur = conn.execute(
+        "UPDATE todos SET done=?, done_at=? WHERE id=?",
+        (1 if done else 0, _now_str() if done else "", tid))
+    conn.commit()
+    return cur.rowcount > 0
+
+
+def delete_todo(conn, tid: int) -> bool:
+    cur = conn.execute("DELETE FROM todos WHERE id=?", (tid,))
+    conn.commit()
+    return cur.rowcount > 0
+
+
+def promote_todo(conn, tid: int) -> dict:
+    """Turn a quick to-do into an action matter (ball=나) and retire the to-do."""
+    row = conn.execute("SELECT * FROM todos WHERE id=?", (tid,)).fetchone()
+    if not row:
+        return {"error": "not found"}
+    mid = create_matter(conn, {"title": row["title"], "ball": "나",
+                               "status": "진행중", "urgency": "normal"})
+    conn.execute("DELETE FROM todos WHERE id=?", (tid,))
+    conn.commit()
+    return {"ok": True, "matter_id": mid}
+
+
 def resolve_suggestion(conn, sid: int, accept: bool) -> dict:
     """Accept applies the proposal (new matter or field update, locks nothing);
     dismiss just marks it. Locked fields are refused at apply time too."""
@@ -364,6 +414,8 @@ def resolve_suggestion(conn, sid: int, accept: bool) -> dict:
             fields["ball"] = data["ball"]
         if data.get("urgency") in ("urgent", "normal", "low"):
             fields["urgency"] = data["urgency"]
+        if data.get("oversight"):
+            fields["oversight"] = 1
         mid = create_matter(conn, fields)
         result = {"ok": True, "status": "accepted", "matter_id": mid}
     else:

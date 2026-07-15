@@ -68,6 +68,7 @@ def _api_payload(db, conn):
         "matters": matters, "kpis": db.kpis(conn),
         "drafts": _drafts(conn), "last_scan": _last_scan(conn),
         "last_mail_scan_at": _last_mail_scan_at(conn),
+        "todos": db.list_todos(conn),
         "new_matter_suggestions": [s for s in sugg if s["field"] == "new_matter"],
         "last_candidates": last_candidates,
         "briefing": db.latest_briefing(conn),
@@ -290,6 +291,19 @@ def handle(method, path, body, ctx=None):
                 accept = data.get("action") == "accept"
                 res = db.resolve_suggestion(conn, sid, accept)
                 return ("json", res)
+            if path == "/matters/api/todos":
+                title = str(data.get("title", "")).strip()
+                if not title:
+                    return ("json", {"error": "할 일 내용을 입력하세요"})
+                return ("json", {"ok": True, "id": db.create_todo(conn, title)})
+            if path.startswith("/matters/api/todos/"):
+                parts = path.split("/")
+                tid = int(parts[4])
+                if path.endswith("/promote"):
+                    return ("json", db.promote_todo(conn, tid))
+                if data.get("delete"):
+                    return ("json", {"ok": db.delete_todo(conn, tid)})
+                return ("json", {"ok": db.set_todo_done(conn, tid, bool(data.get("done")))})
             if path == "/matters/api/matters":
                 return ("json", {"ok": True, "id": db.create_matter(conn, data)})
             if path.startswith("/matters/api/matters/") and path.endswith("/split"):

@@ -47,6 +47,30 @@ details.sect>summary::before{content:"▸";color:var(--dim);font-size:.9rem}
 details.sect[open]>summary::before{content:"▾"}
 details.sect .grid2{margin-top:10px}
 .sect .cnt{color:var(--dim);font-weight:600}
+/* ✅ quick to-dos — jot now, promote to the action queue when it grows up */
+.sect.s-todo{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+  padding:14px 16px 10px;margin-bottom:14px}
+.sect.s-todo h2::before{background:var(--good)}
+.todo-add{display:flex;gap:8px;margin-bottom:6px}
+.todo-add input{flex:1;border:1px solid var(--border-bright);border-radius:8px;
+  background:var(--surface-2);color:var(--text);padding:8px 11px;font-size:.84rem}
+.todo-add input::placeholder{color:var(--dim)}
+.todo-add input:focus{outline:none;border-color:var(--accent)}
+.trow{display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:8px}
+.trow:hover{background:var(--surface-2)}
+.trow .tchk{width:15px;height:15px;accent-color:var(--good);cursor:pointer;flex-shrink:0}
+.trow .tt{flex:1;font-size:.86rem;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.trow.done .tt{text-decoration:line-through;color:var(--dim)}
+.trow .tago{color:var(--dim);font-size:.68rem;white-space:nowrap}
+.tact{border:1px solid var(--border-bright);background:none;color:var(--muted);border-radius:6px;
+  padding:2px 8px;font-size:.68rem;cursor:pointer;white-space:nowrap;opacity:0;transition:opacity .12s}
+.trow:hover .tact{opacity:1}
+.tact:hover{border-color:var(--accent);color:var(--accent)}
+.tact.tdel:hover{border-color:var(--me);color:var(--me)}
+.todo-empty{color:var(--dim);font-size:.78rem;padding:4px 10px 8px}
+details.tdone summary{color:var(--dim);font-size:.72rem;cursor:pointer;padding:4px 10px;list-style:none}
+/* 👁 oversee section header */
+.sect.s-mon h2::before{background:var(--them)}
 /* SLA clock chip */
 .clk{font-size:.68rem;font-weight:700;border-radius:99px;padding:2px 9px;white-space:nowrap;
   background:var(--surface-3);color:var(--muted)}
@@ -270,6 +294,15 @@ PAGE_BODY = """<div class="mt-wrap">
 <div class="scan-note" id="scanNote" hidden>↻ 메일 스캔 중… 최신 메일을 반영하고 있습니다 — 완료되면 화면이 자동 갱신됩니다</div>
 <div class="briefing" id="briefing" hidden></div>
 <div class="kpis" id="kpis"></div>
+<div class="sect s-todo">
+  <h2>✅ To Do <span class="cnt" id="todoCnt"></span></h2>
+  <div class="todo-add">
+    <input id="todoInput" placeholder="지금 떠오른 할 일 입력 후 Enter…"
+      onkeydown="if(event.key==='Enter'){event.preventDefault();addTodo();}">
+    <button class="touch-btn" onclick="addTodo()">＋ 추가</button>
+  </div>
+  <div id="todoList"></div>
+</div>
 <div id="sections"></div>
 <div id="addPanel">
   <button class="add-btn" onclick="toggleAdd()">＋ 새 사안 추가</button>
@@ -311,7 +344,7 @@ function daysAgo(iso){
 async function load(){
   const d = await (await fetch('/matters/api')).json();
   DATA = d;
-  renderKpis(d.kpis); renderSections(d.matters);
+  renderKpis(d.kpis); renderTodos(); renderSections(d.matters);
   renderBriefing(d.briefing); renderAddPanel(); refreshPanel();
   const ls = d.last_scan;
   document.getElementById('sub').textContent =
@@ -348,7 +381,7 @@ function renderAddPanel(){
   if(suggs.length){
     html += '<ul>' + suggs.map(s => {
       let d = {}; try { d = JSON.parse(s.proposed_value); } catch(e){}
-      const watch = (d.urgency === 'low') ? ' <span class="why">📡 모니터링</span>' : '';
+      const watch = (d.oversight || d.urgency === 'low') ? ' <span class="why">👁 모니터링</span>' : '';
       return `<li><b>${esc(d.title || '?')}</b>${watch}<span class="why">${esc(s.reason || '')}</span>
         <button class="touch-btn" onclick="resolveSugg(${s.id}, true)">＋ 사안으로 추가</button>
         <button class="touch-btn" onclick="resolveSugg(${s.id}, false)">무시</button></li>`;
@@ -432,8 +465,56 @@ function renderKpis(k){
     ['amber', k.overdue,    'SLA 초과'],
     ['amber', k.drafts,     '미발송 초안'],
     ['blue',  k.waiting,    '상대 대기'],
+    ['blue',  k.monitor,    '모니터링'],
     ['green', k.reference,  '레퍼런스'],
   ].map(([c,n,l]) => `<div class="kpi ${c}"><div class="num">${n}</div><div class="lbl">${l}</div></div>`).join('');
+}
+
+// --- quick to-dos --------------------------------------------------------------
+function renderTodos(){
+  const el = document.getElementById('todoList');
+  const todos = DATA.todos || [];
+  const open = todos.filter(t => !t.done), done = todos.filter(t => t.done);
+  document.getElementById('todoCnt').textContent = open.length || '';
+  const row = t => `<div class="trow${t.done ? ' done' : ''}">
+    <input type="checkbox" class="tchk" ${t.done ? 'checked' : ''}
+      onchange="todoDone(${t.id}, this.checked)" title="완료 체크">
+    <span class="tt">${esc(t.title)}</span>
+    <span class="tago">${esc((t.created_at || '').slice(5, 10))}</span>
+    ${t.done ? '' : `<button class="tact" onclick="todoPromote(${t.id})"
+      title="사안으로 승격 — ⚡ 지금 내 액션에 들어갑니다">⚡ 액션으로</button>`}
+    <button class="tact tdel" onclick="todoDel(${t.id})" title="삭제">✕</button>
+  </div>`;
+  let html = open.map(row).join('')
+    || '<div class="todo-empty">비어 있음 — 떠오르는 할 일을 바로 적어두세요.</div>';
+  if(done.length)
+    html += `<details class="tdone"><summary>✓ 완료 ${done.length}건</summary>${done.map(row).join('')}</details>`;
+  el.innerHTML = html;
+}
+
+async function addTodo(){
+  const inp = document.getElementById('todoInput');
+  const title = inp.value.trim();
+  if(!title) return;
+  await fetch('/matters/api/todos', {method:'POST',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify({title})});
+  inp.value = '';
+  load().then(() => document.getElementById('todoInput').focus());
+}
+async function todoDone(id, done){
+  await fetch('/matters/api/todos/' + id, {method:'POST',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify({done})});
+  load();
+}
+async function todoDel(id){
+  await fetch('/matters/api/todos/' + id, {method:'POST',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify({delete: true})});
+  load();
+}
+async function todoPromote(id){
+  await fetch('/matters/api/todos/' + id + '/promote', {method:'POST',
+    headers:{'Content-Type':'application/json'}, body: '{}'});
+  load();
 }
 
 
@@ -455,6 +536,10 @@ function card(m){
       <select class="sm${ai.has('status')?' ai-set':''}" data-f="status" data-id="${m.id}">${STATUSES.map(s=>`<option${s===m.status?' selected':''}>${s}</option>`).join('')}</select>
       <select class="sm${ai.has('ball')?' ai-set':''}" data-f="ball" data-id="${m.id}">${BALLS.map(b=>`<option${b===m.ball?' selected':''}>${b}</option>`).join('')}</select>
       <select class="sm" data-f="urgency" data-id="${m.id}" title="긴급도 (SLA)">${URGENCIES.map(([v,l])=>`<option value="${v}"${v===(m.urgency||'normal')?' selected':''}>${l}</option>`).join('')}</select>
+      <select class="sm" data-f="oversight" data-id="${m.id}" title="나의 역할 — 주도 or 모니터링(oversee, closely follow-up)">
+        <option value="0"${Number(m.oversight) ? '' : ' selected'}>주도</option>
+        <option value="1"${Number(m.oversight) ? ' selected' : ''}>👁 오버시</option>
+      </select>
     </div>
     ${latestComm(m.threads)}
     <div class="fgrid">
@@ -784,6 +869,7 @@ function renderSections(ms){
   const root = document.getElementById('sections');
   const action = ms.filter(m => tierOf(m) === 'action').sort(attSort);
   const waiting = ms.filter(m => tierOf(m) === 'waiting');
+  const monitor = ms.filter(m => tierOf(m) === 'monitor');
   const reference = ms.filter(m => tierOf(m) === 'reference');
   let html = '';
 
@@ -797,8 +883,13 @@ function renderSections(ms){
     html += `<div class="sect s-wait"><h2>⏳ 상대 대기 <span class="cnt">${waiting.length}</span></h2>
       ${waiting.map(rowHtml).join('')}</div>`;
 
+  if(monitor.length)
+    html += `<div class="sect s-mon"><h2>👁 모니터링 (oversee) <span class="cnt">${monitor.length}</span>
+      <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--dim)">— 내가 당사자는 아님, closely follow-up</span></h2>
+      ${monitor.map(rowHtml).join('')}</div>`;
+
   if(reference.length)
-    html += `<div class="sect s-ref"><h2>📡 모니터링·레퍼런스 <span class="cnt">${reference.length}</span></h2>
+    html += `<div class="sect s-ref"><h2>📡 레퍼런스 <span class="cnt">${reference.length}</span></h2>
       ${reference.map(rowHtml).join('')}</div>`;
 
   root.innerHTML = html;

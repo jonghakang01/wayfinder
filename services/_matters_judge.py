@@ -51,8 +51,8 @@ onboarding, SOW, vendor/client requests). NEVER newsletters, digests, system not
 benefits mail, event invites, weekly reports.
 - Jongha also OVERSEES ongoing work: threads where he is only CC'd, or a recipient but not \
 the one being asked to act, are NOT noise. When substantive, propose them as new_matters \
-with ball=상대 and urgency=low (monitoring — kept out of the action queue) unless the \
-content clearly asks Jongha himself to act.
+with oversight=true + ball=상대 + urgency=low (monitoring — kept out of the action queue) \
+unless the content clearly asks Jongha himself to act.
 - Keep every reason under 15 Korean words. Suggest at most 10 field changes total.
 - briefing: 2–4 Korean sentences summarizing what moved and what needs Jongha's attention \
 first. 존댓말.
@@ -62,6 +62,8 @@ Respond with ONLY a JSON object, no prose, matching:
                   "proposed_value": str, "reason": str (short Korean)}],
  "new_matters": [{"title": str (Korean, concise), "people": str, "next_action": str,
                   "ball": "나|공동|상대", "urgency": "urgent|normal|low",
+                  "oversight": true|false (true when Jongha is not a direct stakeholder \
+and merely oversees/closely follows — CC'd or indirect threads),
                   "search_queries": [str], "reason": str, "source_subject": str}],
  "briefing": str}"""
 
