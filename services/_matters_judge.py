@@ -401,8 +401,10 @@ topics if it carries several agendas. Single-agenda matters get "topics": [] —
 matter-level sides/next_step already cover everything.
 
 Rules: 2 sides is typical; use 1 side when the matter has a single counterpart, 3+ only \
-when clearly distinct orgs are involved. Woosuk Jang is usually on Jongha's own side — \
-list him under members of the side he coordinates, or a "Cheil 내부" side if he co-drives. \
+when clearly distinct orgs are involved. Jongha Kang (강종하) IS the user — he is ALWAYS \
+the "me" bridge node and must NEVER appear as a side's pic or member (matter-level or \
+topic-level). Woosuk Jang is usually on Jongha's own side — list him under members of \
+the side he coordinates, or a "Cheil 내부" side if he co-drives. \
 Respond ONLY with {"structures": [...]}."""
 
 
