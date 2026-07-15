@@ -456,7 +456,7 @@ def wayfinder(user):
     svc_map = {p: m for p, m in svc_map.items() if not m.get("bucket")}
 
     def _svc_card(m):
-        return (f'<a class="service-card" href="{m["path"]}">'
+        return (f'<a class="service-card" href="{m.get("home_href", m["path"])}">'
                 f'<div class="service-icon">{m["icon"]}</div>'
                 f'<div class="service-name">{m["name"]}</div>'
                 f'<div class="service-desc">{m["description"]}</div>'

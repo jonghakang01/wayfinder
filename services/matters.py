@@ -26,6 +26,12 @@ def _is_local() -> bool:
     return os.path.exists("/mnt/c")
 
 
+if not _is_local():
+    # On prod the home card jumps straight to the local instance instead of
+    # landing on the guard page (the app runs only on Jongha's machine).
+    META["home_href"] = "http://localhost:8080/matters"
+
+
 def _drafts(conn):
     rows = conn.execute("""
         SELECT subject, saved_at FROM drafts_snapshot WHERE scan_run_id =
