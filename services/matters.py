@@ -41,6 +41,14 @@ def _last_scan(conn):
     return dict(r) if r else None
 
 
+def _last_mail_scan_at(conn):
+    """Latest full mailbox scan — bookkeeping runs (split/recheck/seed) don't count."""
+    r = conn.execute(
+        "SELECT finished_at FROM scan_runs WHERE finished_at IS NOT NULL "
+        "AND source NOT IN ('split','recheck','seed') ORDER BY id DESC LIMIT 1").fetchone()
+    return r["finished_at"] if r else None
+
+
 def _api_payload(db, conn):
     matters = db.annotate_attention(db.list_matters(conn))
     sugg = db.pending_suggestions(conn)
@@ -59,6 +67,7 @@ def _api_payload(db, conn):
     return {
         "matters": matters, "kpis": db.kpis(conn),
         "drafts": _drafts(conn), "last_scan": _last_scan(conn),
+        "last_mail_scan_at": _last_mail_scan_at(conn),
         "new_matter_suggestions": [s for s in sugg if s["field"] == "new_matter"],
         "last_candidates": last_candidates,
         "briefing": db.latest_briefing(conn),

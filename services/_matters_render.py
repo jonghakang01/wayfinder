@@ -813,7 +813,13 @@ function archive(id){
 
 // Show last-known state immediately, then auto-scan once so the page always
 // reflects fresh mail — the banner makes the in-between state unmistakable.
-load().then(() => runScan());
+// Cooldown: skip if a full mail scan finished within the last 2h (manual ↻ always works).
+const AUTO_SCAN_COOLDOWN_MS = 2 * 3600 * 1000;
+load().then(() => {
+  const t = DATA.last_mail_scan_at ? new Date(DATA.last_mail_scan_at.replace(' ', 'T')) : null;
+  if(t && !isNaN(t) && Date.now() - t < AUTO_SCAN_COOLDOWN_MS) return;
+  runScan();
+});
 </script>
 </div>"""
 
