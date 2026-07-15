@@ -115,10 +115,25 @@ select.sm{border:1px solid var(--border-bright);border-radius:6px;padding:3px 6p
 .thread.inbound .who{color:var(--them)}
 .thread.side{margin-left:20px;opacity:.88}
 .thread-more{color:var(--dim);font-size:.72rem}
-/* latest communication line — leads the card, click opens the mail */
+/* topic sections — a multi-agenda matter splits into 주제 1 / 주제 2 blocks,
+   each with its own stakeholder map, next step and threads */
+.topic-sect{margin-top:14px;border:1px solid var(--border-bright);border-radius:var(--radius);
+  padding:12px 14px;background:var(--surface-2)}
+.ts-head{font-size:.85rem;font-weight:700;display:flex;align-items:baseline;gap:9px;flex-wrap:wrap}
+.ts-num{font-size:.64rem;font-weight:800;letter-spacing:.06em;color:var(--accent);
+  background:var(--accent-glow);border:1px solid var(--accent);border-radius:99px;
+  padding:2px 9px;white-space:nowrap}
+.ts-sum{color:var(--muted);font-size:.76rem;margin-top:4px;line-height:1.5}
+.topic-sect .struct{border-top:none;padding-top:4px;margin-top:8px}
+.panel .topic-sect .struct{margin-top:8px}
+.topic-sect .threads{margin-top:8px;padding-top:8px}
+.panel .topic-sect .threads{margin-top:8px;padding-top:8px}
+/* latest communication — leads the card (panel-only surface), up to 4 lines then clamp.
+   Clamp lives on an inner wrapper: on the padded box itself -webkit-box gets
+   recomputed to flow-root and a cropped 5th line bleeds through. */
 .latest-comm{margin:8px 0 2px;padding:8px 11px;background:var(--surface);border:1px solid var(--border);
-  border-radius:8px;font-size:.78rem;color:var(--muted);overflow:hidden;text-overflow:ellipsis;
-  white-space:nowrap}
+  border-radius:8px;font-size:.78rem;color:var(--muted);line-height:1.55}
+.lc-clamp{display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
 .latest-comm:hover{border-color:var(--accent)}
 .latest-comm b{color:var(--text)}
 /* people role chips */
@@ -394,7 +409,7 @@ async function addManual(){
 // Per-matter bridge-map refresh; progress and errors land in the card's rc box.
 async function refreshStructure(id){
   const box = document.getElementById('rc-' + id);
-  if(box) box.innerHTML = '<span class="rc-load">🌳 관계도 생성 중… (AI가 스레드를 검토합니다)</span>';
+  if(box) box.innerHTML = '<span class="rc-load">🌳 관계도·토픽 생성 중… (메일 대화 수집 + AI 분석, 1~3분)</span>';
   let r;
   try {
     r = await (await fetch('/matters/api/structures', {method:'POST',
@@ -463,8 +478,9 @@ function card(m){
         onkeydown="if(event.key==='Enter'){event.preventDefault();recheckMatter(${m.id},3);}">
     </div>
     <div class="recheck" id="rc-${m.id}"></div>
-    ${structTree(m)}
-    ${threadList(m.threads)}
+    ${topicsOf(m).length >= 2
+      ? topicSections(m, parseStruct(m), topicsOf(m))
+      : structTree(m) + threadList(m.threads)}
   </div>`;
 }
 
@@ -550,6 +566,10 @@ async function addQuery(id, q, btn){
 function structTree(m){
   if(!m.structure) return '';
   let s = {}; try { s = JSON.parse(m.structure); } catch(e){ return ''; }
+  return structTreeFrom(s);
+}
+
+function structTreeFrom(s){
   if(!s.sides || !s.sides.length) return '';
   const ball = s.ball || '';
   const nextWho = (s.next_step || {}).who || '';
@@ -617,10 +637,10 @@ function latestComm(threads){
   if(!threads || !threads.length) return '';
   const t = threads.slice().sort((a,b)=>(b.last_message_at||'').localeCompare(a.last_message_at||''))[0];
   const when = (t.last_message_at || '').slice(5, 16).replace('T', ' ');
-  const snip = (t.snippet || '').slice(0, 140);
+  const snip = (t.snippet || '').slice(0, 400);
   const eid = (t.outlook_link || '').startsWith('outlook:') ? t.outlook_link.slice(8) : '';
   const open = eid ? ` onclick="openMail('${eid}')" style="cursor:pointer"` : '';
-  return `<div class="latest-comm"${open} title="${esc(t.subject)}${eid ? ' — 클릭하면 Outlook에서 열립니다' : ''}">📨 <b>${esc(threadWho(t))}</b> · ${when} — ${esc(snip)}</div>`;
+  return `<div class="latest-comm"${open} title="${esc(t.subject)}${eid ? ' — 클릭하면 Outlook에서 열립니다' : ''}"><div class="lc-clamp">📨 <b>${esc(threadWho(t))}</b> · ${when} — ${esc(snip)}</div></div>`;
 }
 
 // People as per-person role chips: roles come from the bridge map (structure
@@ -650,8 +670,8 @@ function peopleChips(m){
 // Threads grouped into conversation families: the direct thread as parent and
 // forks that spawned separate conversations (my FW to a new person, split
 // RE: chains) indented under it as ↳ side threads.
-function threadList(threads){
-  if(!threads || !threads.length) return '';
+// Family rows (direct thread + indented forks), newest family first.
+function famRows(threads){
   const fams = {};
   threads.forEach(t => {
     const k = normSubj(t.subject).toLowerCase() || t.id;
@@ -679,9 +699,47 @@ function threadList(threads){
     rows.push(row(fam.main, false));
     fam.side.forEach(t => rows.push(row(t, true)));
   });
+  return rows;
+}
+
+function threadList(threads){
+  if(!threads || !threads.length) return '';
+  const rows = famRows(threads);
   const shown = rows.slice(0, 6).join('');
   const more = rows.length > 6 ? `<div class="thread-more">+${rows.length - 6} more</div>` : '';
   return `<div class="threads">${shown}${more}</div>`;
+}
+
+// Multi-agenda matter → 주제 N sections, each owning its stakeholder map,
+// ball/next step and the threads that carry that agenda.
+function topicSections(m, S, topics){
+  const threads = m.threads || [];
+  const claimed = new Set(topics.flatMap(tp => tp.thread_ids || []));
+  let html = topics.map((tp, i) => {
+    const ids = tp.thread_ids || [];
+    const ths = threads.filter(t => ids.includes(t.id));
+    const pseudo = {sides: tp.sides || [], me: tp.me || S.me || {},
+                    ball: tp.ball || '', next_step: tp.next_step || {}};
+    const rows = famRows(ths);
+    return `<section class="topic-sect">
+      <div class="ts-head"><span class="ts-num">주제 ${i + 1}</span>${esc(tp.label)}</div>
+      ${tp.summary ? `<div class="ts-sum">${esc(tp.summary)}</div>` : ''}
+      ${structTreeFrom(pseudo)}
+      ${rows.length ? `<div class="threads">${rows.join('')}</div>` : ''}
+    </section>`;
+  }).join('');
+  const rest = threads.filter(t => !claimed.has(t.id));
+  if(rest.length)
+    html += `<section class="topic-sect"><div class="ts-head"><span class="ts-num">기타</span>미분류 스레드</div>
+      <div class="threads">${famRows(rest).join('')}</div></section>`;
+  return html;
+}
+
+function parseStruct(m){
+  try { return JSON.parse(m.structure || '{}') || {}; } catch(e){ return {}; }
+}
+function topicsOf(m){
+  return (parseStruct(m).topics || []).filter(tp => tp && tp.label);
 }
 
 function tierOf(m){ return (m.att || {}).tier || 'reference'; }

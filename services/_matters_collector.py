@@ -17,7 +17,7 @@ from datetime import date, datetime
 
 INBOX, SENT, DRAFTS, ARCHIVE = 6, 5, 16, 32  # 32 = olFolderArchive (Outlook 2016+)
 MAX_ITEMS = 1000
-SNIPPET = 200
+SNIPPET = 400
 OL_MAIL = 43
 
 CONNECT_HINT = (

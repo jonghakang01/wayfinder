@@ -13,6 +13,7 @@ import json
 import os
 import re
 import urllib.request
+from datetime import date, timedelta
 from pathlib import Path
 
 API_URL = "https://api.anthropic.com/v1/messages"
@@ -187,8 +188,13 @@ def parse_output(text: str) -> dict:
         raise RuntimeError(f"judge 응답에 JSON 없음: {text[:200]}")
     try:
         out = json.loads(m.group(0))
-    except json.JSONDecodeError as e:
-        raise RuntimeError(f"judge 응답 JSON 파싱 실패: {e} / {m.group(0)[:200]}") from e
+    except json.JSONDecodeError:
+        # Greedy span can glue two objects (model repeated itself / trailing
+        # prose with braces) — fall back to the first complete object.
+        try:
+            out, _end = json.JSONDecoder().raw_decode(text[m.start():])
+        except json.JSONDecodeError as e:
+            raise RuntimeError(f"judge 응답 JSON 파싱 실패: {e} / {m.group(0)[:200]}") from e
     out.setdefault("suggestions", [])
     out.setdefault("new_matters", [])
     out.setdefault("briefing", "")
@@ -378,7 +384,21 @@ For every matter, respond with a "structures" array item:
             "state": str (that side's current state, ≤12 Korean words)}],
  "me": {"role": str (Jongha's bridge role in this matter, ≤12 Korean words)},
  "ball": "me" | side label (who must act next — mirror the matter's ball/waiting),
- "next_step": {"who": str (person or 나), "what": str (≤15 Korean words)}}
+ "next_step": {"who": str (person or 나), "what": str (≤15 Korean words)},
+ "topics": [{"label": str (short Korean topic name), "summary": str (≤20 Korean words),
+             "sides": same schema as the matter-level sides — stakeholders for THIS agenda only,
+             "ball": "me" | side label (who must act next on THIS agenda),
+             "next_step": {"who": str, "what": str (≤15 Korean words)},
+             "thread_ids": [str (copy the mail id= value exactly, e.g. "com:ABC...")]}]}
+
+topics: ONLY when the matter genuinely bundles 2+ distinct agendas (e.g. a service
+wind-down that also carries a separate SOW discussion). Topics are the matter's top-level
+sections — stakeholders, ball and next step often DIFFER per agenda, so derive each
+topic's own sides/ball/next_step from the evidence for that agenda (a person may appear
+in one topic and not the other). Agendas may surface in the matter's own fields
+(waiting/next_action/notes), not only in mail subjects. A thread may appear under several
+topics if it carries several agendas. Single-agenda matters get "topics": [] — their
+matter-level sides/next_step already cover everything.
 
 Rules: 2 sides is typical; use 1 side when the matter has a single counterpart, 3+ only \
 when clearly distinct orgs are involved. Woosuk Jang is usually on Jongha's own side — \
@@ -386,7 +406,7 @@ list him under members of the side he coordinates, or a "Cheil 내부" side if h
 Respond ONLY with {"structures": [...]}."""
 
 
-def derive_structures(matters: list, threads_by_matter: dict) -> dict:
+def derive_structures(matters: list, threads_by_matter: dict, deep_threads=None) -> dict:
     """One batched call → bridge map JSON per matter. Claude only (stable schema)."""
     lines = ["# Matters"]
     for m in matters:
@@ -396,8 +416,13 @@ def derive_structures(matters: list, threads_by_matter: dict) -> dict:
             "next_action": m["next_action"], "notes": m["notes"],
         }, ensure_ascii=False))
         for t in threads_by_matter.get(m["id"], []):
-            lines.append(f"  mail: [{t.get('last_message_at','')}] {t.get('last_sender','')} | "
-                         f"{t.get('subject','')} | {t.get('snippet','')[:120]}")
+            lines.append(f"  mail: id={t.get('id')} [{t.get('last_message_at','')}] "
+                         f"{t.get('last_sender','')} | {t.get('subject','')} | "
+                         f"{t.get('snippet','')[:400]}")
+            dt = (deep_threads or {}).get(t.get("id"))
+            if dt:
+                for msg in dt.messages[:8]:
+                    lines.append(f"    msg: [{msg.sent_at}] {msg.sender} | {msg.body[:300]}")
     key = _api_key()
     if not key:
         raise RuntimeError("ANTHROPIC_API_KEY 없음")
@@ -421,7 +446,7 @@ def derive_structures(matters: list, threads_by_matter: dict) -> dict:
     return {s.get("matter_title", ""): s for s in out.get("structures", [])}
 
 
-def refresh_structures(conn, matter_id=None) -> int:
+def refresh_structures(conn, matter_id=None, deep_threads=None) -> int:
     """Regenerate the bridge map and store on each row (one matter, or all)."""
     from services import _matters_db as _db
     matters = _db.list_matters(conn)
@@ -430,11 +455,40 @@ def refresh_structures(conn, matter_id=None) -> int:
         if not matters:
             raise RuntimeError("사안을 찾을 수 없습니다")
     threads = {m["id"]: _db.threads_for_matter(conn, m["id"]) for m in matters}
-    structs = derive_structures(matters, threads)
+    deep = dict(deep_threads or {})
+    if matter_id is not None and not deep:
+        # Single-matter refresh (🌳 button): pull the live conversations so topic
+        # separation can see inside the threads — the DB keeps only each thread's
+        # last-message snippet, which hides agendas buried mid-conversation.
+        try:
+            from services._matters_mail import get_source
+            from services._matters_scan import _matter_queries
+            src = get_source()
+            if src.name != "fake":
+                since = date.today() - timedelta(days=90)
+                for q in _matter_queries(conn, src, matters[0]):
+                    for t in src.search_threads(q, since):
+                        deep.setdefault(t.id, t)
+        except RuntimeError:
+            pass  # Outlook unavailable — stored snippets still work
+    structs = derive_structures(matters, threads, deep_threads=deep)
     updated = 0
     for m in matters:
         s = structs.get(m["title"])
         if s:
+            # Batch refreshes judge 10+ matters at once and can drop a split the
+            # focused single-matter (🌳) run derived — carry existing topics over.
+            # Only the single-matter run is authoritative enough to clear them.
+            if matter_id is None and not s.get("topics"):
+                try:
+                    old = json.loads(m.get("structure") or "{}")
+                except (ValueError, TypeError):
+                    old = {}
+                if old.get("topics"):
+                    s["topics"] = old["topics"]
+            valid = {t["id"] for t in threads.get(m["id"], [])}
+            for topic in (s.get("topics") or []):
+                topic["thread_ids"] = [i for i in (topic.get("thread_ids") or []) if i in valid]
             _db.update_matter(conn, m["id"], {"structure": json.dumps(s, ensure_ascii=False)},
                               lock_edited=False)
             updated += 1

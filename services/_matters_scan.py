@@ -75,6 +75,7 @@ def run_scan(conn, source, since: date, use_judge: bool = True) -> dict:
     db.apply_pending_suggestions(conn)
     moved, seen_threads = [], set()
     threads_by_matter: dict[int, list] = {}
+    deep_threads: dict[str, object] = {}  # id → Thread (with messages) for topic derivation
     try:
         queries_by_matter = {m["id"]: _matter_queries(conn, source, m)
                              for m in db.list_matters(conn)}
@@ -90,6 +91,7 @@ def run_scan(conn, source, since: date, use_judge: bool = True) -> dict:
                     if t.id in seen_threads:
                         continue
                     seen_threads.add(t.id)
+                    deep_threads[t.id] = t
                     s = t.summary()
                     row = {"id": s.thread_id, "subject": s.subject,
                            "last_message_at": s.last_message_at, "last_sender": s.last_sender,
@@ -119,7 +121,7 @@ def run_scan(conn, source, since: date, use_judge: bool = True) -> dict:
                 except RuntimeError as e:
                     print(f"[judge] 실패(스캔은 계속): {e}")
                 try:
-                    n = judge.refresh_structures(conn)
+                    n = judge.refresh_structures(conn, deep_threads=deep_threads)
                     print(f"[judge] 관계도 갱신 {n}건")
                 except RuntimeError as e:
                     print(f"[judge] 관계도 갱신 실패(스캔은 계속): {e}")

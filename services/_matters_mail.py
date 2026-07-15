@@ -47,7 +47,7 @@ class Thread:
             thread_id=self.id, subject=self.subject,
             last_sender=lm.sender if lm else "",
             last_message_at=lm.sent_at if lm else "",
-            snippet=(lm.body[:200] if lm else ""),
+            snippet=(lm.body[:400] if lm else ""),
             outlook_link=self.outlook_link,
         )
 
