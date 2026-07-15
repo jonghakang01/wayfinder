@@ -185,6 +185,56 @@ select.sm{border:1px solid var(--border-bright);border-radius:6px;padding:3px 6p
 @media(max-width:640px){.struct{flex-direction:column}.slink{transform:rotate(90deg);align-self:flex-start;margin-left:20px}}
 .save-dot{position:fixed;bottom:18px;right:20px;font-size:.72rem;color:var(--muted);opacity:0;transition:opacity .3s}
 .save-dot.show{opacity:1}
+/* ---- to-do list rows ---- */
+.colhead,.lrow{display:grid;grid-template-columns:14px minmax(180px,1.05fr) 64px minmax(160px,1.25fr) minmax(140px,1fr) 64px 30px;
+  align-items:center;gap:12px}
+.colhead{padding:0 12px 6px;font-size:.62rem;color:var(--dim);text-transform:uppercase;letter-spacing:.06em}
+.lrow{padding:10px 12px;border-bottom:1px solid var(--border);cursor:pointer;border-radius:8px}
+.lrow:hover{background:var(--surface)}
+.lrow.done{opacity:.45}
+.ldot{width:9px;height:9px;border-radius:50%}
+.ldot.overdue{background:var(--me);box-shadow:0 0 6px var(--me)}
+.ldot.normal{background:#f5b642}
+.ldot.low{background:var(--dim)}
+.ltitle{font-weight:700;font-size:.88rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lrow:hover .ltitle{color:var(--accent)}
+.lbadge{font-size:.68rem;font-weight:700;border-radius:999px;padding:2px 0;text-align:center;white-space:nowrap}
+.lbadge.me{background:rgba(248,113,113,.12);color:var(--me);border:1px solid rgba(248,113,113,.35)}
+.lbadge.them{background:rgba(74,222,128,.10);color:var(--them);border:1px solid rgba(74,222,128,.3)}
+.lbadge.both{background:rgba(245,182,66,.1);color:#f5b642;border:1px solid rgba(245,182,66,.3)}
+.lnext{font-size:.78rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lcomm{font-size:.72rem;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lclock{font-size:.7rem;color:var(--muted);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.lclock.over{color:var(--me);font-weight:700}
+.ldone{border:1px solid var(--border);background:none;color:var(--dim);border-radius:6px;width:26px;height:24px;
+  cursor:pointer;font-size:.7rem;opacity:0;transition:opacity .12s}
+.lrow:hover .ldone,.lrow.done .ldone{opacity:1}
+.ldone:hover{border-color:var(--them);color:var(--them)}
+@media (max-width:760px){
+  .colhead{display:none}
+  .lrow{grid-template-columns:12px 1fr 56px 30px;row-gap:3px}
+  .lnext{grid-column:2/5}
+  .lcomm,.lclock{display:none}
+}
+/* ---- deep-dive panel (design A) ---- */
+.poverlay{position:fixed;inset:0;background:rgba(5,8,13,.55);opacity:0;pointer-events:none;transition:opacity .18s;z-index:110}
+.panel{position:fixed;top:0;right:0;bottom:0;width:min(620px,100%);background:var(--surface);z-index:120;
+  border-left:1px solid var(--border-bright);transform:translateX(102%);transition:transform .2s ease;
+  overflow-y:auto;padding:48px 28px 64px;box-shadow:-18px 0 42px rgba(0,0,0,.45)}
+body.panel-open .poverlay{opacity:1;pointer-events:auto}
+body.panel-open .panel{transform:none}
+@media (prefers-reduced-motion:reduce){.panel,.poverlay{transition:none}}
+.pclose{position:absolute;top:14px;right:18px;background:none;border:none;color:var(--muted);
+  font-size:1.15rem;cursor:pointer;z-index:2}
+.pclose:hover{color:var(--me)}
+/* the full card renders inside the panel — flatten its chrome, breathe more */
+.panel .card{background:none;border:none;border-left:none;padding:0}
+.panel .row1{margin-bottom:18px}
+.panel .fgrid{row-gap:14px}
+.panel .latest-comm{margin:16px 0 8px;padding:12px 14px}
+.panel .rc-row{margin-top:20px}
+.panel .threads{margin-top:18px;padding-top:16px}
+.panel .struct{margin-top:18px}
 button,select,input,textarea{font-family:inherit}
 :focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 """
@@ -206,6 +256,11 @@ PAGE_BODY = """<div class="mt-wrap">
   <div class="cands nm-sugg" id="addBody" hidden style="margin-top:10px"></div>
 </div>
 <div class="save-dot" id="saveDot">✓ 저장됨</div>
+<div class="poverlay" onclick="closePanel()"></div>
+<aside class="panel" aria-label="사안 딥다이브">
+  <button class="pclose" onclick="closePanel()" title="닫기 (Esc)">✕</button>
+  <div id="panelBody"></div>
+</aside>
 
 <script>
 const BALLS = ['나','공동','상대'];
@@ -237,7 +292,7 @@ async function load(){
   const d = await (await fetch('/matters/api')).json();
   DATA = d;
   renderKpis(d.kpis); renderSections(d.matters);
-  renderBriefing(d.briefing); renderAddPanel();
+  renderBriefing(d.briefing); renderAddPanel(); refreshPanel();
   const ls = d.last_scan;
   document.getElementById('sub').textContent =
     (ls ? `마지막 스캔: ${ls.finished_at} (${ls.source})${ls.changes_summary ? ' — ' + ls.changes_summary : ''}` : '스캔 이력 없음')
@@ -621,6 +676,42 @@ function threadList(threads){
 
 function tierOf(m){ return (m.att || {}).tier || 'reference'; }
 
+function latestOf(threads){
+  if(!threads || !threads.length) return null;
+  return threads.slice().sort((a,b)=>(b.last_message_at||'').localeCompare(a.last_message_at||''))[0];
+}
+
+// One matter = one to-do row; everything else lives in the deep-dive panel.
+function rowHtml(m){
+  const att = m.att || {};
+  const dot = att.overdue ? 'overdue' : ((m.urgency||'normal') === 'low' ? 'low' : 'normal');
+  const ballCls = m.ball === '나' ? 'me' : (m.ball === '상대' ? 'them' : 'both');
+  const lt = latestOf(m.threads);
+  const comm = lt ? `${threadWho(lt)} · ${(lt.last_message_at||'').slice(5,10)} — ${(lt.snippet||'').slice(0,70)}` : '';
+  let clock = '—';
+  if(att.tier === 'action' && att.hours_on_plate != null){
+    const h = Math.round(att.hours_on_plate);
+    clock = att.overdue ? `⚠ ${h}h` : `⏱ ${h}h`;
+  } else {
+    const ago = daysAgo(m.last_contact);
+    if(ago !== null) clock = ago === 0 ? '오늘' : ago + '일';
+  }
+  const done = m.status === '완료';
+  return `<div class="lrow${done ? ' done' : ''}" onclick="openPanel(${m.id})">
+    <span class="ldot ${dot}"></span>
+    <span class="ltitle">${esc(m.title)}</span>
+    <span class="lbadge ${ballCls}">${esc(m.ball)}</span>
+    <span class="lnext">${esc(m.next_action || '')}</span>
+    <span class="lcomm">${esc(comm)}</span>
+    <span class="lclock${att.overdue ? ' over' : ''}">${clock}</span>
+    <button class="ldone" title="${done ? '완료됨 — 되돌리기' : '완료 처리'}"
+      onclick="event.stopPropagation();save(${m.id},{status:'${done ? '진행중' : '완료'}'},true)">✔</button>
+  </div>`;
+}
+
+const COLHEAD = `<div class="colhead"><span></span><span>사안</span><span>공</span>
+  <span>Next — 누가·무엇</span><span>최신 소통</span><span>경과</span><span></span></div>`;
+
 function renderSections(ms){
   const root = document.getElementById('sections');
   const action = ms.filter(m => tierOf(m) === 'action').sort(attSort);
@@ -628,25 +719,47 @@ function renderSections(ms){
   const reference = ms.filter(m => tierOf(m) === 'reference');
   let html = '';
 
-  // ⚡ Needs You Now — the whole point of the dashboard.
   html += `<div class="sect s-now"><h2>⚡ 지금 내 액션 <span class="cnt">${action.length}</span></h2>`;
   html += action.length
-    ? `<div class="grid2">${action.map(card).join('')}</div>`
+    ? COLHEAD + action.map(rowHtml).join('')
     : `<div class="allclear">✓ 막힌 것 없음 — 지금 당장 할 액션이 없습니다.</div>`;
   html += `</div>`;
 
-  // ⏳ Waiting on others — reference; collapsed.
   if(waiting.length)
-    html += `<details class="sect s-wait"><summary>⏳ 상대 대기 <span class="cnt">${waiting.length}</span></summary>
-      <div class="grid2">${waiting.map(card).join('')}</div></details>`;
+    html += `<div class="sect s-wait"><h2>⏳ 상대 대기 <span class="cnt">${waiting.length}</span></h2>
+      ${waiting.map(rowHtml).join('')}</div>`;
 
-  // 📁 Reference — 보류·완료·레퍼런스; collapsed.
   if(reference.length)
-    html += `<details class="sect s-ref"><summary>📁 레퍼런스 <span class="cnt">${reference.length}</span></summary>
-      <div class="grid2">${reference.map(card).join('')}</div></details>`;
+    html += `<div class="sect s-ref"><h2>📡 모니터링·레퍼런스 <span class="cnt">${reference.length}</span></h2>
+      ${reference.map(rowHtml).join('')}</div>`;
 
   root.innerHTML = html;
 }
+
+// --- deep-dive panel (design A: right slide-in; full card content) ------------
+let PANEL_ID = null;
+
+function openPanel(id){
+  const m = (DATA.matters || []).find(x => x.id === id);
+  if(!m) return;
+  PANEL_ID = id;
+  document.getElementById('panelBody').innerHTML = card(m);
+  document.body.classList.add('panel-open');
+}
+
+function closePanel(){
+  PANEL_ID = null;
+  document.body.classList.remove('panel-open');
+}
+
+function refreshPanel(){
+  if(PANEL_ID === null) return;
+  const m = (DATA.matters || []).find(x => x.id === PANEL_ID);
+  if(!m || m.archived){ closePanel(); return; }
+  document.getElementById('panelBody').innerHTML = card(m);
+}
+
+document.addEventListener('keydown', e => { if(e.key === 'Escape') closePanel(); });
 
 // overdue first (most-breached on top), then urgency, then longest on plate.
 function attSort(a, b){
