@@ -281,6 +281,49 @@ def handle(method, path, body, ctx=None):
                 return ("json", res)
             if path == "/matters/api/matters":
                 return ("json", {"ok": True, "id": db.create_matter(conn, data)})
+            if path.startswith("/matters/api/matters/") and path.endswith("/split"):
+                mid = int(path.split("/")[4])
+                row = conn.execute("SELECT * FROM matters WHERE id=?", (mid,)).fetchone()
+                if not row:
+                    return ("json", {"error": "not found"})
+                threads = db.threads_for_matter(conn, mid)
+                if len(threads) < 2:
+                    return ("json", {"error": "스레드가 2개 미만이라 분리할 것이 없습니다"})
+                plan = judge.propose_split(dict(row), threads)
+                return ("json", {"ok": True, **plan})
+            if path.startswith("/matters/api/matters/") and path.endswith("/split_apply"):
+                mid = int(path.split("/")[4])
+                row = conn.execute("SELECT * FROM matters WHERE id=?", (mid,)).fetchone()
+                if not row:
+                    return ("json", {"error": "not found"})
+                valid_ids = {t["id"] for t in db.threads_for_matter(conn, mid)}
+                created = []
+                for item in (data.get("split") or []):
+                    fields = {
+                        "title": str(item.get("title", "")).strip() or "(제목 없음)",
+                        "people": str(item.get("people", "")),
+                        "next_action": str(item.get("next_action", "")),
+                        "search_queries": [str(q) for q in (item.get("search_queries") or [])][:3],
+                    }
+                    if item.get("ball") in ("나", "공동", "상대"):
+                        fields["ball"] = item["ball"]
+                    if item.get("urgency") in ("urgent", "normal", "low"):
+                        fields["urgency"] = item["urgency"]
+                    new_id = db.create_matter(conn, fields)
+                    tids = [i for i in (item.get("thread_ids") or []) if i in valid_ids]
+                    for tid in tids:
+                        conn.execute("UPDATE threads SET matter_id=? WHERE id=? AND matter_id=?",
+                                     (new_id, tid, mid))
+                    created.append({"id": new_id, "title": fields["title"], "threads": len(tids)})
+                keep_title = str((data.get("keep") or {}).get("title", "")).strip()
+                if keep_title:
+                    db.update_matter(conn, mid, {"title": keep_title}, lock_edited=False)
+                conn.commit()
+                run_id = db.start_scan_run(conn, "split")
+                db.finish_scan_run(conn, run_id,
+                                   f"split «{row['title']}» → {len(created)}개 분리: "
+                                   + ", ".join(c["title"] for c in created))
+                return ("json", {"ok": True, "created": created})
             if path.startswith("/matters/api/matters/") and path.endswith("/recheck"):
                 mid = int(path.split("/")[4])
                 return ("json", _handle_recheck(db, judge, get_source, conn, mid,

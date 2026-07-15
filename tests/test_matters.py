@@ -127,3 +127,28 @@ def test_matter_queries_include_thread_subject_for_forks(tmp_path, monkeypatch):
     qs = scan._matter_queries(conn, src, m)
     assert "Cheil-AIE Contract Reconfirm" in qs
     assert scan._norm_subject("FW: RE: [External Email] 전달: Hello World") == "Hello World"
+
+
+def test_split_apply_reassigns_threads(tmp_path, monkeypatch):
+    """Applying a split plan creates the new matter, moves only the listed
+    threads to it, and keeps the rest on the original."""
+    import services.matters as matters_svc
+    conn = _conn(tmp_path, monkeypatch)  # handle() opens its own conn to the same tmp DB
+    m = db.list_matters(conn)[0]
+    for i in (1, 2):
+        db.upsert_thread(conn, {
+            "id": f"fake:sp{i}", "subject": f"Topic {i}", "last_message_at": f"2026-07-0{i}T09:00:00",
+            "last_sender": "a@b.com", "snippet": "", "outlook_link": ""}, matter_id=m["id"])
+    plan = {"split": [{"title": "분리된 사안", "people": "A", "next_action": "",
+                       "ball": "상대", "urgency": "low", "search_queries": ["Topic 2"],
+                       "thread_ids": ["fake:sp2", "fake:not-mine"]}],
+            "keep": {"title": "남는 사안"}}
+    kind, res = matters_svc.handle("POST", f"/matters/api/matters/{m['id']}/split_apply", plan,
+                                   {"user": "jongha.kang"})
+    assert res["ok"] and res["created"][0]["threads"] == 1  # foreign id ignored
+    new_id = res["created"][0]["id"]
+    nm = next(x for x in db.list_matters(conn) if x["id"] == new_id)
+    assert nm["ball"] == "상대" and nm["urgency"] == "low"
+    assert {t["id"] for t in db.threads_for_matter(conn, new_id)} == {"fake:sp2"}
+    assert "fake:sp1" in {t["id"] for t in db.threads_for_matter(conn, m["id"])}
+    assert next(x for x in db.list_matters(conn) if x["id"] == m["id"])["title"] == "남는 사안"

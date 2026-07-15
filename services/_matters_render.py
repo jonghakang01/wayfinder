@@ -393,6 +393,7 @@ function card(m){
     </div>
     <div class="rc-row">
       <button class="rc-btn" onclick="recheckMatter(${m.id},3)" title="아래 칸에 사람/키워드를 넣으면 그 기준으로, 비우면 People 전원+제목으로 최근 메일(내 발신 포함)을 다시 훑어 재판단합니다">🔎 재점검</button>
+      <button class="rc-btn" onclick="splitMatter(${m.id})" title="여러 건이 한 사안에 뭉쳐 있으면 AI가 분리안을 제안합니다 (실행 전 확인)">✂ 분리</button>
       <input class="rc-input" id="rcq-${m.id}" placeholder="사람·키워드 (예: Ram, SOW) — 비우면 People 전원"
         onkeydown="if(event.key==='Enter'){event.preventDefault();recheckMatter(${m.id},3);}">
     </div>
@@ -400,6 +401,50 @@ function card(m){
     ${structTree(m)}
     ${threadList(m.threads)}
   </div>`;
+}
+
+const SPLIT_PLANS = {};
+
+async function splitMatter(id){
+  const box = document.getElementById('rc-' + id);
+  if(box) box.innerHTML = '<span class="rc-load">✂ 분리안 분석 중… (AI가 스레드를 검토합니다)</span>';
+  let r;
+  try {
+    r = await (await fetch('/matters/api/matters/' + id + '/split', {method:'POST',
+      headers:{'Content-Type':'application/json'}, body:'{}'})).json();
+  } catch(e){ if(box) box.innerHTML = '<span class="rc-err">⚠ 요청 실패</span>'; return; }
+  if(!box) return;
+  if(r.error){ box.innerHTML = `<span class="rc-err">⚠ ${esc(r.error)}</span>`; return; }
+  if(!r.split || !r.split.length){
+    box.innerHTML = '<div class="rc-res">✓ 하나의 사안으로 판단됨 — 분리할 항목이 없습니다</div>';
+    return;
+  }
+  SPLIT_PLANS[id] = r;
+  const items = r.split.map(it =>
+    `<li><b>${esc(it.title)}</b> <span class="why">${esc(it.reason)}</span>
+      <span class="why">· 스레드 ${it.thread_ids.length}개 · ${esc(it.ball)}/${esc(it.urgency)}</span></li>`).join('');
+  const keep = r.keep && r.keep.title
+    ? `<div class="why" style="margin-top:4px">원 사안 제목 → «${esc(r.keep.title)}»</div>` : '';
+  box.innerHTML = `<div class="rc-res">✂ ${r.split.length}개 사안으로 분리 제안:
+    <ul style="margin:6px 0 0;padding-left:18px">${items}</ul>${keep}
+    <div style="margin-top:8px;display:flex;gap:8px">
+      <button class="touch-btn" onclick="applySplit(${id})">✂ 분리 실행</button>
+      <button class="touch-btn" onclick="document.getElementById('rc-${id}').innerHTML=''">닫기</button>
+    </div></div>`;
+}
+
+async function applySplit(id){
+  const plan = SPLIT_PLANS[id];
+  if(!plan) return;
+  const box = document.getElementById('rc-' + id);
+  if(box) box.innerHTML = '<span class="rc-load">분리 적용 중…</span>';
+  try {
+    const r = await (await fetch('/matters/api/matters/' + id + '/split_apply', {method:'POST',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify(plan)})).json();
+    if(!r.ok){ if(box) box.innerHTML = `<span class="rc-err">⚠ ${esc(r.error || '실패')}</span>`; return; }
+  } catch(e){ if(box) box.innerHTML = '<span class="rc-err">⚠ 요청 실패</span>'; return; }
+  delete SPLIT_PLANS[id];
+  load();
 }
 
 async function recheckMatter(id, days){
