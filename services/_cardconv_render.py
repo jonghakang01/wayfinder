@@ -918,6 +918,14 @@ def _render_review(user: str) -> str:
     completed_n = sum(1 for e in rows if e.get("status") == "completed")
     li          = pool.get("last_ingest") or {}
     dup_skipped = li.get("dup_skipped", 0)
+    # Card/usage live on the ledger receipts, not in the pool's receipt
+    # snapshot — look them up by receipt id for the filters.
+    _rcpt_attrs = {e.get("id"): (e.get("card_brand") or "", e.get("usage") or "Regular")
+                   for e in _ledger_entries(user)}
+    usages      = sorted({_rcpt_attrs.get((e.get("receipt") or {}).get("id"), ("", "Regular"))[1]
+                          for e in rows if e.get("matched")})
+    usage_opts  = '<option value="all">All</option>' + ''.join(
+        f'<option value="{_esc(u)}">{_esc(u)}</option>' for u in usages)
 
     def _money(a):
         return f'${a:,.2f}' if isinstance(a, (int, float)) else (_esc(a) or '–')
@@ -1014,6 +1022,8 @@ def _render_review(user: str) -> str:
                 f'<div class="{item_cls}" data-date="{row_date}" '
                 f'data-merchant="{row_merchant}" '
                 f'data-status="{st}" '
+                f'data-card="{_esc(_rcpt_attrs.get(rc.get("id"), ("", ""))[0])}" '
+                f'data-usage="{_esc(_rcpt_attrs.get(rc.get("id"), ("", "Regular"))[1] if is_matched else "")}" '
                 f'data-matched="{"1" if is_matched else "0"}">{txn}{receipt_block}</div>')
         body_html = "".join(items)
 
@@ -1022,12 +1032,10 @@ def _render_review(user: str) -> str:
                      '<div class="fb-menu" id="rvExportMenu">'
                      '<button id="rvDownload" class="fb-menu-item" '
                      'title="SAP upload file (for_upload_*.xlsx)">⬇ xlsx (SAP)</button>'
-                     '<button id="rvDownloadPdf" class="fb-menu-item" '
-                     'title="Receipt images of the matched transactions">⬇ PDF</button>'
-                     '<button id="rvDownloadBoth" class="fb-menu-item" '
-                     'title="Download the SAP xlsx and the receipt PDF together">⬇ Both <small>xlsx + PDF</small></button>'
                      '<button id="rvDownloadReport" class="fb-menu-item" '
-                     'title="Human-readable report: expense table + labeled receipt images">📋 Expense Report</button>'
+                     'title="Receipt report: expense table + labeled receipt images (replaces the PDF)">⬇ xlsx (Receipt)</button>'
+                     '<button id="rvDownloadBoth" class="fb-menu-item" '
+                     'title="Download the SAP xlsx and the receipt xlsx together">⬇ Both <small>SAP + Receipt</small></button>'
                      '</div></span>')
                     if total else '')
     if li:
@@ -1156,6 +1164,18 @@ def _render_review(user: str) -> str:
       <input type="date" id="rvFrom"> ~ <input type="date" id="rvTo">
     </span>
     <span class="fb-field fb-search">🔍 <input type="text" id="rvMerchant" placeholder="Search merchant…"></span>
+    <span class="fb-field"><span>Card</span>
+      <select id="rvCard">
+        <option value="all">All</option>
+        <option value="amex">AMEX</option>
+        <option value="visa">Visa</option>
+        <option value="other">Cash</option>
+        <option value="unknown">–</option>
+      </select>
+    </span>
+    <span class="fb-field"><span>Usage</span>
+      <select id="rvUsage">{usage_opts}</select>
+    </span>
     <span class="fb-field"><span>Sort</span>
       <select id="rvSort">
         <option value="date">Date ↓</option>
@@ -1219,12 +1239,15 @@ let rvMatchedF = 'all';   // 'all' | '1' | '0' — set by the Matched/Unmatched 
 function applyFilter(){{
   const from = $('rvFrom').value, to = $('rvTo').value;
   const mq = $('rvMerchant').value.trim().toLowerCase();
+  const cardF = $('rvCard').value, usageF = $('rvUsage').value;
   document.querySelectorAll('.rv-item').forEach(it => {{
     const d = it.dataset.date || '';
     const show = (it.dataset.status === rvView)
       && (rvMatchedF === 'all' || it.dataset.matched === rvMatchedF)
       && (!from || !d || d >= from) && (!to || !d || d <= to)
-      && (!mq || (it.dataset.merchant || '').includes(mq));
+      && (!mq || (it.dataset.merchant || '').includes(mq))
+      && (cardF === 'all' || (cardF === 'unknown' ? !it.dataset.card : it.dataset.card === cardF))
+      && (usageF === 'all' || it.dataset.usage === usageF);
     it.style.display = show ? '' : 'none';
     if(!show) it.querySelector('.rv-cb').checked = false;
   }});
@@ -1312,6 +1335,8 @@ function applyPreset(p){{
 
 let _rvmDeb;
 $('rvMerchant').addEventListener('input', () => {{ clearTimeout(_rvmDeb); _rvmDeb = setTimeout(applyFilter, 250); }});
+$('rvCard').addEventListener('change', applyFilter);
+$('rvUsage').addEventListener('change', applyFilter);
 $('rvSort').addEventListener('change', applySort);
 $('rvFrom').addEventListener('change', applyFilter);
 $('rvTo').addEventListener('change', applyFilter);
@@ -1325,6 +1350,7 @@ $('rvPeriod').addEventListener('change', () => {{
 $('rvReset').addEventListener('click', () => {{
   $('rvFrom').value = ''; $('rvTo').value = ''; $('rvMerchant').value = '';
   $('rvPeriod').value = 'all'; $('rvCustomRange').hidden = true;
+  $('rvCard').value = 'all'; $('rvUsage').value = 'all';
   $('rvSort').value = 'date'; applySort();
   rvView = 'open'; rvMatchedF = 'all';
   document.querySelectorAll('.stat-click').forEach(c => c.classList.toggle('active', c.dataset.rvview === 'open'));
@@ -1382,11 +1408,6 @@ if(rvDl){{
     window.location = '/cardconv/review/download?' + rvDlParams().toString();
     rvOfferInProgress();
   }});
-  $('rvDownloadPdf').addEventListener('click', () => {{
-    rvCloseExport();
-    window.location = '/cardconv/review/download.pdf?' + rvDlParams().toString();
-    rvOfferInProgress();
-  }});
   $('rvDownloadReport').addEventListener('click', () => {{
     rvCloseExport();
     window.location = '/cardconv/review/expense_report?' + rvDlParams().toString();
@@ -1396,7 +1417,7 @@ if(rvDl){{
   $('rvDownloadBoth').addEventListener('click', () => {{
     rvCloseExport();
     const q = rvDlParams().toString();
-    ['/cardconv/review/download?', '/cardconv/review/download.pdf?'].forEach(u => {{
+    ['/cardconv/review/download?', '/cardconv/review/expense_report?'].forEach(u => {{
       const f = document.createElement('iframe');
       f.style.display = 'none';
       f.src = u + q;
@@ -1410,8 +1431,8 @@ if(rvDl){{
     if(!e.target.classList || (!e.target.classList.contains('rv-cb') && e.target.id !== 'rvSelAll')) return;
     const n = document.querySelectorAll('.rv-cb:checked').length;
     rvDl.textContent = n ? ('⬇ xlsx (SAP · ' + n + ' selected)') : '⬇ xlsx (SAP)';
-    $('rvDownloadPdf').textContent = n ? ('⬇ PDF (' + n + ' selected)') : '⬇ PDF';
-    $('rvDownloadBoth').innerHTML = '⬇ Both' + (n ? (' (' + n + ' selected)') : '') + ' <small>xlsx + PDF</small>';
+    $('rvDownloadReport').textContent = n ? ('⬇ xlsx (Receipt · ' + n + ' selected)') : '⬇ xlsx (Receipt)';
+    $('rvDownloadBoth').innerHTML = '⬇ Both' + (n ? (' (' + n + ' selected)') : '') + ' <small>SAP + Receipt</small>';
   }});
 }}
 
