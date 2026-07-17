@@ -6,9 +6,23 @@ on:
   workflow_dispatch:
 
 jobs:
+  test:
+    # Safety net behind the local pre-push hook — nothing deploys on red tests.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install deps
+        run: pip install -q pytest openpyxl Pillow fpdf2
+      - name: Run pytest
+        run: python -m pytest tests/ -q
+
   deploy:
     # Only deploy when commit message contains [deploy] tag, or manually triggered
     if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[deploy]')
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - name: Write Google credentials
@@ -45,6 +59,7 @@ jobs:
     # Every push to main deploys to staging (no [deploy] tag needed).
     # Manual workflow_dispatch targets prod only, so staging is skipped there.
     if: github.event_name == 'push'
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - name: Deploy to staging via SSH
