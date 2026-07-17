@@ -3465,7 +3465,8 @@ def _handle_expense_report(username: str, query: dict):
     if not entries:
         return ("html", "<h2 style='padding:40px'>No transactions to export.</h2>", 404)
     xlsx = _build_expense_report(username, entries)
-    fn = f"expense_report_{date.today().isoformat()}.xlsx"
+    # Same naming convention as the receipt PDF this report replaces.
+    fn = f"receipts_{username}_{date.today().isoformat()}.xlsx"
     return ("file_inline", xlsx,
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fn)
 
@@ -3481,7 +3482,7 @@ def _build_expense_report(username: str, entries: list) -> bytes:
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Expense Report"
-    for col, w in {"A": 26, "B": 12, "C": 16, "D": 44, "E": 30, "F": 7, "G": 12}.items():
+    for col, w in {"A": 26, "B": 12, "C": 16, "D": 36, "E": 30, "F": 7, "G": 12}.items():
         ws.column_dimensions[col].width = w
 
     bold = Font(bold=True)
@@ -3532,7 +3533,29 @@ def _build_expense_report(username: str, entries: list) -> bytes:
     ws.cell(row=r, column=1, value="RECEIPTS    2 per row").font = bold
     service = _get_drive_service(username)
     img_refs = []  # keep BytesIO alive until save
-    ANCHORS = ((1, 4, "A"), (5, 7, "E"))  # (label span start, span end, image col)
+
+    # This report replaces the receipt PDF, so images must stay readable —
+    # encode as large as the per-image share of a ~10 MB workbook allows,
+    # stepping down the ladder only when a photo is too heavy.
+    n_imgs = sum(1 for e in entries
+                 if e.get("matched") and (e.get("receipt") or {}).get("file_id"))
+    per_img_budget = 9_000_000 // max(1, n_imgs)
+    LADDER = ((460, 520, 85), (460, 460, 72), (440, 390, 68), (360, 320, 62), (300, 260, 55))
+
+    def encode(im):
+        for w, h, q in LADDER:
+            t = im.copy()
+            t.thumbnail((w, h))
+            buf = io.BytesIO()
+            t.save(buf, format="JPEG", quality=q)
+            if buf.tell() <= per_img_budget:
+                break
+        buf.seek(0)
+        return t, buf
+
+    # Anchor at B/E (not A) so the grid sits off the left edge, and the pair
+    # reads as one block rather than two far-apart columns.
+    ANCHORS = ((2, 4, "B"), (5, 7, "E"))  # (label span start, span end, image col)
     for i in range(0, len(entries), 2):
         label_row, img_row = r + 1, r + 2
         max_h = 60.0
@@ -3553,11 +3576,7 @@ def _build_expense_report(username: str, entries: list) -> bytes:
                 continue
             try:
                 im = ImageOps.exif_transpose(PILImage.open(io.BytesIO(raw)))
-                im = im.convert("RGB")
-                im.thumbnail((340, 300))
-                buf = io.BytesIO()
-                im.save(buf, format="JPEG", quality=70)
-                buf.seek(0)
+                im, buf = encode(im.convert("RGB"))
                 xi = XLImage(buf)
                 xi.width, xi.height = im.width, im.height
                 ws.add_image(xi, f"{img_col}{img_row}")
