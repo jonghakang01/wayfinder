@@ -187,7 +187,8 @@ def _tab_bar(active: str, user: str) -> str:
     sync_js = (
         '<script>(function(){var n=document.querySelector("nav"),'
         't=document.querySelector(".cc-tabbar");if(!n||!t)return;'
-        'var f=function(){t.style.top=n.offsetHeight+"px"};'
+        'var f=function(){t.style.top=n.offsetHeight+"px";'
+        'document.documentElement.style.setProperty("--cc-sticky-top",(n.offsetHeight+t.offsetHeight-10)+"px")};'
         'f();window.addEventListener("resize",f);})();</script>'
     )
     return '<div class="cc-tabbar">' + "".join(out) + '</div>' + sync_js + _workflow_bar(active, user)
@@ -1073,6 +1074,11 @@ def _render_review(user: str) -> str:
 .fb-menu-item:hover{{background:var(--surface-2)}}
 .fb-menu-item small{{color:var(--text-muted);font-weight:500}}
 .rv-list{{display:flex;flex-direction:column;gap:10px}}
+.rv-head{{display:flex;gap:14px;padding:8px 15px;position:sticky;top:var(--cc-sticky-top,104px);z-index:30;background:var(--bg-deep)}}
+.rv-head span{{font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted)}}
+.rv-h-cb{{flex:0 0 18px}}
+.rv-h-txn{{flex:0 0 280px}}
+.rv-h-receipt{{flex:1}}
 .rv-item{{display:flex;gap:14px;align-items:stretch;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md);padding:12px 14px}}
 .rv-item.unmatched{{border-color:rgba(239,68,68,.35);background:rgba(239,68,68,.06)}}
 .rv-item.done{{opacity:.65}}
@@ -1088,7 +1094,8 @@ def _render_review(user: str) -> str:
 .rv-receipt{{flex:1;min-width:0;border-left:1px solid var(--border);padding-left:14px}}
 .rv-receipt.matched{{display:flex;gap:14px;align-items:center}}
 .rv-thumb{{width:200px;height:170px;flex:none;border-radius:8px;object-fit:cover;border:1px solid var(--border);background:var(--surface-3);cursor:zoom-in;transition:border-color .12s}}
-@media(max-width:900px){{.rv-txn{{flex-basis:220px}}.rv-thumb{{width:150px;height:140px}}}}
+@media(max-width:900px){{.rv-txn{{flex-basis:220px}}.rv-h-txn{{flex-basis:220px}}.rv-thumb{{width:150px;height:140px}}}}
+@media(max-width:600px){{.rv-head{{display:none}}}}
 .rv-thumb:hover{{border-color:var(--accent)}}
 .rv-lb{{position:fixed;inset:0;background:rgba(2,6,23,.82);display:none;align-items:center;justify-content:center;z-index:1000;padding:24px}}
 .rv-lb.open{{display:flex}}
@@ -1173,6 +1180,11 @@ def _render_review(user: str) -> str:
 
   <div class="notepad-card">
     <div class="notepad-body" style="padding:12px 14px">
+      <div class="rv-head">
+        <span class="rv-h-cb"></span>
+        <span class="rv-h-txn">Transaction · from statement CSV</span>
+        <span class="rv-h-receipt">Matched receipt · from Ledger</span>
+      </div>
       <div class="rv-list">{body_html}</div>
     </div>
   </div>
@@ -1755,6 +1767,11 @@ __TABCSS__
   letter-spacing:.07em;color:var(--text-muted);border-bottom:1px solid var(--border)}
 .ledger-table td{padding:10px 7px;border-bottom:1px solid var(--border);vertical-align:middle}
 .ledger-scroll{overflow-x:auto}
+/* Wide screens: the table fits, so trade the (unused) x-scroll for sticky column headers. */
+@media(min-width:900px){
+  .ledger-scroll{overflow:visible}
+  .ledger-table th{position:sticky;top:var(--cc-sticky-top,104px);background:var(--bg-deep);z-index:30}
+}
 .ledger-table tbody tr:hover td{background:var(--surface-2);cursor:pointer}
 .ledger-table tr:last-child td{border-bottom:none}
 .ledger-table tr.dup-row td{background:rgba(250,204,21,.10)}
