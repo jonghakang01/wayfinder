@@ -80,6 +80,9 @@ STYLE = """
   --shadow-lg:0 8px 32px rgba(28,36,48,0.14);
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
+/* Reserve the scrollbar gutter so short views (0-item filters etc.) don't
+   shift the layout sideways when the vertical scrollbar disappears. */
+html { scrollbar-gutter: stable; }
 input, textarea, select, button { font-family: inherit; font-size: inherit; }
 body { font-family: 'Pretendard Variable', Pretendard, -apple-system, system-ui, sans-serif; background: var(--bg-deep); color: var(--text); line-height: 1.5; -webkit-font-smoothing: antialiased; min-height: 100vh; }
 
