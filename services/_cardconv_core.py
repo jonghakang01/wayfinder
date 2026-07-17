@@ -2217,7 +2217,13 @@ def _handle_ledger_api(username: str, query: dict):
                                      f["merchant"], f["sort"], f["settle"])
     _mark_duplicates(filtered)
 
-    stats   = _ledger_stats(filtered)
+    # Stat cards are view switchers — their numbers must not change with the
+    # view dimensions they control (status/settle/completed). Compute stats on
+    # a base that keeps only the user filters (date/card/usage/merchant).
+    stats_base = _apply_ledger_filters(entries, "all", f["dfrom"], f["dto"],
+                                       f["card_brand"], f["usage"], "hide",
+                                       f["merchant"], f["sort"], "all")
+    stats   = _ledger_stats(stats_base)
     total_f = len(filtered)
     if limit > 0:
         pages = max(1, (total_f + limit - 1) // limit)
