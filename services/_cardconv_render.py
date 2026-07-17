@@ -1419,6 +1419,7 @@ function rvOpenLightbox(data){{
   let boxes = (data.siblings && data.siblings.length)
     ? data.siblings.filter(s => Array.isArray(s.ocr_bbox))
     : (Array.isArray(data.bbox) ? [{{id: data.id, ocr_bbox: data.bbox}}] : []);
+  if (boxes.length < 2) boxes = [];  // single receipt on the image — overlay is just noise
   rvLbSvg.innerHTML=''; rvLbSvg.style.display='none';
   rvLbImg.src = '/cardconv/receipts/image/' + data.fid;
   $('rvLbCaption').textContent = data.merchant || '';
@@ -2470,7 +2471,8 @@ function drawBoxes(cur){
 }
 
 function paintBoxes(svg, img, sibs, cur){
-  if(!sibs.length || !img.naturalWidth){ svg.innerHTML=''; svg.style.display='none'; return; }
+  // A lone receipt fills the photo — the box overlay only helps disambiguate multi-receipt pages.
+  if(sibs.length < 2 || !img.naturalWidth){ svg.innerHTML=''; svg.style.display='none'; return; }
   // object-fit:contain → find the rendered image rect inside the <img> box.
   const cW=img.clientWidth, cH=img.clientHeight, nW=img.naturalWidth, nH=img.naturalHeight;
   const scale=Math.min(cW/nW, cH/nH);
