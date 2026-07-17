@@ -167,8 +167,12 @@ _CC_TAB_CSS = (
 
 def _tab_bar(active: str, user: str) -> str:
     """Shared Card Converter tab bar. active ∈ ledger|convert|review|history|keywords."""
-    unmatched_n = _ledger_stats(_ledger_entries(user))["unmatched"]
-    ledger_badge = (f'<span class="tab-badge" title="{unmatched_n} unmatched receipt(s) — click to view" '
+    # Same definition as the Ledger's Unmatched stat card: unmatched + pending
+    # match, completed excluded — the two surfaces must agree.
+    _active = [e for e in _ledger_entries(user) if not e.get("completed")]
+    _st = _ledger_stats(_active)
+    unmatched_n = _st["unmatched"] + _st["pending_match"]
+    ledger_badge = (f'<span class="tab-badge" title="{unmatched_n} receipt(s) awaiting match — click to view" '
                     f'style="cursor:pointer" '
                     f'onclick="location.href=\'/cardconv/ledger?view=unmatched\';return false;">{unmatched_n}</span>'
                     if unmatched_n else '')
