@@ -582,6 +582,15 @@ def wayfinder(user):
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
 
+    def handle(self):
+        # A client hanging up mid-response is routine (health checks, page
+        # navigations) — swallow it here so journalctl isn't flooded with
+        # BrokenPipe tracebacks that bury real errors.
+        try:
+            super().handle()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
     def send_html(self, html, code=200):
         html = html.replace('</head>', PWA_INJECT + '</head>', 1)
         if '</body>' in html:
