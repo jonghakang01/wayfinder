@@ -956,7 +956,7 @@ def _render_review(user: str) -> str:
             # Inline matched-receipt mini card, or unmatched + loss-reason input
             if is_matched and rc.get("file_id"):
                 fid   = rc["file_id"]
-                tn    = f'https://drive.google.com/thumbnail?id={fid}&sz=w240'
+                tn    = f'https://drive.google.com/thumbnail?id={fid}&sz=w400'
                 proxy = f'/cardconv/receipts/image/{fid}'
                 link  = (f'<a href="{_esc(rc.get("drive_url"))}" target="_blank" '
                          f'class="rv-drive-link">🔗 Drive</a>' if rc.get("drive_url") else '')
@@ -997,7 +997,7 @@ def _render_review(user: str) -> str:
                         f'onclick="rvOpenMatchPanel(this)" '
                         f'data-txn="{txn_json}" '
                         f'class="btn btn-ghost btn-sm" '
-                        f'style="margin-top:6px;font-size:.74rem;color:var(--accent);width:100%">'
+                        f'style="margin-top:6px;font-size:.74rem;color:var(--accent)">'
                         f'🔗 Match manually</button>')
                 receipt_block = (
                     '<div class="rv-receipt unmatched">'
@@ -1078,16 +1078,17 @@ def _render_review(user: str) -> str:
 .rv-item.done{{opacity:.65}}
 .rv-cb-wrap{{display:flex;align-items:center;padding-right:2px;cursor:pointer}}
 .rv-cb{{width:16px;height:16px;accent-color:var(--accent);cursor:pointer}}
-.rv-txn{{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;gap:6px}}
+.rv-txn{{flex:0 0 280px;min-width:0;display:flex;flex-direction:column;justify-content:center;gap:6px}}
 .rv-txn-main{{display:flex;flex-direction:column;gap:2px}}
 .rv-date{{font-size:.74rem;color:var(--text-muted)}}
 .rv-merchant{{font-size:.95rem;font-weight:700;color:var(--text)}}
 .rv-txn-meta{{display:flex;gap:12px;align-items:baseline;flex-wrap:wrap}}
 .rv-amt{{font-size:1.05rem;font-weight:700;color:var(--text)}}
 .rv-gl{{font-size:.74rem;color:var(--text-muted)}}
-.rv-receipt{{flex:0 0 230px;border-left:1px solid var(--border);padding-left:14px}}
-.rv-receipt.matched{{display:flex;gap:12px;align-items:flex-start}}
-.rv-thumb{{width:120px;height:120px;border-radius:8px;object-fit:cover;border:1px solid var(--border);background:var(--surface-3);cursor:zoom-in;transition:border-color .12s}}
+.rv-receipt{{flex:1;min-width:0;border-left:1px solid var(--border);padding-left:14px}}
+.rv-receipt.matched{{display:flex;gap:14px;align-items:center}}
+.rv-thumb{{width:200px;height:170px;flex:none;border-radius:8px;object-fit:cover;border:1px solid var(--border);background:var(--surface-3);cursor:zoom-in;transition:border-color .12s}}
+@media(max-width:900px){{.rv-txn{{flex-basis:220px}}.rv-thumb{{width:150px;height:140px}}}}
 .rv-thumb:hover{{border-color:var(--accent)}}
 .rv-lb{{position:fixed;inset:0;background:rgba(2,6,23,.82);display:none;align-items:center;justify-content:center;z-index:1000;padding:24px}}
 .rv-lb.open{{display:flex}}
@@ -1109,7 +1110,7 @@ def _render_review(user: str) -> str:
 .rv-drive-link:hover{{text-decoration:underline}}
 .rv-nomatch{{color:var(--danger);font-size:.84rem;font-weight:700;margin-bottom:6px}}
 
-@media(max-width:600px){{.rv-item{{flex-direction:column;gap:10px}}.rv-receipt{{flex:none;border-left:none;border-top:1px solid var(--border);padding-left:0;padding-top:10px}}}}
+@media(max-width:600px){{.rv-item{{flex-direction:column;gap:10px}}.rv-txn{{flex:none}}.rv-receipt{{flex:none;border-left:none;border-top:1px solid var(--border);padding-left:0;padding-top:10px}}}}
 .rv-foot{{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 4px;flex-wrap:wrap}}
 @media(max-width:600px){{.stat-grid{{grid-template-columns:1fr 1fr 1fr}}}}
 </style>
