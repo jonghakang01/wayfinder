@@ -1561,6 +1561,30 @@ def _render_ocr_staging_review(user: str) -> str:
     staging  = _load_ocr_staging(user)
     entries  = staging.get("entries", [])
 
+    # Photos carrying 3+ receipts: OCR reliability drops sharply — warn and
+    # offer a confirmed remove-and-reupload path (entry + Drive file).
+    fid_counts = Counter(e.get("file_id") for e in entries if e.get("file_id"))
+    crowd_rows = ""
+    for fid, n in fid_counts.items():
+        if n < 3:
+            continue
+        fn = next((e.get("filename") for e in entries if e.get("file_id") == fid), "") or fid
+        crowd_rows += (
+            '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:5px 0">'
+            f'<span style="font-weight:600">{_esc(fn)}</span>'
+            f'<span style="color:var(--text-muted)">— {n} receipts on one photo</span>'
+            f'<button type="button" class="btn btn-danger btn-sm" '
+            f'onclick="stgDiscardFile(\'{_esc(fid)}\',{n})">🗑 Remove photo &amp; re-upload</button>'
+            '</div>')
+    crowd_banner = (
+        '<div style="background:color-mix(in srgb, var(--warning,#f59e0b) 10%, transparent);'
+        'border:1px solid var(--warning,#f59e0b);border-radius:var(--radius-md,8px);'
+        'padding:12px 16px;margin-bottom:16px;font-size:.84rem;line-height:1.6">'
+        '⚠️ <b>3+ receipts detected on a single photo.</b> OCR often misreads crowded shots — '
+        'aim for 1–2 receipts per photo. Remove the photo below and re-upload as separate shots, '
+        'or keep it and correct the fields manually.'
+        f'{crowd_rows}</div>') if crowd_rows else ""
+
     def money(a):
         return f'${a:,.2f}' if isinstance(a, (int, float)) else (_esc(str(a)) if a else '–')
 
@@ -1682,6 +1706,7 @@ def _render_ocr_staging_review(user: str) -> str:
       <button type="button" onclick="toggleAll(false)" class="btn btn-secondary" style="font-size:.82rem;padding:6px 14px">Uncheck All</button>
     </div>
   </div>
+  {crowd_banner}
   <form method="POST" action="/cardconv/receipts/review/confirm" id="stgForm">
     <div class="stg-grid">
       {body_html}
@@ -1700,6 +1725,14 @@ def _render_ocr_staging_review(user: str) -> str:
 <script>
 function toggleAll(on) {{
   document.querySelectorAll('#stgForm input[type=checkbox]').forEach(cb => cb.checked = on);
+}}
+function stgDiscardFile(fid, n) {{
+  if (!confirm('Remove this photo and its ' + n + ' receipts from the queue?\\n' +
+               'The Drive file is moved to trash — re-upload as separate photos.')) return;
+  fetch('/cardconv/receipts/review/discard-file', {{
+    method: 'POST', headers: {{'Content-Type': 'application/x-www-form-urlencoded'}},
+    body: 'file_id=' + encodeURIComponent(fid)
+  }}).then(function(r) {{ return r.json(); }}).then(function() {{ location.reload(); }});
 }}
 </script>
 </body></html>'''
@@ -3206,7 +3239,28 @@ function _imgLbKey(e){ if(e.key==='Escape') closeImgLb(); }
       body.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:var(--text-muted);padding:40px">No pending entries.</div>';
       return;
     }
-    body.innerHTML = entries.map(function(e) {
+    // 3+ receipts on one photo: OCR reliability drops — warn and offer removal.
+    var fidCounts = {};
+    entries.forEach(function(e) { if (e.file_id) fidCounts[e.file_id] = (fidCounts[e.file_id] || 0) + 1; });
+    var crowded = Object.keys(fidCounts).filter(function(f) { return fidCounts[f] >= 3; });
+    var warnHtml = '';
+    if (crowded.length) {
+      warnHtml = '<div style="grid-column:1/-1;background:rgba(245,158,11,.1);border:1px solid #f59e0b;'
+        + 'border-radius:8px;padding:12px 16px;font-size:.84rem;line-height:1.6">'
+        + '⚠️ <b>3+ receipts detected on a single photo.</b> OCR often misreads crowded shots — '
+        + 'aim for 1–2 receipts per photo. Remove the photo and re-upload as separate shots, '
+        + 'or keep it and correct the fields manually.'
+        + crowded.map(function(f) {
+            var fn = (entries.find(function(e) { return e.file_id === f; }) || {}).filename || f;
+            return '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:5px 0">'
+              + '<span style="font-weight:600">' + fn.replace(/</g,'&lt;') + '</span>'
+              + '<span style="color:var(--text-muted)">— ' + fidCounts[f] + ' receipts on one photo</span>'
+              + '<button type="button" class="btn btn-danger btn-sm" onclick="ocrDiscardFile(\'' + f + '\',' + fidCounts[f] + ')">🗑 Remove photo &amp; re-upload</button>'
+              + '</div>';
+          }).join('')
+        + '</div>';
+    }
+    body.innerHTML = warnHtml + entries.map(function(e) {
       var proxy = e.file_id ? '/cardconv/receipts/image/' + encodeURIComponent(e.file_id) : '';
       var fid = e.file_id || '';
       var imgHtml = proxy
@@ -3281,6 +3335,15 @@ function _imgLbKey(e){ if(e.key==='Escape') closeImgLb(); }
 
   window.ocrToggleAll = function(on) {
     document.querySelectorAll('.ocr-cb').forEach(function(cb) { cb.checked = on; });
+  };
+
+  window.ocrDiscardFile = function(fid, n) {
+    if (!confirm('Remove this photo and its ' + n + ' receipts from the queue?\n' +
+                 'The Drive file is moved to trash — re-upload as separate photos.')) return;
+    fetch('/cardconv/receipts/review/discard-file', {
+      method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+      body: 'file_id=' + encodeURIComponent(fid)
+    }).then(function(r) { return r.json(); }).then(function() { location.reload(); });
   };
 
   function clearOcrBadge() {

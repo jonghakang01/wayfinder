@@ -153,6 +153,8 @@ def handle(method, path, body, ctx=None):
     if method == "POST" and path == "/cardconv/receipts/review/discard":
         _clear_ocr_staging(user)
         return ("redirect", "/cardconv/ledger")
+    if method == "POST" and path == "/cardconv/receipts/review/discard-file":
+        return _handle_ocr_staging_discard_file(user, body)
 
     # File download
     if method == "GET" and path.startswith("/cardconv/download/"):

@@ -364,6 +364,33 @@ def _clear_ocr_staging(username: str):
     if f.exists():
         f.unlink()
 
+def _handle_ocr_staging_discard_file(username: str, body: dict):
+    """POST /cardconv/receipts/review/discard-file — drop every staged sub-entry
+    of one photo and trash its Drive file so the next sync doesn't re-stage it.
+    Used by the 3+-receipts-per-photo warning flow (user re-uploads better shots)."""
+    fid = body.get("file_id")
+    if isinstance(fid, list):
+        fid = fid[0] if fid else ""
+    fid = (fid or "").strip()
+    if not fid:
+        return ("json", {"error": "file_id required"}, 400)
+    staging = _load_ocr_staging(username)
+    entries = staging.get("entries", [])
+    keep    = [e for e in entries if e.get("file_id") != fid]
+    removed = len(entries) - len(keep)
+    staging["entries"] = keep
+    _save_ocr_staging(username, staging)
+    trashed = False
+    try:
+        service = _get_drive_service(username)
+        if service:
+            service.files().update(fileId=fid, body={"trashed": True}).execute()
+            trashed = True
+    except Exception:
+        pass
+    return ("json", {"ok": True, "removed": removed, "trashed": trashed})
+
+
 def _handle_ocr_staging_confirm(username: str, body: dict):
     """POST /cardconv/receipts/review/confirm (JSON) — apply manual edits and add to ledger.
 
