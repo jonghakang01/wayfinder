@@ -3078,6 +3078,11 @@ def _handle_upload(body, user=None):
         if csv_name.lower().endswith(".xlsx") or csv_bytes[:4] == b"PK\x03\x04":
             csv_bytes = _master_xlsx_to_csv_bytes(csv_bytes)
         stats = _ingest_csv(user, csv_bytes, csv_name)
+        if not stats["added"] and not stats["dup_skipped"]:
+            # Nothing recognized (wrong file, or no card-name match) — bounce
+            # back to Convert with a visible notice instead of a silent no-op.
+            import urllib.parse as _up
+            return ("redirect", "/cardconv/convert?ingest_empty=" + _up.quote(csv_name))
         _save_uploaded_csv(user, csv_bytes, csv_name, stats["added"], "")
         _add_hist({
             "type":        "ingest",
@@ -3091,7 +3096,19 @@ def _handle_upload(body, user=None):
         # New transactions join the pool; Review shows every open one.
         return ("redirect", "/cardconv/review")
     except Exception as e:
-        return ("html", f"<p style='color:red;padding:20px'>Error: {e}</p>")
+        return ("html", (
+            '<!DOCTYPE html><html><head><meta charset="UTF-8">'
+            '<meta name="viewport" content="width=device-width,initial-scale=1">'
+            '<link rel="stylesheet" href="/static/style.css"></head><body>'
+            '<div class="container" style="max-width:640px;padding-top:60px">'
+            '<div class="notepad-card"><div class="notepad-body" style="padding:28px">'
+            f'<h2 style="font-size:1.05rem;margin-bottom:10px">⚠️ Couldn\'t read {_esc(csv_name)}</h2>'
+            '<p style="font-size:.86rem;color:var(--text-muted);line-height:1.7;margin-bottom:6px">'
+            'This file doesn\'t look like an AMEX statement CSV (Posted_*.csv) or AMEX Master xlsx. '
+            'Please check the file and try again.</p>'
+            f'<p style="font-size:.74rem;color:var(--text-muted);margin-bottom:18px">Details: {_esc(str(e))}</p>'
+            '<a href="/cardconv/convert" class="btn btn-primary">← Back to Convert</a>'
+            '</div></div></div></body></html>'))
 
 
 def _handle_upload_rerun(username: str, uid: str):

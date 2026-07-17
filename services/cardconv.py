@@ -25,7 +25,8 @@ def handle(method, path, body, ctx=None):
     if method == "GET" and path == "/cardconv":
         return ("redirect", "/cardconv/ledger")
     if method == "GET" and path == "/cardconv/convert":
-        return ("html", _render_convert(user))
+        empty_fn = (body.get("ingest_empty", [""]) or [""])[0] if isinstance(body, dict) else ""
+        return ("html", _render_convert(user, empty_fn=empty_fn))
     if method == "GET" and path == "/cardconv/review":
         return ("html", _render_review(user))
     if method == "GET" and path == "/cardconv/history":

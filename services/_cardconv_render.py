@@ -464,8 +464,18 @@ def _render_drm_alert(user: str, filename: str, context: str = "convert") -> str
 </body></html>'''
 
 
-def _render_convert(user: str) -> str:
+def _render_convert(user: str, empty_fn: str = "") -> str:
     from server import CSS_VER
+    empty_banner = ""
+    if empty_fn:
+        empty_banner = (
+            '<div style="background:color-mix(in srgb, var(--warning,#f59e0b) 10%, transparent);'
+            'border:1px solid var(--warning,#f59e0b);border-radius:var(--radius-md,8px);'
+            'padding:12px 16px;margin-bottom:16px;font-size:.84rem;color:var(--text);line-height:1.6">'
+            f'⚠️ <b>No transactions were recognized in {_esc(empty_fn)}.</b> '
+            'Make sure it\'s an AMEX statement CSV (Posted_*.csv) or AMEX Master xlsx, and that the '
+            'Card Member Name column matches one of your registered names below.'
+            '</div>')
     uploads = _load_uploads(user)
     up_rows = ""
     for u in uploads:
@@ -520,7 +530,7 @@ def _render_convert(user: str) -> str:
 </nav>
 <div class="container" style="max-width:1100px">
   {_tab_bar("convert", user)}
-
+  {empty_banner}
   <div class="notepad-card" style="margin-bottom:20px">
     <div class="notepad-header">
       <span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--accent)">My Card Names</span>{_info_icon('Only transactions whose Card Member Name matches one of these names will be converted. Enter your name exactly as it appears in the AMEX CSV.')}
@@ -563,7 +573,7 @@ def _render_convert(user: str) -> str:
       </div>
       <div id="nameSuggest" style="display:none;margin-top:14px;padding:10px 14px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md)">
         <div style="font-size:.76rem;color:var(--text-muted);margin-bottom:8px">👤 Found in CSV — click to add to My Card Names:</div>
-        <div id="nameChips" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+        <div id="nameChips" style="display:flex;flex-wrap:wrap;gap:6px;max-height:180px;overflow-y:auto"></div>
       </div>
       <p style="font-size:.78rem;color:var(--text-muted);margin-top:14px">
         Conversion matches receipts from the Ledger and opens the <b>Review</b> page before download.
@@ -610,7 +620,7 @@ function parseCsvSuggest(text) {{
   const sorted = Object.entries(counts).sort((a,b) => b[1]-a[1]).map(e => e[0]);
   const priority = sorted.filter(n => PRIORITY.some(p => n.includes(p)));
   const rest = sorted.filter(n => !PRIORITY.some(p => n.includes(p)));
-  const top = [...priority, ...rest].slice(0, 10);
+  const top = [...priority, ...rest];
   if (!top.length) return;
   const chips = document.getElementById('nameChips');
   chips.innerHTML = top.map(n =>
