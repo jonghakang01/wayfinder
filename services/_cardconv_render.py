@@ -167,19 +167,10 @@ _CC_TAB_CSS = (
 
 def _tab_bar(active: str, user: str) -> str:
     """Shared Card Converter tab bar. active ∈ ledger|convert|review|history|keywords."""
-    # Same definition as the Ledger's Unmatched stat card: unmatched + pending
-    # match, completed excluded — the two surfaces must agree.
-    _active = [e for e in _ledger_entries(user) if not e.get("completed")]
-    _st = _ledger_stats(_active)
-    unmatched_n = _st["unmatched"] + _st["pending_match"]
-    ledger_badge = (f'<span class="tab-badge" title="{unmatched_n} receipt(s) awaiting match — click to view" '
-                    f'style="cursor:pointer" '
-                    f'onclick="location.href=\'/cardconv/ledger?view=unmatched\';return false;">{unmatched_n}</span>'
-                    if unmatched_n else '')
     staged_n = len(_load_ocr_staging(user).get("entries", []))
     ocr_badge = f'<span class="tab-badge" style="background:#f59e0b;cursor:pointer" onclick="openOcrModal();return false;">{staged_n}</span>' if staged_n else ''
     tabs = [
-        ("ledger",   "/cardconv/ledger",   "Receipt Ledger" + ledger_badge + ocr_badge),
+        ("ledger",   "/cardconv/ledger",   "Receipt Ledger" + ocr_badge),
         ("convert",  "/cardconv/convert",  "Convert"),
         ("review",   "/cardconv/review",   "Review"),
         ("history",  "/cardconv/history",  "History"),
