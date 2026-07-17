@@ -1359,17 +1359,38 @@ if(rvDl){{
     rvCloseExport();
   }});
   document.addEventListener('keydown', e => {{ if(e.key === 'Escape') rvCloseExport(); }});
+  // After exporting a selection from the Open view, offer the natural next
+  // workflow step: mark those transactions as submitted to SAP.
+  function rvOfferInProgress(){{
+    if(rvView !== 'open') return;
+    const ids = Array.from(document.querySelectorAll('.rv-cb:checked')).map(cb => cb.dataset.id);
+    if(!ids.length) return;
+    setTimeout(() => {{  // let the download start before confirm blocks the thread
+      if(!confirm('Mark the ' + ids.length + ' exported transaction(s) as ⏳ In progress (submitted to SAP)?')) return;
+      fetch('/cardconv/review/status', {{
+        method: 'POST',
+        headers: {{'Content-Type': 'application/json'}},
+        body: JSON.stringify({{ids: ids, status: 'in_progress'}})
+      }}).then(r => r.json()).then(d => {{
+        if(d.error){{ alert('Error: ' + d.error); return; }}
+        location.reload();
+      }}).catch(e => alert('Error: ' + e));
+    }}, 800);
+  }}
   rvDl.addEventListener('click', () => {{
     rvCloseExport();
     window.location = '/cardconv/review/download?' + rvDlParams().toString();
+    rvOfferInProgress();
   }});
   $('rvDownloadPdf').addEventListener('click', () => {{
     rvCloseExport();
     window.location = '/cardconv/review/download.pdf?' + rvDlParams().toString();
+    rvOfferInProgress();
   }});
   $('rvDownloadReport').addEventListener('click', () => {{
     rvCloseExport();
     window.location = '/cardconv/review/expense_report?' + rvDlParams().toString();
+    rvOfferInProgress();
   }});
   // Both at once: hidden iframes so the two attachment downloads don't race.
   $('rvDownloadBoth').addEventListener('click', () => {{
@@ -1382,6 +1403,7 @@ if(rvDl){{
       document.body.appendChild(f);
       setTimeout(() => f.remove(), 60000);
     }});
+    rvOfferInProgress();
   }});
   // Reflect the selection count on the download buttons.
   document.addEventListener('change', e => {{
