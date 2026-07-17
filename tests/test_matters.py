@@ -1,6 +1,9 @@
 """Matter Tracker port — scan pipeline with the fake source, suggestion apply."""
 import importlib
+import os
 from datetime import date
+
+import pytest
 
 from services import _matters_db as db
 from services import _matters_scan as scan
@@ -129,6 +132,8 @@ def test_matter_queries_include_thread_subject_for_forks(tmp_path, monkeypatch):
     assert scan._norm_subject("FW: RE: [External Email] 전달: Hello World") == "Hello World"
 
 
+@pytest.mark.skipif(not os.path.exists("/mnt/c"),
+                    reason="matters handle() is local-only (guards on the Windows mount)")
 def test_split_apply_reassigns_threads(tmp_path, monkeypatch):
     """Applying a split plan creates the new matter, moves only the listed
     threads to it, and keeps the rest on the original."""
