@@ -920,12 +920,15 @@ def _render_review(user: str) -> str:
     dup_skipped = li.get("dup_skipped", 0)
     # Card/usage live on the ledger receipts, not in the pool's receipt
     # snapshot — look them up by receipt id for the filters.
+    _ledger_rows = _ledger_entries(user)
     _rcpt_attrs = {e.get("id"): (e.get("card_brand") or "", e.get("usage") or "Regular")
-                   for e in _ledger_entries(user)}
+                   for e in _ledger_rows}
     usages      = sorted({_rcpt_attrs.get((e.get("receipt") or {}).get("id"), ("", "Regular"))[1]
                           for e in rows if e.get("matched")})
     usage_opts  = '<option value="all">All</option>' + ''.join(
         f'<option value="{_esc(u)}">{_esc(u)}</option>' for u in usages)
+    # Every tag known to the ledger — options for the inline per-item editor.
+    all_usages  = sorted({(e.get("usage") or "Regular") for e in _ledger_rows} | {"Regular"})
 
     def _money(a):
         return f'${a:,.2f}' if isinstance(a, (int, float)) else (_esc(a) or '–')
@@ -982,6 +985,16 @@ def _render_review(user: str) -> str:
                 comp = (f'<div class="rv-card-line rv-card-comp" title="Handwritten companion note — appended to the SAP purpose">'
                         f'👥 w/ {_esc(rc.get("companions"))}</div>'
                         if rc.get("companions") else '')
+                # Inline usage editor (same tags as the Ledger; edits write to the
+                # ledger entry, so both surfaces always agree).
+                u_cur  = _rcpt_attrs.get(rc.get("id"), ("", "Regular"))[1]
+                u_all  = all_usages if u_cur in all_usages else all_usages + [u_cur]
+                u_opts = ''.join(f'<option value="{_esc(u)}"{" selected" if u == u_cur else ""}>{_esc(u)}</option>'
+                                 for u in u_all)
+                usage_sel = (f'<select class="rv-usage-sel" data-id="{_esc(rc.get("id") or "")}" '
+                             f'data-cur="{_esc(u_cur)}" onchange="rvChangeUsage(this)" '
+                             f'title="Usage tag — synced with the Ledger">'
+                             f'{u_opts}<option value="__new__">+ New…</option></select>')
                 receipt_block = (
                     '<div class="rv-receipt matched">'
                       f'<img class="rv-thumb" src="{tn}" loading="lazy" '
@@ -991,6 +1004,7 @@ def _render_review(user: str) -> str:
                         f'<div class="rv-card-line">🗓 {_esc(rc.get("ocr_date")) or "–"}</div>'
                         f'<div class="rv-card-line rv-card-merchant">{_esc(rc.get("ocr_merchant")) or "–"}</div>'
                         f'<div class="rv-card-line rv-card-amt">{_money(rc.get("ocr_amount"))}</div>'
+                        f'<div class="rv-card-line">🏷 {usage_sel}</div>'
                         f'{comp}{link}'
                       '</div>'
                     '</div>')
@@ -1123,6 +1137,10 @@ def _render_review(user: str) -> str:
 .rv-card-amt{{font-size:1rem;font-weight:700;color:#22c55e}}
 .rv-drive-link{{font-size:.76rem;color:var(--accent);text-decoration:none;margin-top:2px}}
 .rv-drive-link:hover{{text-decoration:underline}}
+.rv-usage-sel{{background:var(--surface);border:1px solid transparent;border-radius:6px;color:var(--text);
+  font-size:.76rem;padding:3px 6px;max-width:160px;cursor:pointer}}
+.rv-usage-sel:hover{{border-color:var(--border)}}
+.rv-usage-sel:focus{{border-color:var(--accent);outline:none}}
 .rv-nomatch{{color:var(--danger);font-size:.84rem;font-weight:700;margin-bottom:6px}}
 
 @media(max-width:600px){{.rv-item{{flex-direction:column;gap:10px}}.rv-txn{{flex:none}}.rv-receipt{{flex:none;border-left:none;border-top:1px solid var(--border);padding-left:0;padding-top:10px}}}}
@@ -1178,7 +1196,8 @@ def _render_review(user: str) -> str:
     </span>
     <span class="fb-field"><span>Sort</span>
       <select id="rvSort">
-        <option value="date">Date ↓</option>
+        <option value="date">Date ↓ newest first</option>
+        <option value="date_asc">Date ↑ oldest first</option>
         <option value="merchant">Merchant A→Z</option>
       </select>
     </span>
@@ -1261,9 +1280,54 @@ function applySort(){{
   items.sort((a, b) => {{
     if(mode === 'merchant')
       return (a.dataset.merchant || '\\uffff').localeCompare(b.dataset.merchant || '\\uffff');
+    if(mode === 'date_asc')  // ascending; dateless rows sink to the bottom
+      return (a.dataset.date || '\\uffff').localeCompare(b.dataset.date || '\\uffff');
     return (b.dataset.date || '').localeCompare(a.dataset.date || '');  // date desc
   }});
   items.forEach(it => list.appendChild(it));
+}}
+
+// ── Inline usage editor — writes to the ledger entry, so the Ledger tab
+//    always shows the same tag (single source of truth) ──────────────────────
+async function rvChangeUsage(sel){{
+  const id = sel.dataset.id;
+  let val = sel.value;
+  if(val === '__new__'){{
+    val = (prompt('New usage tag (leave blank to cancel)', '') || '').trim();
+    if(!val){{ sel.value = sel.dataset.cur || 'Regular'; return; }}
+    if(!Array.from(sel.options).some(o => o.value === val)){{
+      const opt = document.createElement('option');
+      opt.value = val; opt.textContent = val;
+      sel.insertBefore(opt, sel.querySelector('option[value="__new__"]'));
+    }}
+    sel.value = val;
+  }}
+  const r = await fetch('/cardconv/ledger/' + encodeURIComponent(id) + '/update',
+    {{method:'POST', body: new URLSearchParams({{usage: val}})}});
+  const d = await r.json().catch(() => ({{}}));
+  if(!d.ok){{
+    alert('Usage update failed: ' + (d.error || r.status));
+    sel.value = sel.dataset.cur || 'Regular';
+    return;
+  }}
+  sel.dataset.cur = val;
+  sel.closest('.rv-item').dataset.usage = val;
+  rvSyncUsageFilter();
+}}
+
+// Rebuild the Usage filter dropdown from what's on screen, keeping the selection.
+function rvSyncUsageFilter(){{
+  const seen = new Set();
+  document.querySelectorAll('.rv-item[data-matched="1"]').forEach(it => seen.add(it.dataset.usage || 'Regular'));
+  const f = $('rvUsage'), cur = f.value;
+  f.textContent = '';
+  const all = document.createElement('option'); all.value = 'all'; all.textContent = 'All';
+  f.appendChild(all);
+  Array.from(seen).sort().forEach(u => {{
+    const o = document.createElement('option'); o.value = u; o.textContent = u; f.appendChild(o);
+  }});
+  f.value = Array.from(f.options).some(o => o.value === cur) ? cur : 'all';
+  applyFilter();
 }}
 
 // ── Status workflow: open → in_progress (SAP submitted) → completed ─────────
