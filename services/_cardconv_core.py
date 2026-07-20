@@ -225,6 +225,10 @@ def _migrate_entry(e: dict) -> dict:
     # v2.5: handwritten "w/ NAME" companion note — flows into the SAP purpose.
     e.setdefault("ocr_companions", None)
     e.setdefault("ocr_handwriting", None)
+    # v2.6: printed transaction time (duplicate disambiguation) + user override
+    # that pins an entry out of duplicate grouping ("this is a separate purchase").
+    e.setdefault("ocr_time", None)
+    e.setdefault("dup_exempt", False)
     # v2.4: foreign-currency receipts (KRW/INR business trips) — OCR currency +
     # USD estimate for band-matching against the USD AMEX statement.
     e.setdefault("ocr_currency", None)
@@ -1330,6 +1334,8 @@ _OCR_PROMPT = (
     'For each receipt extract: '
     '1) date (YYYY-MM-DD; if the receipt only shows a relative date such as "today", '
     'return the literal string "today" — do not guess an absolute date), '
+    '1b) time: the transaction time printed on the receipt as "HH:MM" in 24-hour '
+    'format (convert AM/PM, e.g. "1:45 PM" -> "13:45"); null if no time is printed, '
     '2) merchant name, '
     '3) printed_amount: the PRINTED/typed total (number only), '
     '4) handwritten_amount: any HAND-WRITTEN final amount including tip (number only, '
@@ -1367,7 +1373,7 @@ _OCR_PROMPT = (
     '[ymin, xmin, ymax, xmax] using a 0-1000 normalized coordinate system '
     '(0=top/left, 1000=bottom/right). '
     'Return a JSON ARRAY ONLY, one object per receipt: '
-    '[{"date":"YYYY-MM-DD","merchant":"name","printed_amount":0.00,"handwritten_amount":null,'
+    '[{"date":"YYYY-MM-DD","time":null,"merchant":"name","printed_amount":0.00,"handwritten_amount":null,'
     '"card_brand":"amex","currency":"USD","handwriting_notes":null,"companions":null,'
     '"bbox":[100,50,800,950]}]. '
     'If only one receipt is visible, return an array with a single element.'
@@ -1402,6 +1408,7 @@ def _normalize_ocr(result: dict) -> dict:
     result["amount"] = handwritten if handwritten is not None else printed
     # bbox: [ymin, xmin, ymax, xmax] in 0-1000 normalized coords (None if absent/invalid).
     result["bbox"] = _coerce_bbox(result.get("bbox"))
+    result["time"] = _coerce_time(result.get("time"))
     result["card_brand"] = _coerce_card_brand(result.get("card_brand"))
     result["currency"] = _coerce_currency(result.get("currency"))
     hn = result.get("handwriting_notes")
@@ -1423,6 +1430,24 @@ def _coerce_companions(v):
         return None
     s = re.sub(r"^\s*(w/|with)\s*", "", v.strip(), flags=re.I).strip(" ,;")
     return s[:60] or None
+
+
+def _coerce_time(v):
+    """Normalize an OCR time to 'HH:MM' 24h, or None. Accepts HH:MM(:SS) and AM/PM."""
+    if not isinstance(v, str):
+        return None
+    m = re.match(r"\s*(\d{1,2}):(\d{2})(?::\d{2})?\s*([AaPp][Mm])?\s*$", v)
+    if not m:
+        return None
+    h, mnt = int(m.group(1)), int(m.group(2))
+    ap = (m.group(3) or "").lower()
+    if ap == "pm" and h < 12:
+        h += 12
+    if ap == "am" and h == 12:
+        h = 0
+    if not (0 <= h <= 23 and 0 <= mnt <= 59):
+        return None
+    return f"{h:02d}:{mnt:02d}"
 
 
 def _coerce_currency(v):
@@ -1659,6 +1684,7 @@ def _ocr_entry_fields(ocr: dict, upload_date: str = None) -> dict:
     return {
         "ocr_status":             "done" if has_ocr else "failed",
         "ocr_date":               ocr_date,
+        "ocr_time":               ocr.get("time"),
         "ocr_amount":             ocr.get("amount"),
         "ocr_printed_amount":     ocr.get("printed_amount"),
         "ocr_handwritten_amount": ocr.get("handwritten_amount"),
@@ -1894,6 +1920,22 @@ def _apply_ledger_filters(entries: list, status: str, dfrom: str, dto: str,
     )
 
 
+def _times_close(a, b, tol_min: int = 5) -> bool:
+    """True when either printed time is unknown or they differ ≤ tol_min minutes.
+
+    Copies of the same receipt print the same transaction time; two separate
+    same-amount purchases at one merchant rarely do. A small tolerance absorbs
+    OCR misreads of a digit."""
+    if not a or not b:
+        return True
+    try:
+        ah, am = map(int, a.split(":"))
+        bh, bm = map(int, b.split(":"))
+    except ValueError:
+        return True
+    return abs((ah * 60 + am) - (bh * 60 + bm)) <= tol_min
+
+
 def _mark_duplicates(entries: list):
     """Flag likely-duplicate receipts in-place.
 
@@ -1905,6 +1947,10 @@ def _mark_duplicates(entries: list):
     too since file_id is ignored. Within a group the keeper / head is chosen by
     match_status priority (matched > unmatched > pending_match), then a present
     date; the rest are flagged for easy bulk-deletion.
+    Two refinements: entries the user marked as separate purchases
+    (dup_exempt) never enter a group, and printed transaction times split a
+    group — same-image copies print the same time, while two same-amount
+    purchases at one merchant usually don't (see _times_close).
     Sets e['dup'] (bool), e['dup_keep'] (bool) and e['dup_group_id'] (str|None)
     on each entry. dup_group_id lets the UI collapse a group into one row.
     """
@@ -1913,11 +1959,11 @@ def _mark_duplicates(entries: list):
         e["dup_keep"] = False
         e["dup_group_id"] = None
 
-    # Bucket by (amount, merchant); date handled per-pair below.
+    # Bucket by (amount, merchant); date/time handled per-pair below.
     buckets = {}
     for e in entries:
         amt = e.get("ocr_amount")
-        if amt is None:
+        if amt is None or e.get("dup_exempt"):
             continue
         merch = (e.get("ocr_merchant") or "").strip().lower()
         buckets.setdefault((round(amt, 2), merch), []).append(e)
@@ -1934,15 +1980,19 @@ def _mark_duplicates(entries: list):
                 continue
             group, used[i] = [bucket[i]], True
             anchor = bucket[i].get("ocr_date")
+            anchor_t = bucket[i].get("ocr_time")
             for j in range(i + 1, len(bucket)):
                 if used[j]:
                     continue
                 dj = bucket[j].get("ocr_date")
-                if anchor is None or dj is None or anchor == dj:
+                if ((anchor is None or dj is None or anchor == dj)
+                        and _times_close(anchor_t, bucket[j].get("ocr_time"))):
                     group.append(bucket[j])
                     used[j] = True
                     if anchor is None:
                         anchor = dj  # lock onto the first known date
+                    if anchor_t is None:
+                        anchor_t = bucket[j].get("ocr_time")
             if len(group) < 2:
                 continue
             gid = f"dg_{gi}"
@@ -3276,6 +3326,16 @@ def _handle_ledger_update(username: str, entry_id: str, body: dict):
         if raw is not None:
             val = (raw[0] if isinstance(raw, list) else str(raw)).strip()
             e["usage"] = val or "Regular"
+        # "Not a duplicate": pins the entry out of duplicate grouping ('1'/'0').
+        raw = body.get("dup_exempt")
+        if raw is not None:
+            val = (raw[0] if isinstance(raw, list) else str(raw)).strip()
+            e["dup_exempt"] = val == "1"
+        # Printed transaction time (HH:MM) — used by duplicate detection.
+        raw = body.get("ocr_time")
+        if raw is not None:
+            val = (raw[0] if isinstance(raw, list) else str(raw)).strip()
+            e["ocr_time"] = _coerce_time(val)
         for field in ("ocr_printed_amount", "ocr_handwritten_amount"):
             raw = body.get(field)
             if raw is not None:

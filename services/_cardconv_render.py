@@ -1945,6 +1945,12 @@ __TABCSS__
 .grp-toggle{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:10px;font-size:.62rem;
   font-weight:700;background:rgba(99,102,241,.18);color:#6366f1;cursor:pointer;white-space:nowrap}
 .grp-toggle:hover{background:rgba(99,102,241,.3)}
+.dup-split{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:10px;font-size:.6rem;
+  border:1px solid var(--border-bright);color:var(--text-muted);cursor:pointer;white-space:nowrap}
+.dup-split:hover{border-color:var(--accent);color:var(--accent)}
+.split-tag{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:10px;font-size:.6rem;
+  border:1px dashed var(--border-bright);color:var(--text-muted);cursor:pointer;white-space:nowrap}
+.split-tag:hover{border-color:var(--accent);color:var(--accent)}
 .ledger-table tr.dup-child{display:none}
 .ledger-table tr.dup-child.show{display:table-row}
 .del-modal{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) scale(.96);z-index:120;
@@ -2123,7 +2129,7 @@ select.sb-act{padding:5px 8px}
           </div>
           <div class="fb-field"><span>Duplicates</span>
             <span style="display:inline-flex;align-items:center;gap:6px">
-              <button class="preset-btn" id="viewToggle" title="Collapse duplicate receipts into one row">🔁 Group Duplicates</button>
+              <button class="preset-btn active" id="viewToggle" title="Duplicates are collapsed into one row by default — click to list every copy">☰ Show All</button>
               <span class="cc-info-wrap"><span class="cc-info" onclick="ccTipToggle(this)">ℹ</span><span class="cc-tip">Groups receipts recognized multiple times from the same image. Delete the redundant duplicates.</span></span>
             </span>
           </div>
@@ -2306,7 +2312,7 @@ select.sb-act{padding:5px 8px}
 </div>
 
 <script>
-let CUR_ID = null, CUR_FILE_ID = null, ENTRIES = [], VIEW_MODE = 'all';
+let CUR_ID = null, CUR_FILE_ID = null, ENTRIES = [], VIEW_MODE = 'group';
 const $ = id => document.getElementById(id);
 const STATUS_LABEL = {matched:'✅ Matched', unmatched:'❌ Unmatched', pending_match:'⏳ Pending Match'};
 
@@ -2379,6 +2385,15 @@ async function changeUsage(sel){
   if(!d.ok){ alert('Usage update failed: ' + (d.error || r.status)); load(); return; }
   const e = ENTRIES.find(function(x){ return x.id===id; }); if(e) e.usage = val;
   load();   // refresh so the Usage filter dropdown picks up any new tag
+}
+
+// "Not a duplicate" — pin an entry out of duplicate grouping (or re-include it).
+async function markNotDup(id, on){
+  const r = await fetch('/cardconv/ledger/' + id + '/update',
+    {method:'POST', body: new URLSearchParams({dup_exempt: on ? '1' : '0'})});
+  const d = await r.json().catch(function(){ return {}; });
+  if(!d.ok){ alert('Update failed: ' + (d.error || r.status)); return; }
+  load();
 }
 
 // Inline-editable Card Type cell: dropdown of –/AMEX/Visa/Other, edited from the row.
@@ -2465,10 +2480,16 @@ function rowHtml(e, i, opts){
   const preCheck = (e.dup && !e.dup_keep) ? ' checked' : '';
   const checkCell = '<td><input type="checkbox" class="row-check sel" data-id="' +
     e.id + '"' + preCheck + '></td>';
+  // ✂ separates a mis-grouped receipt into its own entry; ◇ can undo that.
+  const splitBtn = '<span class="dup-split" data-nd="' + e.id + '" ' +
+    'title="Not a duplicate — keep this receipt as a separate entry">✂ Not dup</span>';
   let dupTag = e.dup
-    ? (e.dup_keep ? '<span class="keep-tag">KEEP</span>'
-                  : '<span class="dup-tag">🔁 Duplicate</span>')
-    : '';
+    ? (e.dup_keep ? '<span class="keep-tag">KEEP</span>' + splitBtn
+                  : '<span class="dup-tag">🔁 Duplicate</span>' + splitBtn)
+    : (e.dup_exempt
+        ? '<span class="split-tag" data-rd="' + e.id + '" ' +
+          'title="Marked as a separate purchase (excluded from duplicate grouping) — click to re-include">◇ Separate</span>'
+        : '');
   if(opts.groupHead){
     dupTag = '<span class="grp-toggle" data-gid="' + opts.groupHead + '">+' +
       opts.extra + ' duplicate' + (opts.extra>1?'s':'') + '</span>';
@@ -2479,7 +2500,9 @@ function rowHtml(e, i, opts){
   const compTag = e.completed ? '<span class="comp-tag">✓ Done</span>' : '';
   return '<tr data-i="' + i + '"' + (cls?(' class="'+cls.trim()+'"'):'') + '>' +
     checkCell.replace('<td>','<td data-label="Select">') +
-    '<td data-label="Date">' + (e.ocr_date||'–') + dupTag + compTag + '</td>' +
+    '<td data-label="Date">' + (e.ocr_date||'–') +
+      (e.ocr_time ? ' <span style="color:var(--text-muted);font-size:.72rem">' + e.ocr_time + '</span>' : '') +
+      dupTag + compTag + '</td>' +
     '<td data-label="Printed" style="color:var(--text-muted)">' + fmtAmt(e.ocr_printed_amount) + '</td>' +
     handCell.replace('<td','<td data-label="Handwritten"') +
     '<td data-label="Final" style="font-weight:700">' + fmtAmtFx(e, e.ocr_amount) + '</td>' +
@@ -2570,6 +2593,10 @@ function rerender(){
         ev.stopPropagation();
         body.querySelectorAll('.gc-' + g.dataset.gid).forEach(r => r.classList.toggle('show'));
       }));
+    body.querySelectorAll('.dup-split').forEach(s =>
+      s.addEventListener('click', ev => { ev.stopPropagation(); markNotDup(s.dataset.nd, true); }));
+    body.querySelectorAll('.split-tag').forEach(s =>
+      s.addEventListener('click', ev => { ev.stopPropagation(); markNotDup(s.dataset.rd, false); }));
   }
   $('checkAll').checked = false;
   updateDeleteBtn();
