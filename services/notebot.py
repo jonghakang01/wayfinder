@@ -6,10 +6,12 @@ python), audio chunks land on the local C: drive and transcripts/minutes in
 meeting audio must never reach the server.
 """
 import html
+import json
 import os
 import re
 import shutil
 import subprocess
+import time
 from datetime import datetime
 
 META = {
@@ -150,12 +152,22 @@ def _md_html(md):
 _TR_LINE = re.compile(r"^\[c(\d+)\s+([\d.]+)s (나|상대)\] ?(.*)$")
 
 
-def _transcript_html(transcript):
+def _transcript_html(transcript, speakers=None):
     """Speaker-labelled transcript: '[cN <sec>s 나|상대] text' lines become
     badge rows (나 = mic track, 상대 = speaker loopback — physically separate
-    recordings, so the attribution is exact). Unparsable lines pass through."""
+    recordings, so that attribution is exact). When a speakers.json exists
+    (LLM diarization of the loopback track), 상대 lines show the identified
+    speaker instead. Unparsable lines pass through. Line numbers are 1-based
+    over splitlines() to stay aligned with speakers_gen.py."""
+    assign, meta = {}, {}
+    if speakers:
+        for s in speakers.get("speakers", []):
+            meta[s.get("id")] = s
+        for rng in speakers.get("assign", []):
+            for n in range(int(rng.get("from", 0)), int(rng.get("to", -1)) + 1):
+                assign[n] = rng.get("id")
     rows = []
-    for ln in transcript.splitlines():
+    for no, ln in enumerate(transcript.splitlines(), start=1):
         if not ln.strip():
             continue
         m = _TR_LINE.match(ln)
@@ -164,9 +176,17 @@ def _transcript_html(transcript):
             continue
         chunk, start, who, text = m.groups()
         secs = int(float(start))
-        cls, icon = ("me", "🎤 나") if who == "나" else ("other", "🔊 상대")
+        if who == "나":
+            cls, icon, tip = "me", "🎤 나", ""
+        else:
+            s = meta.get(assign.get(no)) or {}
+            label = s.get("name") or s.get("id") or "상대"
+            org = s.get("org") or ""
+            cls, icon = "other", f"🔊 {label}"
+            tip = f'{org} · {s.get("confidence", "")}'.strip(" ·") if s else ""
         rows.append(
-            f'<div class="nb-tr {cls}"><span class="nb-tr-who">{icon}</span>'
+            f'<div class="nb-tr {cls}"><span class="nb-tr-who"'
+            + (f' title="{esc(tip)}"' if tip else "") + f'>{esc(icon)}</span>'
             f'<span class="nb-tr-t">c{chunk}·{secs // 60}:{secs % 60:02d}</span>'
             f'<span class="nb-tr-txt">{esc(text)}</span></div>')
     return "".join(rows)
@@ -208,6 +228,11 @@ CSS = """
 .nb-tr-txt{flex:1;min-width:0}
 .nb-tr.other .nb-tr-txt{color:var(--text-muted)}
 @media(max-width:640px){.nb-tr{flex-wrap:wrap}.nb-tr-t{display:none}}
+.nb-tr .nb-tr-who{flex-basis:auto;min-width:56px;max-width:150px;overflow:hidden;text-overflow:ellipsis}
+.nb-spks{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 4px}
+.nb-spk{font-size:.78rem;padding:5px 11px;border-radius:999px;border:1px solid var(--border);
+  background:var(--surface);color:var(--text-muted)}
+.nb-spk b{color:var(--text)}
 @media(max-width:640px){.nb-stats{grid-template-columns:repeat(3,1fr)}.nb-row{align-items:flex-start;flex-direction:column;gap:6px}}
 """
 
@@ -305,14 +330,44 @@ def render_session(sid):
 
     minutes_html = (f'<div class="nb-doc">{_md_html(minutes)}</div>' if minutes
                     else '<p style="color:var(--text-muted)">No minutes yet.</p>')
+
+    # LLM speaker identification of the loopback track (on demand).
+    speakers, spk_block = None, ""
+    spk_path = os.path.join(mdir, "speakers.json")
+    pending = os.path.join(mdir, "speakers.pending")
+    if os.path.exists(spk_path):
+        try:
+            speakers = json.loads(_read(spk_path))
+        except ValueError:
+            speakers = None
+    if speakers:
+        chips = "".join(
+            f'<span class="nb-spk" title="{esc(s.get("evidence"))}">🔊 <b>{esc(s.get("name") or s.get("id"))}</b>'
+            + (f' · {esc(s["org"])}' if s.get("org") else "")
+            + (f' <small>({esc(s.get("confidence"))})</small>' if s.get("confidence") else "")
+            + '</span>'
+            for s in speakers.get("speakers", []))
+        spk_block = f'<h3>Speakers</h3><div class="nb-spks">{chips}</div>'
+    elif transcript:
+        if os.path.exists(pending) and time.time() - os.path.getmtime(pending) < 900:
+            spk_block = ('<p style="color:var(--text-muted);font-size:.84rem">🎭 화자 분석 중… '
+                         '1~2분 뒤 새로고침하세요.</p>')
+        else:
+            spk_block = (f'<form method="post" action="/notebot/speakers" style="margin:8px 0">'
+                         f'<input type="hidden" name="sid" value="{sid}">'
+                         f'<button class="nb-btn nb-ghost" style="padding:7px 14px" '
+                         f'title="상대 트랙의 개별 화자와 소속을 대화 내용으로 추론합니다 (Claude)">'
+                         f'🎭 Identify speakers</button></form>')
+
     tr_html = (f'<details><summary style="cursor:pointer;color:var(--text-muted)">Transcript ({len(transcript.splitlines())} lines)</summary>'
-               f'<div class="nb-doc">{_transcript_html(transcript)}</div></details>' if transcript else "")
+               f'<div class="nb-doc">{_transcript_html(transcript, speakers)}</div></details>' if transcript else "")
 
     body = f"""
 <p><a href="/notebot" style="color:var(--text-muted);text-decoration:none">← All sessions</a></p>
 <h1>{esc(title)}</h1>
 <p style="color:var(--text-muted);margin-top:-6px">{when:%Y-%m-%d %H:%M} · {sid}</p>
 <h3>Minutes</h3>{minutes_html}
+{spk_block}
 {tr_html}
 {audio}
 <form method="post" action="/notebot/delete" style="margin-top:18px" onsubmit="return confirm('Delete this whole session — audio, transcript and minutes?')">
@@ -380,6 +435,24 @@ def handle(method, path, body, ctx):
                              stdout=log, stderr=subprocess.STDOUT,
                              start_new_session=True, env=interop_env())
         return ("redirect", "/notebot")
+
+    if method == "POST" and path == "/notebot/speakers":
+        sid = _one(body, "sid")
+        mdir = os.path.join(MEETINGS, sid)
+        tpath = os.path.join(mdir, "transcript.txt")
+        if SID_RE.match(sid) and os.path.exists(tpath):
+            pending = os.path.join(mdir, "speakers.pending")
+            with open(pending, "w") as f:
+                f.write(sid)
+            title = _read(os.path.join(mdir, "title.txt")).strip() or "meeting"
+            subprocess.Popen(
+                ["bash", "-c",
+                 'python3 "$1" "$2" "$3" "$4" >>"$5" 2>&1; rm -f "$6"', "_",
+                 os.path.join(LAB, "speakers_gen.py"), tpath,
+                 os.path.join(mdir, "speakers.json"), title,
+                 os.path.join(mdir, "speakers.log"), pending],
+                start_new_session=True)
+        return ("redirect", f"/notebot/s/{sid}" if SID_RE.match(sid) else "/notebot")
 
     if method == "POST" and path == "/notebot/reset":
         if os.path.exists(PROC_FILE):
