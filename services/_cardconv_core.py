@@ -813,6 +813,57 @@ def _find_receipt_match(inv_date_str, amt_rounded, receipts_map, fx_receipts):
     return None
 
 
+def _sync_cash_pool(username: str) -> None:
+    """Mirror cash receipts (card_brand='other') into the transaction pool.
+
+    Cash spend never appears on the AMEX statement CSV, so Review would
+    otherwise hide it. Each cash receipt gets a synthetic matched pool row
+    (id 'cash_<receipt id>', no G/L): visible, taggable and settle-tracked
+    like any transaction, included in the receipt/expense exports, but kept
+    out of the SAP upload xlsx. Un-marking the receipt as cash removes the
+    row again and frees the receipt for normal statement matching."""
+    receipts = _load_receipts(username)
+    pool = _load_tx_pool(username)
+    entries = pool.get("entries", [])
+    have = {e.get("id") for e in entries}
+    cash = [r for r in receipts if (r.get("card_brand") or "") == "other"]
+    cash_rids = {r.get("id") for r in cash}
+    dirty = False
+    for r in cash:
+        cid = f"cash_{r.get('id')}"
+        if cid in have:
+            continue
+        entry = {
+            "id": cid, "cash": True,
+            "date": r.get("ocr_date") or "",
+            "merchant": r.get("ocr_merchant") or r.get("filename") or "Cash receipt",
+            "amount": r.get("usd_estimate") or r.get("ocr_amount") or 0,
+            "gl": "",
+            "status": "completed" if r.get("completed") else "open",
+            "added_at": datetime.now().isoformat(),
+        }
+        _apply_receipt_match(entry, r, receipts)
+        entries.append(entry)
+        dirty = True
+    kept = []
+    for e in entries:
+        if e.get("cash") and (e.get("receipt") or {}).get("id") not in cash_rids:
+            # Receipt deleted or no longer cash — drop the synthetic row and
+            # release a still-existing receipt back to pending_match.
+            rid = (e.get("receipt") or {}).get("id")
+            for r in receipts:
+                if r.get("id") == rid and r.get("matched"):
+                    r["matched"] = False
+                    r["match_status"] = "pending_match"
+            dirty = True
+            continue
+        kept.append(e)
+    if dirty:
+        pool["entries"] = kept
+        _save_tx_pool(username, pool)
+        _save_receipts(username, receipts)
+
+
 def _apply_receipt_match(entry: dict, receipt: dict, receipts: list):
     """Flag the ledger receipt + attach match info to the pool entry."""
     if not receipt.get('matched'):
@@ -827,6 +878,11 @@ def _apply_receipt_match(entry: dict, receipt: dict, receipts: list):
         if receipt.get('ocr_date') in (None, '', 'unknown') and entry["date"]:
             receipt['ocr_date_original'] = receipt.get('ocr_date')
             receipt['ocr_date'] = entry["date"]
+    # A usage tag set on the transaction before matching (Review allows
+    # receipt-less tagging) carries over unless the receipt already has one.
+    tx_usage = (entry.get("usage") or "").strip()
+    if tx_usage and tx_usage != "Regular" and (receipt.get("usage") or "Regular") == "Regular":
+        receipt["usage"] = tx_usage
     mfid = receipt.get("file_id")
     siblings = [
         {"id": s.get("id"), "ocr_bbox": s.get("ocr_bbox")}
@@ -3340,6 +3396,36 @@ def _handle_review_reason(username: str, body: dict):
     return ("json", {"error": "not found"}, 404)
 
 
+def _handle_review_usage(username: str, body: dict):
+    """POST /cardconv/review/usage — set the usage tag on a pool transaction.
+
+    Lets Review tag receipt-less transactions. When the row is matched the
+    ledger receipt stays the source of truth, so it is updated in the same
+    call and both surfaces agree."""
+    def _val(k):
+        v = body.get(k, "")
+        return (v[0] if isinstance(v, list) else str(v)).strip()
+    rid   = _val("id")
+    usage = _val("usage") or "Regular"
+    if not rid:
+        return ("json", {"error": "missing id"}, 400)
+    pool = _load_tx_pool(username)
+    entry = next((e for e in pool["entries"] if e.get("id") == rid), None)
+    if entry is None:
+        return ("json", {"error": "not found"}, 404)
+    entry["usage"] = usage
+    _save_tx_pool(username, pool)
+    rcpt_id = (entry.get("receipt") or {}).get("id")
+    if entry.get("matched") and rcpt_id:
+        ledger = _load_ledger(username)
+        for e in ledger["entries"]:
+            if e.get("id") == rcpt_id:
+                e["usage"] = usage
+                _save_ledger(username, ledger)
+                break
+    return ("json", {"ok": True})
+
+
 def _handle_review_set_status(username: str, body: dict):
     """POST /cardconv/review/status — set open / in_progress / completed.
 
@@ -3422,7 +3508,9 @@ def _select_review_entries(username: str, query: dict) -> list:
 def _handle_review_download(username: str, query: dict):
     """GET /cardconv/review/download — xlsx of open (or explicitly selected)
     transactions, built on demand from the pool."""
-    entries = _select_review_entries(username, query)
+    # Cash rows are synthetic pool mirrors of cash receipts — real expenses,
+    # but not statement lines, so they must never enter the SAP upload file.
+    entries = [e for e in _select_review_entries(username, query) if not e.get("cash")]
     if not entries:
         return ("html", "<h2 style='padding:40px'>No open transactions to download.</h2>", 404)
     try:

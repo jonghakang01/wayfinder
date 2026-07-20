@@ -904,6 +904,7 @@ def _render_keywords(user: str) -> str:
 
 def _render_review(user: str) -> str:
     from server import CSS_VER
+    _sync_cash_pool(user)            # mirror cash receipts into the pool (no-op when in sync)
     _reconcile_settle_status(user)   # self-heal pre-sync mismatches (no-op when consistent)
     pool    = _load_tx_pool(user)
     # Newest transactions first; dateless rows sink to the bottom.
@@ -923,12 +924,27 @@ def _render_review(user: str) -> str:
     _ledger_rows = _ledger_entries(user)
     _rcpt_attrs = {e.get("id"): (e.get("card_brand") or "", e.get("usage") or "Regular")
                    for e in _ledger_rows}
-    usages      = sorted({_rcpt_attrs.get((e.get("receipt") or {}).get("id"), ("", "Regular"))[1]
-                          for e in rows if e.get("matched")})
+    # Matched rows read usage from the ledger receipt (source of truth);
+    # unmatched rows carry their own tag on the pool entry.
+    def _row_usage(e):
+        if e.get("matched"):
+            return _rcpt_attrs.get((e.get("receipt") or {}).get("id"), ("", "Regular"))[1]
+        return e.get("usage") or "Regular"
+    usages      = sorted({_row_usage(e) for e in rows})
     usage_opts  = '<option value="all">All</option>' + ''.join(
         f'<option value="{_esc(u)}">{_esc(u)}</option>' for u in usages)
-    # Every tag known to the ledger — options for the inline per-item editor.
-    all_usages  = sorted({(e.get("usage") or "Regular") for e in _ledger_rows} | {"Regular"})
+    # Every known tag (ledger + pool) — options for the inline per-item editor.
+    all_usages  = sorted({(e.get("usage") or "Regular") for e in _ledger_rows}
+                         | {(e.get("usage") or "Regular") for e in rows} | {"Regular"})
+
+    def _usage_sel(kind, sid, cur):
+        u_all = all_usages if cur in all_usages else all_usages + [cur]
+        opts = ''.join(f'<option value="{_esc(u)}"{" selected" if u == cur else ""}>{_esc(u)}</option>'
+                       for u in u_all)
+        return (f'<select class="rv-usage-sel" data-kind="{kind}" data-id="{_esc(sid)}" '
+                f'data-cur="{_esc(cur)}" onchange="rvChangeUsage(this)" '
+                f'title="Usage tag — synced with the Ledger">'
+                f'{opts}<option value="__new__">+ New…</option></select>')
 
     def _money(a):
         return f'${a:,.2f}' if isinstance(a, (int, float)) else (_esc(a) or '–')
@@ -962,7 +978,9 @@ def _render_review(user: str) -> str:
                   '</div>'
                   '<div class="rv-txn-meta">'
                     f'<span class="rv-amt">{_money(r.get("amount"))}</span>'
-                    f'<span class="rv-gl">G/L {_esc(r.get("gl"))}</span>'
+                    + ('<span class="rv-gl rv-cash" title="Cash receipt — not on the AMEX statement, '
+                       'excluded from the SAP xlsx (included in receipt/expense exports)">💵 Cash</span>'
+                       if r.get("cash") else f'<span class="rv-gl">G/L {_esc(r.get("gl"))}</span>') +
                   '</div>'
                 '</div>')
             # Inline matched-receipt mini card, or unmatched + loss-reason input
@@ -987,14 +1005,7 @@ def _render_review(user: str) -> str:
                         if rc.get("companions") else '')
                 # Inline usage editor (same tags as the Ledger; edits write to the
                 # ledger entry, so both surfaces always agree).
-                u_cur  = _rcpt_attrs.get(rc.get("id"), ("", "Regular"))[1]
-                u_all  = all_usages if u_cur in all_usages else all_usages + [u_cur]
-                u_opts = ''.join(f'<option value="{_esc(u)}"{" selected" if u == u_cur else ""}>{_esc(u)}</option>'
-                                 for u in u_all)
-                usage_sel = (f'<select class="rv-usage-sel" data-id="{_esc(rc.get("id") or "")}" '
-                             f'data-cur="{_esc(u_cur)}" onchange="rvChangeUsage(this)" '
-                             f'title="Usage tag — synced with the Ledger">'
-                             f'{u_opts}<option value="__new__">+ New…</option></select>')
+                usage_sel = _usage_sel("rcpt", rc.get("id") or "", _row_usage(r))
                 receipt_block = (
                     '<div class="rv-receipt matched">'
                       f'<img class="rv-thumb" src="{tn}" loading="lazy" '
@@ -1025,6 +1036,7 @@ def _render_review(user: str) -> str:
                 receipt_block = (
                     '<div class="rv-receipt unmatched">'
                       '<div class="rv-nomatch">❌ No receipt matched</div>'
+                      f'<div class="rv-card-line">🏷 {_usage_sel("tx", r.get("id") or "", _row_usage(r))}</div>'
                       f'{match_btn}'
                     '</div>')
             item_cls = 'rv-item' + ('' if is_matched else ' unmatched') + ('' if st == "completed" else '')
@@ -1037,7 +1049,7 @@ def _render_review(user: str) -> str:
                 f'data-merchant="{row_merchant}" '
                 f'data-status="{st}" '
                 f'data-card="{_esc(_rcpt_attrs.get(rc.get("id"), ("", ""))[0])}" '
-                f'data-usage="{_esc(_rcpt_attrs.get(rc.get("id"), ("", "Regular"))[1] if is_matched else "")}" '
+                f'data-usage="{_esc(_row_usage(r))}" '
                 f'data-matched="{"1" if is_matched else "0"}">{txn}{receipt_block}</div>')
         body_html = "".join(items)
 
@@ -1113,6 +1125,7 @@ def _render_review(user: str) -> str:
 .rv-txn-meta{{display:flex;gap:12px;align-items:baseline;flex-wrap:wrap}}
 .rv-amt{{font-size:1.05rem;font-weight:700;color:var(--text)}}
 .rv-gl{{font-size:.74rem;color:var(--text-muted)}}
+.rv-cash{{color:#22c55e;font-weight:700}}
 .rv-receipt{{flex:1;min-width:0;border-left:1px solid var(--border);padding-left:14px}}
 .rv-receipt.matched{{display:flex;gap:14px;align-items:center}}
 .rv-thumb{{width:200px;height:170px;flex:none;border-radius:8px;object-fit:cover;border:1px solid var(--border);background:var(--surface-3);cursor:zoom-in;transition:border-color .12s}}
@@ -1302,8 +1315,12 @@ async function rvChangeUsage(sel){{
     }}
     sel.value = val;
   }}
-  const r = await fetch('/cardconv/ledger/' + encodeURIComponent(id) + '/update',
-    {{method:'POST', body: new URLSearchParams({{usage: val}})}});
+  // Matched rows write to the ledger receipt (source of truth); receipt-less
+  // rows keep the tag on the pool transaction itself.
+  const isTx = sel.dataset.kind === 'tx';
+  const r = await fetch(isTx ? '/cardconv/review/usage'
+                             : '/cardconv/ledger/' + encodeURIComponent(id) + '/update',
+    {{method:'POST', body: new URLSearchParams(isTx ? {{id: id, usage: val}} : {{usage: val}})}});
   const d = await r.json().catch(() => ({{}}));
   if(!d.ok){{
     alert('Usage update failed: ' + (d.error || r.status));
@@ -1318,7 +1335,7 @@ async function rvChangeUsage(sel){{
 // Rebuild the Usage filter dropdown from what's on screen, keeping the selection.
 function rvSyncUsageFilter(){{
   const seen = new Set();
-  document.querySelectorAll('.rv-item[data-matched="1"]').forEach(it => seen.add(it.dataset.usage || 'Regular'));
+  document.querySelectorAll('.rv-item').forEach(it => seen.add(it.dataset.usage || 'Regular'));
   const f = $('rvUsage'), cur = f.value;
   f.textContent = '';
   const all = document.createElement('option'); all.value = 'all'; all.textContent = 'All';
