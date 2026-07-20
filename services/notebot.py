@@ -62,6 +62,11 @@ def _state():
         if os.path.exists(os.path.join(MEETINGS, sid, "minutes.md")):
             os.remove(PROC_FILE)
             return ("idle", None)
+        # Orphan marker: stop crashed before any session data landed, so
+        # nothing will ever produce minutes — clear instead of spinning.
+        if not os.path.isdir(os.path.join(MEETINGS, sid)):
+            os.remove(PROC_FILE)
+            return ("idle", None)
         return ("processing", sid)
     sid = _read(STATE_FILE).strip()
     if sid:
@@ -142,6 +147,31 @@ def _md_html(md):
     return "\n".join(out)
 
 
+_TR_LINE = re.compile(r"^\[c(\d+)\s+([\d.]+)s (나|상대)\] ?(.*)$")
+
+
+def _transcript_html(transcript):
+    """Speaker-labelled transcript: '[cN <sec>s 나|상대] text' lines become
+    badge rows (나 = mic track, 상대 = speaker loopback — physically separate
+    recordings, so the attribution is exact). Unparsable lines pass through."""
+    rows = []
+    for ln in transcript.splitlines():
+        if not ln.strip():
+            continue
+        m = _TR_LINE.match(ln)
+        if not m:
+            rows.append(f'<div class="nb-tr"><span class="nb-tr-txt">{esc(ln)}</span></div>')
+            continue
+        chunk, start, who, text = m.groups()
+        secs = int(float(start))
+        cls, icon = ("me", "🎤 나") if who == "나" else ("other", "🔊 상대")
+        rows.append(
+            f'<div class="nb-tr {cls}"><span class="nb-tr-who">{icon}</span>'
+            f'<span class="nb-tr-t">c{chunk}·{secs // 60}:{secs % 60:02d}</span>'
+            f'<span class="nb-tr-txt">{esc(text)}</span></div>')
+    return "".join(rows)
+
+
 CSS = """
 .nb-wrap{max-width:860px;margin:0 auto}
 .nb-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:18px 0}
@@ -170,6 +200,14 @@ CSS = """
 .nb-audio audio{height:36px;max-width:100%}
 .nb-doc{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px 22px;margin:14px 0;overflow-x:auto}
 .nb-doc pre{white-space:pre-wrap;font-size:.85rem;color:var(--text-muted)}
+.nb-tr{display:flex;gap:8px;align-items:baseline;padding:3px 0;font-size:.85rem}
+.nb-tr-who{flex:0 0 56px;font-weight:700;font-size:.72rem;white-space:nowrap}
+.nb-tr.me .nb-tr-who{color:var(--accent)}
+.nb-tr.other .nb-tr-who{color:var(--text-muted)}
+.nb-tr-t{flex:0 0 60px;color:var(--text-muted);opacity:.7;font-size:.7rem;white-space:nowrap}
+.nb-tr-txt{flex:1;min-width:0}
+.nb-tr.other .nb-tr-txt{color:var(--text-muted)}
+@media(max-width:640px){.nb-tr{flex-wrap:wrap}.nb-tr-t{display:none}}
 @media(max-width:640px){.nb-stats{grid-template-columns:repeat(3,1fr)}.nb-row{align-items:flex-start;flex-direction:column;gap:6px}}
 """
 
@@ -268,7 +306,7 @@ def render_session(sid):
     minutes_html = (f'<div class="nb-doc">{_md_html(minutes)}</div>' if minutes
                     else '<p style="color:var(--text-muted)">No minutes yet.</p>')
     tr_html = (f'<details><summary style="cursor:pointer;color:var(--text-muted)">Transcript ({len(transcript.splitlines())} lines)</summary>'
-               f'<div class="nb-doc"><pre>{esc(transcript)}</pre></div></details>' if transcript else "")
+               f'<div class="nb-doc">{_transcript_html(transcript)}</div></details>' if transcript else "")
 
     body = f"""
 <p><a href="/notebot" style="color:var(--text-muted);text-decoration:none">← All sessions</a></p>
@@ -325,8 +363,9 @@ def handle(method, path, body, ctx):
         state, _sid = _state()
         if state == "idle":
             title = _one(body, "title") or "meeting"
+            from services._wsl_interop import interop_env
             subprocess.run(["bash", os.path.join(LAB, "notebot.sh"), "start", title],
-                           capture_output=True, timeout=60)
+                           capture_output=True, timeout=60, env=interop_env())
         return ("redirect", "/notebot")
 
     if method == "POST" and path == "/notebot/stop":
@@ -334,10 +373,12 @@ def handle(method, path, body, ctx):
         if state == "recording":
             with open(PROC_FILE, "w") as f:
                 f.write(sid)
+            os.makedirs(os.path.join(MEETINGS, sid), exist_ok=True)
             log = open(os.path.join(MEETINGS, sid, "process.log"), "w")
+            from services._wsl_interop import interop_env
             subprocess.Popen(["bash", os.path.join(LAB, "notebot.sh"), "stop"],
                              stdout=log, stderr=subprocess.STDOUT,
-                             start_new_session=True)
+                             start_new_session=True, env=interop_env())
         return ("redirect", "/notebot")
 
     if method == "POST" and path == "/notebot/reset":

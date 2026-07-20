@@ -150,10 +150,11 @@ def _powershell_runner(queries: list[str], since: date) -> dict:
 
     cmd = (f"python '{WIN_DIR}\\outlook_collect.py' "
            f"--queries-file '{WIN_DIR}\\request.json' --since {since.isoformat()}")
+    from services._wsl_interop import POWERSHELL, interop_env
     try:
         proc = subprocess.run(
-            ["powershell.exe", "-NoProfile", "-c", cmd],
-            capture_output=True, timeout=TIMEOUT_S)
+            [POWERSHELL, "-NoProfile", "-c", cmd],
+            capture_output=True, timeout=TIMEOUT_S, env=interop_env())
     except subprocess.TimeoutExpired as e:
         raise RuntimeError(f"collector 타임아웃({TIMEOUT_S}s) — Outlook 응답 없음") from e
     text = proc.stdout.decode("utf-8", errors="replace")

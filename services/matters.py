@@ -207,9 +207,10 @@ def _open_in_outlook(entry_id: str):
     dst_dir.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(Path(__file__).parent / "_matters_openmail.py", dst_dir / "open_mail.py")
     cmd = f"python '{mail.WIN_DIR}\\open_mail.py' {entry_id}"
+    from services._wsl_interop import POWERSHELL, interop_env
     try:
-        p = subprocess.run(["powershell.exe", "-NoProfile", "-c", cmd],
-                           capture_output=True, timeout=30)
+        p = subprocess.run([POWERSHELL, "-NoProfile", "-c", cmd],
+                           capture_output=True, timeout=30, env=interop_env())
     except subprocess.TimeoutExpired:
         return False, "Outlook 응답 없음 (30초)"
     out = p.stdout.decode("utf-8", "replace")
@@ -301,7 +302,10 @@ def handle(method, path, body, ctx=None):
                 title = str(data.get("title", "")).strip()
                 if not title:
                     return ("json", {"error": "할 일 내용을 입력하세요"})
-                return ("json", {"ok": True, "id": db.create_todo(conn, title)})
+                return ("json", {"ok": True, "id": db.create_todo(
+                    conn, title,
+                    due_date=str(data.get("due_date", "")).strip(),
+                    note=str(data.get("note", "")).strip())})
             if path.startswith("/matters/api/todos/"):
                 parts = path.split("/")
                 tid = int(parts[4])
@@ -309,6 +313,8 @@ def handle(method, path, body, ctx=None):
                     return ("json", db.promote_todo(conn, tid))
                 if data.get("delete"):
                     return ("json", {"ok": db.delete_todo(conn, tid)})
+                if any(k in data for k in ("title", "due_date", "note")):
+                    return ("json", {"ok": db.update_todo(conn, tid, data)})
                 return ("json", {"ok": db.set_todo_done(conn, tid, bool(data.get("done")))})
             if path == "/matters/api/matters":
                 return ("json", {"ok": True, "id": db.create_matter(conn, data)})
@@ -366,6 +372,8 @@ def handle(method, path, body, ctx=None):
                 return ("json", {"ok": ok} if ok else {"error": "not found"})
         except RuntimeError as e:  # mail/judge boundary: Outlook down, API errors
             return ("json", {"error": str(e)})
+        except OSError as e:  # Windows bridge unreachable (interop socket/PATH)
+            return ("json", {"error": f"Windows 브릿지 실행 실패: {e}"})
         except (ValueError, json.JSONDecodeError) as e:
             return ("json", {"error": str(e)})
         finally:

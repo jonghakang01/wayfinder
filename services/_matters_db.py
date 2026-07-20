@@ -61,7 +61,9 @@ CREATE TABLE IF NOT EXISTS todos (
     title TEXT NOT NULL,
     done INTEGER DEFAULT 0,
     created_at TEXT DEFAULT (datetime('now','localtime')),
-    done_at TEXT DEFAULT ''
+    done_at TEXT DEFAULT '',
+    due_date TEXT DEFAULT '',
+    note TEXT DEFAULT ''
 );
 """
 
@@ -162,6 +164,11 @@ def get_conn():
     if "ball_since" not in cols:
         conn.execute("UPDATE matters SET ball_since=last_contact "
                      "WHERE (ball_since='' OR ball_since IS NULL) AND last_contact!=''")
+    tcols = {r[1] for r in conn.execute("PRAGMA table_info(todos)")}
+    for col in ("due_date", "note"):
+        if col not in tcols:
+            conn.execute(f"ALTER TABLE todos ADD COLUMN {col} TEXT DEFAULT ''")
+            changed = True
     if changed:
         conn.commit()
     return conn
@@ -351,14 +358,29 @@ def pending_suggestions(conn) -> list:
 
 
 def list_todos(conn):
+    # Open items with a due date float up by deadline (todo-app parity);
+    # dateless ones follow by recency, done items sink.
     return [dict(r) for r in conn.execute(
-        "SELECT * FROM todos ORDER BY done, id DESC").fetchall()]
+        "SELECT * FROM todos ORDER BY done, "
+        "CASE WHEN due_date='' THEN 1 ELSE 0 END, due_date, id DESC").fetchall()]
 
 
-def create_todo(conn, title: str) -> int:
-    cur = conn.execute("INSERT INTO todos (title) VALUES (?)", (title,))
+def create_todo(conn, title: str, due_date: str = "", note: str = "") -> int:
+    cur = conn.execute("INSERT INTO todos (title, due_date, note) VALUES (?,?,?)",
+                       (title, due_date, note))
     conn.commit()
     return cur.lastrowid
+
+
+def update_todo(conn, tid: int, fields: dict) -> bool:
+    allowed = {k: fields[k] for k in ("title", "due_date", "note") if k in fields}
+    if not allowed:
+        return False
+    sets = ", ".join(f"{k}=?" for k in allowed)
+    cur = conn.execute(f"UPDATE todos SET {sets} WHERE id=?",
+                       (*allowed.values(), tid))
+    conn.commit()
+    return cur.rowcount > 0
 
 
 def set_todo_done(conn, tid: int, done: bool) -> bool:

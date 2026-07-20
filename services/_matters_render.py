@@ -51,11 +51,23 @@ details.sect .grid2{margin-top:10px}
 .sect.s-todo{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
   padding:14px 16px 10px;margin-bottom:14px}
 .sect.s-todo h2::before{background:var(--good)}
-.todo-add{display:flex;gap:8px;margin-bottom:6px}
+.todo-add{display:flex;gap:8px;margin-bottom:6px;flex-wrap:wrap}
 .todo-add input{flex:1;border:1px solid var(--border-bright);border-radius:8px;
   background:var(--surface-2);color:var(--text);padding:8px 11px;font-size:.84rem}
 .todo-add input::placeholder{color:var(--dim)}
 .todo-add input:focus{outline:none;border-color:var(--accent)}
+.todo-add input[type=date]{flex:0 0 auto;color-scheme:dark}
+.todo-add .todo-note-in{flex:1 1 100%;font-size:.78rem;padding:6px 11px}
+.tdue{font-size:.68rem;font-weight:700;border-radius:999px;padding:1px 7px;white-space:nowrap;
+  border:1px solid var(--border-bright);color:var(--muted)}
+.tdue.today{border-color:var(--joint);color:var(--joint)}
+.tdue.over{border-color:var(--me);color:var(--me)}
+.tnote{cursor:default;font-size:.78rem;flex-shrink:0}
+.trow .tedit{flex:1;display:flex;gap:6px;flex-wrap:wrap}
+.trow .tedit input{border:1px solid var(--border-bright);border-radius:6px;background:var(--surface-2);
+  color:var(--text);padding:5px 8px;font-size:.8rem}
+.trow .tedit input[type=date]{color-scheme:dark}
+.trow .tedit .te-t{flex:2;min-width:140px}.trow .tedit .te-n{flex:1;min-width:110px}
 .trow{display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:8px}
 .trow:hover{background:var(--surface-2)}
 .trow .tchk{width:15px;height:15px;accent-color:var(--good);cursor:pointer;flex-shrink:0}
@@ -299,7 +311,10 @@ PAGE_BODY = """<div class="mt-wrap">
   <div class="todo-add">
     <input id="todoInput" placeholder="지금 떠오른 할 일 입력 후 Enter…"
       onkeydown="if(event.key==='Enter'){event.preventDefault();addTodo();}">
+    <input type="date" id="todoDue" title="마감일 (선택)">
     <button class="touch-btn" onclick="addTodo()">＋ 추가</button>
+    <input id="todoNote" class="todo-note-in" placeholder="메모 (선택)"
+      onkeydown="if(event.key==='Enter'){event.preventDefault();addTodo();}">
   </div>
   <div id="todoList"></div>
 </div>
@@ -476,12 +491,15 @@ function renderTodos(){
   const todos = DATA.todos || [];
   const open = todos.filter(t => !t.done), done = todos.filter(t => t.done);
   document.getElementById('todoCnt').textContent = open.length || '';
-  const row = t => `<div class="trow${t.done ? ' done' : ''}">
+  const row = t => `<div class="trow${t.done ? ' done' : ''}" id="trow-${t.id}">
     <input type="checkbox" class="tchk" ${t.done ? 'checked' : ''}
       onchange="todoDone(${t.id}, this.checked)" title="완료 체크">
     <span class="tt">${esc(t.title)}</span>
+    ${t.note ? `<span class="tnote" title="${esc(t.note)}">📝</span>` : ''}
+    ${t.done ? '' : dueBadge(t.due_date)}
     <span class="tago">${esc((t.created_at || '').slice(5, 10))}</span>
-    ${t.done ? '' : `<button class="tact" onclick="todoPromote(${t.id})"
+    ${t.done ? '' : `<button class="tact" onclick="todoEdit(${t.id})" title="제목·마감일·메모 편집">✎</button>
+    <button class="tact" onclick="todoPromote(${t.id})"
       title="사안으로 승격 — ⚡ 지금 내 액션에 들어갑니다">⚡ 액션으로</button>`}
     <button class="tact tdel" onclick="todoDel(${t.id})" title="삭제">✕</button>
   </div>`;
@@ -492,14 +510,52 @@ function renderTodos(){
   el.innerHTML = html;
 }
 
+function dueBadge(d){
+  if(!d) return '';
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const diff = Math.round((new Date(d + 'T00:00:00') - today) / 86400000);
+  const cls = diff < 0 ? 'tdue over' : diff === 0 ? 'tdue today' : 'tdue';
+  const label = diff < 0 ? `D+${-diff}` : diff === 0 ? 'D-Day' : `D-${diff}`;
+  return `<span class="${cls}" title="마감 ${esc(d)}">${label}</span>`;
+}
+
 async function addTodo(){
   const inp = document.getElementById('todoInput');
   const title = inp.value.trim();
   if(!title) return;
+  const due_date = document.getElementById('todoDue').value;
+  const note = document.getElementById('todoNote').value.trim();
   await fetch('/matters/api/todos', {method:'POST',
-    headers:{'Content-Type':'application/json'}, body: JSON.stringify({title})});
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify({title, due_date, note})});
   inp.value = '';
+  document.getElementById('todoDue').value = '';
+  document.getElementById('todoNote').value = '';
   load().then(() => document.getElementById('todoInput').focus());
+}
+
+function todoEdit(id){
+  const t = (DATA.todos || []).find(x => x.id === id);
+  const row = document.getElementById('trow-' + id);
+  if(!t || !row) return;
+  row.innerHTML = `<span class="tedit">
+    <input class="te-t" value="${esc(t.title)}" placeholder="할 일">
+    <input type="date" class="te-d" value="${esc(t.due_date || '')}" title="마감일">
+    <input class="te-n" value="${esc(t.note || '')}" placeholder="메모">
+    <button class="tact" style="opacity:1" onclick="todoSave(${id})">저장</button>
+    <button class="tact" style="opacity:1" onclick="renderTodos()">취소</button></span>`;
+  row.querySelector('.te-t').focus();
+}
+
+async function todoSave(id){
+  const row = document.getElementById('trow-' + id);
+  const title = row.querySelector('.te-t').value.trim();
+  if(!title){ renderTodos(); return; }
+  await fetch('/matters/api/todos/' + id, {method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({title,
+      due_date: row.querySelector('.te-d').value,
+      note: row.querySelector('.te-n').value.trim()})});
+  load();
 }
 async function todoDone(id, done){
   await fetch('/matters/api/todos/' + id, {method:'POST',
