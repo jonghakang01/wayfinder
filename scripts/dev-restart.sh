@@ -6,14 +6,17 @@ set -e
 
 echo "🔄 Restarting local dev server..."
 
-# Kill existing server
-lsof -ti:8080 | xargs kill -9 2>/dev/null || true
-sleep 1
-
-# Start fresh
-cd "$(dirname "$0")/.."
-python3 server.py &>/tmp/server.log &
-SERVER_PID=$!
+# Prefer systemd user service (auto-start/auto-restart); fall back to bare process
+if systemctl --user cat wayfinder-dev.service &>/dev/null; then
+    systemctl --user restart wayfinder-dev.service
+    SERVER_PID=$(systemctl --user show -p MainPID --value wayfinder-dev.service)
+else
+    lsof -ti:8080 | xargs kill -9 2>/dev/null || true
+    sleep 1
+    cd "$(dirname "$0")/.."
+    python3 server.py &>/tmp/server.log &
+    SERVER_PID=$!
+fi
 
 # Wait for server to be ready
 echo "⏳ Waiting for server..."
