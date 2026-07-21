@@ -1,4 +1,5 @@
-import hashlib, json, os, secrets, shutil
+import hashlib, json, os, secrets, shutil, threading
+from datetime import datetime
 
 from services._paths import DATA_ROOT
 USERS_FILE    = os.path.join(DATA_ROOT, "users.json")
@@ -20,6 +21,28 @@ APP_LABELS = {
     "aeo":       "🔍 AEO Analysis",
     "llm-check": "🤖 AEO 페이지 진단",
 }
+
+
+def _notify_admin_signup(email: str, services_list: list):
+    """Best-effort admin alert on a new signup — sent from a daemon thread so
+    the signup response never waits on SMTP; silently skipped when SMTP_USER/
+    SMTP_PASS are absent from the environment."""
+    def _send():
+        try:
+            from services import email as email_svc
+            svcs = ", ".join(services_list) or "(none)"
+            when = datetime.now().strftime("%Y-%m-%d %H:%M")
+            email_svc.send(
+                ADMIN_EMAIL,
+                f"[Wayfinder] New signup: {email}",
+                f"<h3>New user signed up</h3>"
+                f"<ul><li><b>Email:</b> {email}</li>"
+                f"<li><b>Services:</b> {svcs}</li>"
+                f"<li><b>At:</b> {when} (server time)</li></ul>"
+                f"<p><a href='http://134.209.62.57:8080/admin'>Open admin</a></p>")
+        except Exception:
+            pass
+    threading.Thread(target=_send, daemon=True).start()
 
 
 def _load_sessions():
@@ -324,6 +347,7 @@ def handle(method, path, body, ctx=None):
                 "email": email, "services": services_list, "blocked": False,
             }
             save_users(users)
+            _notify_admin_signup(email, services_list)
         else:
             key = _resolve_login(email)
             if not key:
