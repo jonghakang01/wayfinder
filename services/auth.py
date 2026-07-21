@@ -25,13 +25,30 @@ APP_LABELS = {
 
 def _notify_admin_signup(email: str, services_list: list):
     """Best-effort admin alert on a new signup — sent from a daemon thread so
-    the signup response never waits on SMTP; silently skipped when SMTP_USER/
-    SMTP_PASS are absent from the environment."""
+    the signup response never waits on the network. Telegram (bridge bot,
+    TELEGRAM_TOKEN + TG_ADMIN_CHAT_ID) is the primary channel; Gmail SMTP
+    (SMTP_USER/SMTP_PASS) fires too when configured. Either is silently
+    skipped while its credentials are absent."""
     def _send():
+        svcs = ", ".join(services_list) or "(none)"
+        when = datetime.now().strftime("%Y-%m-%d %H:%M")
+        try:
+            tok  = os.environ.get("TELEGRAM_TOKEN", "")
+            chat = os.environ.get("TG_ADMIN_CHAT_ID", "")
+            if tok and chat:
+                import urllib.request, urllib.parse
+                data = urllib.parse.urlencode({
+                    "chat_id": chat,
+                    "text": (f"👤 Wayfinder 신규 가입\n"
+                             f"이메일: {email}\n서비스: {svcs}\n{when} (server)"),
+                }).encode()
+                urllib.request.urlopen(
+                    f"https://api.telegram.org/bot{tok}/sendMessage",
+                    data=data, timeout=10)
+        except Exception:
+            pass
         try:
             from services import email as email_svc
-            svcs = ", ".join(services_list) or "(none)"
-            when = datetime.now().strftime("%Y-%m-%d %H:%M")
             email_svc.send(
                 ADMIN_EMAIL,
                 f"[Wayfinder] New signup: {email}",
