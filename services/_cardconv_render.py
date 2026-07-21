@@ -1065,10 +1065,20 @@ def _render_review(user: str) -> str:
                 head_line = ('<div class="rv-nomatch nr">📄 No receipt — filed as receipt-less</div>'
                              if r.get("no_receipt")
                              else '<div class="rv-nomatch">❌ No receipt matched</div>')
+                # w/ note editor — stored on the pool transaction, carried over
+                # to the receipt if one matches later, appended to SAP purpose.
+                tx_comp = r.get("companions")
+                comp_line = (
+                    f'<div class="rv-card-line">👥 '
+                    f'<span class="rv-comp-edit" onclick="rvEditComp(this)" '
+                    f'data-id="{_esc(r.get("id") or "")}" data-cur="{_esc(tx_comp or "")}" '
+                    f'title="Companion note (w/) — appended to the SAP purpose">'
+                    + (f'w/ {_esc(tx_comp)}' if tx_comp else '+ Add w/') + '</span></div>')
                 receipt_block = (
                     f'<div class="rv-receipt unmatched">'
                       f'{head_line}'
                       f'<div class="rv-card-line">🏷 {_usage_sel("tx", r.get("id") or "", _row_usage(r))}</div>'
+                      f'{comp_line}'
                       f'{"" if r.get("no_receipt") else match_btn}{nr_btn}'
                     '</div>')
             item_cls = 'rv-item' + ('' if is_matched or r.get("no_receipt") else ' unmatched')
@@ -1187,6 +1197,8 @@ def _render_review(user: str) -> str:
   font-size:.76rem;padding:3px 6px;max-width:160px;cursor:pointer}}
 .rv-usage-sel:hover{{border-color:var(--border)}}
 .rv-usage-sel:focus{{border-color:var(--accent);outline:none}}
+.rv-comp-edit{{cursor:pointer;border-bottom:1px dashed var(--border-bright);font-size:.78rem}}
+.rv-comp-edit:hover{{color:var(--accent)}}
 .rv-nomatch{{color:var(--danger);font-size:.84rem;font-weight:700;margin-bottom:6px}}
 .rv-nomatch.nr{{color:var(--text-muted)}}
 
@@ -1383,6 +1395,20 @@ async function rvChangeUsage(sel){{
   sel.dataset.cur = val;
   sel.closest('.rv-item').dataset.usage = val;
   rvSyncUsageFilter();
+}}
+
+// Companion (w/) editor for receipt-less rows — stored on the pool
+// transaction; carries over to the receipt if one matches later.
+async function rvEditComp(el){{
+  const v = prompt('Companions (w/) — leave blank and press OK to clear:', el.dataset.cur || '');
+  if(v === null) return;
+  const val = v.trim();
+  const r = await fetch('/cardconv/review/companions',
+    {{method:'POST', body: new URLSearchParams({{id: el.dataset.id, companions: val}})}});
+  const d = await r.json().catch(function(){{ return {{}}; }});
+  if(!d.ok){{ alert('Update failed: ' + (d.error || r.status)); return; }}
+  el.dataset.cur = val;
+  el.textContent = val ? ('w/ ' + val) : '+ Add w/';
 }}
 
 // File / un-file a transaction as receipt-less (no receipt exists for it).
@@ -2108,12 +2134,7 @@ __TABCSS__
 .detail-actions{padding:16px 20px;display:flex;flex-direction:column;gap:8px;margin-top:auto}
 .filter-bar [hidden],.fb-chips[hidden]{display:none!important}
 .fb-pop-wrap{position:relative}
-.fb-advanced{display:none;position:absolute;top:calc(100% + 8px);right:0;z-index:120;background:var(--surface-3);border:1px solid var(--border-bright);border-radius:var(--radius-md);box-shadow:0 12px 34px rgba(0,0,0,.55);padding:14px;min-width:440px;flex-direction:column;gap:12px}
-.fb-advanced.open{display:flex}
-.fb-adv-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px 18px}
-.fb-adv-grid .fb-field{justify-content:space-between}
-.fb-adv-foot{display:flex;justify-content:flex-end;border-top:1px solid var(--border-bright);padding-top:10px}
-.fb-badge{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;border-radius:999px;background:var(--accent);color:var(--on-accent,#080d14);font-size:.65rem;font-weight:800;padding:0 4px}
+.fb-row2{margin-top:-4px;flex-wrap:wrap}
 .fb-menu{display:none;position:absolute;top:calc(100% + 8px);right:0;z-index:120;background:var(--surface-3);border:1px solid var(--border-bright);border-radius:var(--radius-md);box-shadow:0 12px 34px rgba(0,0,0,.55);padding:6px;min-width:280px;flex-direction:column;gap:2px}
 .fb-menu.open{display:flex}
 .fb-menu-item{display:flex;align-items:center;gap:8px;background:none;border:none;border-radius:7px;color:var(--text);font-size:.8rem;font-weight:600;padding:8px 10px;cursor:pointer;text-align:left;white-space:nowrap}
@@ -2129,7 +2150,7 @@ __TABCSS__
 .th-sort{cursor:pointer;user-select:none}
 .th-sort:hover{color:var(--text)}
 .th-sort.on{color:var(--accent)}
-@media(max-width:640px){.fb-advanced{position:fixed;left:12px;right:12px;top:auto;bottom:84px;min-width:0;max-height:55vh;overflow-y:auto;z-index:220}.fb-adv-grid{grid-template-columns:1fr}}
+@media(max-width:640px){.fb-row2{gap:8px}.fb-row2 .fb-field{flex:1 1 45%;justify-content:space-between}}
 .fb-more-btn{background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:.78rem;font-weight:600;padding:5px 11px;cursor:pointer;display:inline-flex;align-items:center;gap:5px}
 .fb-more-btn:hover{border-color:var(--accent);color:var(--text)}
 .fb-more-btn .chev{transition:transform .18s}
@@ -2164,8 +2185,8 @@ select.sb-act{padding:5px 8px}
     <div class="stat-card stat-click" data-statview="completed" title="Archived receipts"><div class="stat-value" id="statCompleted" style="color:#818cf8">–</div><div class="stat-label">Completed</div></div>
   </div>
 
-  <!-- Toolbar · one row, one job per control: Period / Search / Filters / Export.
-       Status filtering lives on the stat cards; fine-grained state in the Filters popover. -->
+  <!-- Toolbar · row 1: Period / Search / Export. Status filtering lives on the
+       stat cards; fine-grained filters sit on the always-visible second row. -->
   <div class="filter-bar">
     <div class="fb-field">
       <span>Period</span>
@@ -2189,57 +2210,6 @@ select.sb-act{padding:5px 8px}
       <option value="merchant">Merchant A→Z</option>
     </select>
     <div class="fb-pop-wrap">
-      <button class="fb-more-btn" id="fMore" aria-expanded="false">Filters <span class="chev">▾</span><span class="fb-badge" id="fBadge" hidden>0</span></button>
-      <div class="fb-advanced" id="fAdvanced">
-        <div class="fb-adv-grid">
-          <div class="fb-field"><span>Status</span>
-            <select id="fStatus">
-              <option value="all">All</option>
-              <option value="matched">Matched</option>
-              <option value="unmatched_any">Unmatched (any)</option>
-              <option value="unmatched">Unmatched only</option>
-              <option value="pending_match">Pending Match</option>
-            </select>
-          </div>
-          <div class="fb-field"><span>Card</span>
-            <select id="fCard">
-              <option value="all">All</option>
-              <option value="amex">AMEX</option>
-              <option value="visa">Visa</option>
-              <option value="other">Cash</option>
-              <option value="unknown">Unknown</option>
-            </select>
-          </div>
-          <div class="fb-field"><span>Usage</span>
-            <select id="fUsage"><option value="all">All</option></select>
-          </div>
-          <div class="fb-field"><span>Show</span>
-            <select id="fCompleted">
-              <option value="hide">Active only</option>
-              <option value="only">Completed only</option>
-              <option value="all">All</option>
-            </select>
-          </div>
-          <div class="fb-field"><span>Status</span>
-            <select id="fSettle" title="Settlement status (synced with Review). Completed rows live under the Completed filter.">
-              <option value="all">All</option>
-              <option value="open">Open</option>
-              <option value="in_progress">⏳ In progress</option>
-            </select>
-          </div>
-          <div class="fb-field"><span>Duplicates</span>
-            <span style="display:inline-flex;align-items:center;gap:6px">
-              <button class="preset-btn active" id="viewToggle" title="Duplicates are collapsed into one row by default — click to list every copy">☰ Show All</button>
-              <span class="cc-info-wrap"><span class="cc-info" onclick="ccTipToggle(this)">ℹ</span><span class="cc-tip">Groups receipts recognized multiple times from the same image. Delete the redundant duplicates.</span></span>
-            </span>
-          </div>
-        </div>
-        <div class="fb-adv-foot">
-          <button class="btn btn-ghost btn-sm" id="fReset">↺ Reset all</button>
-        </div>
-      </div>
-    </div>
-    <div class="fb-pop-wrap">
       <button class="fb-more-btn" id="fExport" aria-expanded="false">⬇ Export <span class="chev">▾</span></button>
       <div class="fb-menu" id="fExportMenu">
         <button class="fb-menu-item" id="fDownloadXlsx" title="Ledger backup with Card Type/Usage columns — NOT for SAP upload (use Review's xlsx)">⬇ xlsx (ledger) <small>backup · not for SAP</small></button>
@@ -2248,7 +2218,54 @@ select.sb-act{padding:5px 8px}
     </div>
   </div>
 
-  <!-- Non-default filters stay visible as chips even while the popover is closed -->
+  <!-- Toolbar · row 2: fine-grained filters, always visible. -->
+  <div class="filter-bar fb-row2">
+    <div class="fb-field"><span>Status</span>
+      <select id="fStatus">
+        <option value="all">All</option>
+        <option value="matched">Matched</option>
+        <option value="unmatched_any">Unmatched (any)</option>
+        <option value="unmatched">Unmatched only</option>
+        <option value="pending_match">Pending Match</option>
+      </select>
+    </div>
+    <div class="fb-field"><span>Card</span>
+      <select id="fCard">
+        <option value="all">All</option>
+        <option value="amex">AMEX</option>
+        <option value="visa">Visa</option>
+        <option value="other">Cash</option>
+        <option value="unknown">Unknown</option>
+      </select>
+    </div>
+    <div class="fb-field"><span>Usage</span>
+      <select id="fUsage"><option value="all">All</option></select>
+    </div>
+    <div class="fb-field"><span>Show</span>
+      <select id="fCompleted">
+        <option value="hide">Active only</option>
+        <option value="only">Completed only</option>
+        <option value="all">All</option>
+      </select>
+    </div>
+    <div class="fb-field"><span>Approval</span>
+      <select id="fSettle" title="Settlement status (synced with Review). Completed rows live under the Completed filter.">
+        <option value="all">All</option>
+        <option value="open">Open</option>
+        <option value="in_progress">⏳ In progress</option>
+      </select>
+    </div>
+    <div class="fb-field"><span>Duplicates</span>
+      <span style="display:inline-flex;align-items:center;gap:6px">
+        <button class="preset-btn active" id="viewToggle" title="Duplicates are collapsed into one row by default — click to list every copy">☰ Show All</button>
+        <span class="cc-info-wrap"><span class="cc-info" onclick="ccTipToggle(this)">ℹ</span><span class="cc-tip">Groups receipts recognized multiple times from the same image. Delete the redundant duplicates.</span></span>
+      </span>
+    </div>
+    <div class="fb-spacer"></div>
+    <button class="btn btn-ghost btn-sm" id="fReset">↺ Reset all</button>
+  </div>
+
+  <!-- Non-default filters double as chips for one-click removal -->
   <div class="fb-chips" id="fChips" hidden></div>
 
   <!-- Bulk-action bar, appears only while rows are selected.
@@ -2400,6 +2417,14 @@ select.sb-act{padding:5px 8px}
 </div>
 
 <div class="overlay-bg" id="delOverlay"></div>
+<div class="del-modal" id="dupModal">
+  <div class="del-title">🔁 Duplicates need review</div>
+  <div class="del-body" id="dupBody"></div>
+  <div class="del-actions">
+    <button class="btn btn-ghost btn-sm" id="dupLater">Later</button>
+    <button class="btn btn-primary btn-sm" id="dupReview">Review duplicates</button>
+  </div>
+</div>
 <div class="del-modal" id="delModal">
   <div class="del-title">🗑 Delete receipts</div>
   <div class="del-body" id="delBody">Delete the checked receipts from the Ledger?</div>
@@ -2586,10 +2611,8 @@ function rowHtml(e, i, opts){
       '" style="color:#f59e0b;padding:2px 8px" title="Undo match — reset to pending">↩ Undo</button></td>'
     : '<td><button class="btn btn-ghost btn-sm act-rematch" data-id="' + e.id +
       '" style="color:#818cf8;padding:2px 8px" title="Re-try CSV matching for this receipt">🔗 Rematch</button></td>';
-  // Duplicate group: non-keeper rows are pre-checked for quick cleanup.
-  const preCheck = (e.dup && !e.dup_keep) ? ' checked' : '';
   const checkCell = '<td><input type="checkbox" class="row-check sel" data-id="' +
-    e.id + '"' + preCheck + '></td>';
+    e.id + '"></td>';
   // ✂ separates a mis-grouped receipt into its own entry; ◇ can undo that.
   const splitBtn = '<span class="dup-split" data-nd="' + e.id + '" ' +
     'title="Not a duplicate — keep this receipt as a separate entry">✂ Not dup</span>';
@@ -2763,7 +2786,37 @@ async function load(){
   rerender();
   renderLastSynced(d.last_synced);
   updateChips();
+  maybeDupPrompt();
 }
+
+// Duplicates need a decision — surface them in a modal once per page load
+// instead of silently pre-checking rows (easy to miss, easy to mass-delete).
+let _dupPrompted = false;
+function maybeDupPrompt(){
+  const dupN = ENTRIES.filter(e => e.dup && !e.dup_keep).length;
+  if(!dupN || _dupPrompted) return;
+  _dupPrompted = true;
+  $('dupBody').textContent = dupN + ' receipt' + (dupN > 1 ? 's look' : ' looks') +
+    ' like duplicate scans of the same purchase. Review each group and delete the redundant copies, or mark real separate purchases with ✂ Not dup.';
+  $('delOverlay').classList.add('open');
+  $('dupModal').classList.add('open');
+}
+function closeDupModal(){
+  $('dupModal').classList.remove('open');
+  $('delOverlay').classList.remove('open');
+}
+$('dupLater').addEventListener('click', closeDupModal);
+$('dupReview').addEventListener('click', () => {
+  closeDupModal();
+  // Expand every collapsed group, pre-check the non-keeper copies for
+  // cleanup, and jump to the first duplicate.
+  document.querySelectorAll('.dup-child').forEach(r => r.classList.add('show'));
+  const dupIds = new Set(ENTRIES.filter(e => e.dup && !e.dup_keep).map(e => e.id));
+  document.querySelectorAll('.sel').forEach(c => { if(dupIds.has(c.dataset.id)) c.checked = true; });
+  updateDeleteBtn();
+  const first = document.querySelector('.dup-row, .dup-child');
+  if(first) first.scrollIntoView({behavior:'smooth', block:'center'});
+});
 
 function escSvg(s){
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -3122,11 +3175,6 @@ document.querySelectorAll('.stat-click').forEach(card => card.addEventListener('
 }));
 let _mDeb;
 $('fMerchant').addEventListener('input', () => { clearTimeout(_mDeb); _mDeb = setTimeout(load, 300); });
-$('fMore').addEventListener('click', () => {
-  const adv = $('fAdvanced'), open = adv.classList.toggle('open');
-  $('fMore').classList.toggle('open', open);
-  $('fMore').setAttribute('aria-expanded', open);
-});
 $('fReset').addEventListener('click', () => {
   $('fStatus').value='all'; $('fCard').value='all'; $('fUsage').value='all';
   $('fCompleted').value='hide'; $('fSettle').value='all';
@@ -3214,15 +3262,15 @@ $('fExport').addEventListener('click', () => {
   $('fExport').setAttribute('aria-expanded', open);
 });
 
-// Click outside / Escape closes both popovers.
+// Click outside / Escape closes the export popover.
 function closePops(){
-  [['fMore','fAdvanced'],['fExport','fExportMenu']].forEach(([b,p]) => {
+  [['fExport','fExportMenu']].forEach(([b,p]) => {
     $(p).classList.remove('open'); $(b).classList.remove('open');
     $(b).setAttribute('aria-expanded','false');
   });
 }
 document.addEventListener('click', e => {
-  [['fMore','fAdvanced'],['fExport','fExportMenu']].forEach(([b,p]) => {
+  [['fExport','fExportMenu']].forEach(([b,p]) => {
     if(!$(p).classList.contains('open')) return;
     if($(p).contains(e.target) || $(b).contains(e.target)) return;
     $(p).classList.remove('open'); $(b).classList.remove('open');
@@ -3251,11 +3299,6 @@ function updateChips(){
     chips.push({label:'Show: ' + optText('fCompleted'), clear: () => { $('fCompleted').value='hide'; clearStatRing(); load(); }});
   if($('fSettle').value !== 'all')
     chips.push({label:'Status: ' + optText('fSettle'), clear: () => { $('fSettle').value='all'; clearStatRing(); load(); }});
-
-  const advCount = ['fStatus','fCard','fUsage','fSettle'].filter(id => $(id).value !== 'all').length
-                 + ($('fCompleted').value !== 'hide' ? 1 : 0);
-  $('fBadge').hidden = advCount === 0;
-  $('fBadge').textContent = advCount;
 
   const bar = $('fChips');
   bar.innerHTML = '';
@@ -3327,7 +3370,7 @@ $('manualOverlay').addEventListener('click', closeManualAdd);
 
 // Delete confirmation modal (with optional Drive trashing).
 $('delCancel').addEventListener('click', closeDelModal);
-$('delOverlay').addEventListener('click', closeDelModal);
+$('delOverlay').addEventListener('click', () => { closeDelModal(); closeDupModal(); });
 $('delConfirm').addEventListener('click', confirmDelete);
 
 setDefaultDates();

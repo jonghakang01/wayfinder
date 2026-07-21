@@ -920,6 +920,10 @@ def _apply_receipt_match(entry: dict, receipt: dict, receipts: list):
     tx_usage = (entry.get("usage") or "").strip()
     if tx_usage and tx_usage != "Regular" and (receipt.get("usage") or "Regular") == "Regular":
         receipt["usage"] = tx_usage
+    # Same carry-over for a w/ note typed on the transaction before matching.
+    tx_comp = (entry.get("companions") or "").strip()
+    if tx_comp and not receipt.get("ocr_companions"):
+        receipt["ocr_companions"] = tx_comp
     mfid = receipt.get("file_id")
     siblings = [
         {"id": s.get("id"), "ocr_bbox": s.get("ocr_bbox")}
@@ -1203,7 +1207,9 @@ def _build_xlsx_from_entries(entries: list) -> tuple:
         ser_s = str(e.get("ser") or "").strip()
         ser_is_text = ser_s.startswith("0") or not ser_s.isdigit()
         purpose = e.get("purpose") or ""
-        companions = (e.get("receipt") or {}).get("companions")
+        # Matched rows carry the note on the receipt snapshot; receipt-less
+        # rows keep it on the pool transaction itself.
+        companions = (e.get("receipt") or {}).get("companions") or e.get("companions")
         if companions:
             purpose = (purpose + " w/ " + companions).strip()
 
@@ -3528,6 +3534,27 @@ def _handle_review_no_receipt(username: str, body: dict):
     return ("json", {"ok": True})
 
 
+def _handle_review_companions(username: str, body: dict):
+    """POST /cardconv/review/companions — set the w/ note on a pool transaction.
+
+    Lets Review annotate receipt-less transactions. Matched rows edit the
+    ledger receipt instead (single source of truth), so this only writes to
+    the pool entry; the note carries over if a receipt matches later."""
+    def _val(k):
+        v = body.get(k, "")
+        return (v[0] if isinstance(v, list) else str(v)).strip()
+    rid = _val("id")
+    if not rid:
+        return ("json", {"error": "missing id"}, 400)
+    pool = _load_tx_pool(username)
+    entry = next((e for e in pool["entries"] if e.get("id") == rid), None)
+    if entry is None:
+        return ("json", {"error": "not found"}, 404)
+    entry["companions"] = _coerce_companions(_val("companions"))
+    _save_tx_pool(username, pool)
+    return ("json", {"ok": True})
+
+
 def _handle_review_usage(username: str, body: dict):
     """POST /cardconv/review/usage — set the usage tag on a pool transaction.
 
@@ -3719,7 +3746,7 @@ def _build_expense_report(username: str, entries: list) -> bytes:
 
     def purpose(e) -> str:
         p = str(e.get("purpose", "") or "")
-        comp = (e.get("receipt") or {}).get("companions", "")
+        comp = (e.get("receipt") or {}).get("companions") or e.get("companions") or ""
         return f"{p} w/ {comp}" if comp else p
 
     r = 5
