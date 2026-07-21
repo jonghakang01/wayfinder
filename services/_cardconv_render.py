@@ -926,6 +926,9 @@ def _render_review(user: str) -> str:
     _ledger_rows = _ledger_entries(user)
     _rcpt_attrs = {e.get("id"): (e.get("card_brand") or "", e.get("usage") or "Regular")
                    for e in _ledger_rows}
+    # Cash rows print in their receipt's own currency like the Ledger does —
+    # the pool snapshot predates FX fields, so read the live receipt.
+    _rcpt_by_id = {e.get("id"): e for e in _ledger_rows}
     # Matched rows read usage from the ledger receipt (source of truth);
     # unmatched rows carry their own tag on the pool entry.
     def _row_usage(e):
@@ -997,6 +1000,12 @@ def _render_review(user: str) -> str:
                 label = {"amex": "AMEX", "visa": "Visa", "other": "Cash"}.get(brand, brand.upper())
                 pay_chip = (f'<span class="rv-gl rv-brand" title="Payment card type">💳 {label}</span>'
                             f'<span class="rv-gl">G/L {_esc(r.get("gl"))}</span>')
+            # Cash rows show the receipt's own currency + USD conversion
+            # ("₩435,500 → ~$286.47"), same as the Ledger; statement rows are
+            # already the settled USD figure.
+            live_rc = _rcpt_by_id.get(rc.get("id")) if r.get("cash") else None
+            amt_html = (_money(live_rc.get("ocr_amount"), live_rc)
+                        if live_rc else _money(r.get("amount")))
             # Transaction (CSV line item) header
             txn = (
                 f'<label class="rv-cb-wrap"><input type="checkbox" class="rv-cb" data-id="{_esc(r.get("id",""))}"></label>'
@@ -1006,7 +1015,7 @@ def _render_review(user: str) -> str:
                     f'<span class="rv-merchant">{_esc(r.get("merchant"))}</span>'
                   '</div>'
                   '<div class="rv-txn-meta">'
-                    f'<span class="rv-amt">{_money(r.get("amount"))}</span>'
+                    f'<span class="rv-amt">{amt_html}</span>'
                     f'{pay_chip}'
                   '</div>'
                 '</div>')
@@ -1041,7 +1050,7 @@ def _render_review(user: str) -> str:
                       '<div class="rv-card-info">'
                         f'<div class="rv-card-line">🗓 {_esc(rc.get("ocr_date")) or "–"}</div>'
                         f'<div class="rv-card-line rv-card-merchant">{_esc(rc.get("ocr_merchant")) or "–"}</div>'
-                        f'<div class="rv-card-line rv-card-amt">{_money(rc.get("ocr_amount"), rc)}</div>'
+                        f'<div class="rv-card-line rv-card-amt">{_money((live_rc or rc).get("ocr_amount"), live_rc or rc)}</div>'
                         f'<div class="rv-card-line">🏷 {usage_sel}</div>'
                         f'{comp}{link}'
                       '</div>'
