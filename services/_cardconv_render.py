@@ -1302,7 +1302,20 @@ function iso(d){{ return d.toISOString().slice(0,10); }}
 // View state: 'open' (default) or 'completed'. Date filters keep rows without
 // an invoice date always visible, matching Ledger.
 let rvView = 'open';
-let rvMatchedF = 'all';   // 'all' | '1' | '0' — set by the Matched/Unmatched cards
+let rvMatchedF = 'all';   // 'all' | '1' | '0' | 'nr' — set by the stat cards
+let rvViewKey = 'open';   // which stat card is active (for state restore)
+
+// Row actions reload the page (server re-renders states) — keep the working
+// context (sort, filters, active view) alive across those reloads.
+function rvSaveState(){{
+  try {{
+    sessionStorage.setItem('rvState', JSON.stringify({{
+      sort: $('rvSort').value, period: $('rvPeriod').value,
+      from: $('rvFrom').value, to: $('rvTo').value,
+      merchant: $('rvMerchant').value, card: $('rvCard').value,
+      usage: $('rvUsage').value, view: rvViewKey}}));
+  }} catch(e) {{}}
+}}
 function applyFilter(){{
   const from = $('rvFrom').value, to = $('rvTo').value;
   const mq = $('rvMerchant').value.trim().toLowerCase();
@@ -1322,6 +1335,7 @@ function applyFilter(){{
     if(!show) it.querySelector('.rv-cb').checked = false;
   }});
   $('rvSelAll').checked = false;
+  rvSaveState();
 }}
 
 function applySort(){{
@@ -1336,6 +1350,7 @@ function applySort(){{
     return (b.dataset.date || '').localeCompare(a.dataset.date || '');  // date desc
   }});
   items.forEach(it => list.appendChild(it));
+  rvSaveState();
 }}
 
 // ── Inline usage editor — writes to the ledger entry, so the Ledger tab
@@ -1406,6 +1421,7 @@ const RV_VIEWS = {{
 }};
 document.querySelectorAll('.stat-click').forEach(card => card.addEventListener('click', () => {{
   const v = RV_VIEWS[card.dataset.rvview];
+  rvViewKey = card.dataset.rvview;
   rvView = v.view; rvMatchedF = v.matched;
   document.querySelectorAll('.stat-click').forEach(c => c.classList.toggle('active', c === card));
   applyFilter();
@@ -1481,10 +1497,35 @@ $('rvReset').addEventListener('click', () => {{
   $('rvPeriod').value = 'all'; $('rvCustomRange').hidden = true;
   $('rvCard').value = 'all'; $('rvUsage').value = 'all';
   $('rvSort').value = 'date'; applySort();
-  rvView = 'open'; rvMatchedF = 'all';
+  rvView = 'open'; rvMatchedF = 'all'; rvViewKey = 'open';
   document.querySelectorAll('.stat-click').forEach(c => c.classList.toggle('active', c.dataset.rvview === 'open'));
   applyFilter();
 }});
+
+// Restore the saved working context after the reload a row action triggered.
+(function rvRestoreState(){{
+  let s = null;
+  try {{ s = JSON.parse(sessionStorage.getItem('rvState') || 'null'); }} catch(e) {{}}
+  if(!s) return;
+  if(s.period){{ $('rvPeriod').value = s.period; $('rvCustomRange').hidden = (s.period !== 'custom'); }}
+  if(s.from) $('rvFrom').value = s.from;
+  if(s.to) $('rvTo').value = s.to;
+  if(s.merchant) $('rvMerchant').value = s.merchant;
+  if(s.card) $('rvCard').value = s.card;
+  if(s.usage && Array.from($('rvUsage').options).some(o => o.value === s.usage))
+    $('rvUsage').value = s.usage;
+  if(s.sort && Array.from($('rvSort').options).some(o => o.value === s.sort))
+    $('rvSort').value = s.sort;
+  if(s.view && RV_VIEWS[s.view]){{
+    rvViewKey = s.view;
+    rvView = RV_VIEWS[s.view].view;
+    rvMatchedF = RV_VIEWS[s.view].matched;
+    document.querySelectorAll('.stat-click').forEach(c =>
+      c.classList.toggle('active', c.dataset.rvview === s.view));
+  }}
+  applySort();
+  applyFilter();
+}})();
 
 // Downloads: checked rows take priority (download selected only); otherwise
 // the current date filter applies to all open transactions.
