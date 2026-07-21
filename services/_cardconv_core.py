@@ -227,6 +227,8 @@ def _migrate_entry(e: dict) -> dict:
     e.setdefault("ocr_handwriting", None)
     # v2.7: actual settled USD from the matched statement line (vs FX estimate).
     e.setdefault("usd_settled", None)
+    # v2.8: 'Reason for Cash' on cash receipts — SAP xlsx column S.
+    e.setdefault("cash_reason", None)
     # v2.6: printed transaction time (duplicate disambiguation) + user override
     # that pins an entry out of duplicate grouping ("this is a separate purchase").
     e.setdefault("ocr_time", None)
@@ -416,11 +418,17 @@ def _handle_ocr_staging_confirm(username: str, body: dict):
         corrections = {item["id"]: item for item in confirmed_list if "id" in item}
         confirmed_ids = set(corrections.keys())
     else:
-        # Legacy FormData path: just a list of IDs, no corrections
+        # Legacy FormData path: a list of IDs, plus optional per-entry
+        # 'cash_reason_<id>' inputs from the staging page's cash rows.
         if isinstance(confirmed_list, str):
             confirmed_list = [confirmed_list]
         confirmed_ids = set(confirmed_list)
         corrections = {}
+        for k, v in body.items():
+            if k.startswith("cash_reason_"):
+                val = (v[0] if isinstance(v, list) else str(v)).strip()
+                if val:
+                    corrections[k[len("cash_reason_"):]] = {"cash_reason": val}
 
     confirmed = []
     for e in all_entries:
@@ -446,6 +454,9 @@ def _handle_ocr_staging_confirm(username: str, body: dict):
         raw = fix.get("ocr_companions")
         if raw is not None:
             entry["ocr_companions"] = _coerce_companions(str(raw))
+        raw = fix.get("cash_reason")
+        if raw is not None:
+            entry["cash_reason"] = str(raw).strip()[:120] or None
         # Recompute final amount after manual correction.
         hw = entry.get("ocr_handwritten_amount")
         pr = entry.get("ocr_amount")
@@ -895,12 +906,21 @@ def _sync_cash_pool(username: str) -> None:
     # G/L / Ser. / Purpose (backfills pre-2026-07-21 rows too, when the SAP
     # export didn't carry cash lines).
     rules = _load_kw()
+    rcpt_by_id = {r.get("id"): r for r in receipts}
     for e in entries:
-        if e.get("cash") and not e.get("gl"):
+        if not e.get("cash"):
+            continue
+        if not e.get("gl"):
             gl, ser, purpose = _classify(e.get("merchant") or "", rules)
             if gl is None:
                 gl, ser, purpose = 53410177, "160", "Coffee, Snack and meal"
             e.update(gl=gl, ser=ser, purpose=purpose)
+            dirty = True
+        # Receipt-side 'Reason for Cash' (OCR confirm / Ledger edit) is the
+        # source of truth — mirror onto the pool row for Review + SAP col S.
+        src = rcpt_by_id.get((e.get("receipt") or {}).get("id"))
+        if src is not None and src.get("cash_reason") != e.get("cash_reason"):
+            e["cash_reason"] = src.get("cash_reason")
             dirty = True
     kept = []
     for e in entries:
@@ -3410,6 +3430,12 @@ def _handle_ledger_update(username: str, entry_id: str, body: dict):
         if raw is not None:
             val = (raw[0] if isinstance(raw, list) else str(raw)).strip().lower()
             e["card_brand"] = val if val in ("amex", "visa", "other") else None
+        # Reason for Cash: receipt is the source of truth; _sync_cash_pool
+        # mirrors it onto the cash pool row for Review + the SAP column S.
+        raw = body.get("cash_reason")
+        if raw is not None:
+            val = (raw[0] if isinstance(raw, list) else str(raw)).strip()
+            e["cash_reason"] = None if val == "__clear__" else (val[:120] or None)
         # Usage: free-text tag, defaults back to "Regular" when cleared.
         raw = body.get("usage")
         if raw is not None:
@@ -3605,8 +3631,19 @@ def _handle_review_cash_reason(username: str, body: dict):
         return ("json", {"error": "not found"}, 404)
     if not entry.get("cash"):
         return ("json", {"error": "not a cash row"}, 400)
-    entry["cash_reason"] = _val("reason")[:120] or None
+    reason = _val("reason")[:120] or None
+    entry["cash_reason"] = reason
     _save_tx_pool(username, pool)
+    # Receipt is the source of truth (_sync_cash_pool mirrors receipt → pool
+    # on every load) — write it there too or the edit reverts next render.
+    rid = (entry.get("receipt") or {}).get("id")
+    if rid:
+        ledger = _load_ledger(username)
+        for e in ledger["entries"]:
+            if e.get("id") == rid:
+                e["cash_reason"] = reason
+                _save_ledger(username, ledger)
+                break
     return ("json", {"ok": True})
 
 
@@ -3730,10 +3767,15 @@ def _handle_review_download(username: str, query: dict):
         return ("html", "<h2 style='padding:40px'>No open transactions to download.</h2>", 404)
     # Receipt Type (col A): D = AMEX statement charge; everything else —
     # cash, personal Visa, any non-AMEX method — is reimbursed as cash → A.
-    brands = {r.get("id"): (r.get("card_brand") or "") for r in _load_receipts(username)}
+    # Reason for Cash lives on the receipt (OCR confirm / Ledger edit) — read
+    # it live so a fresh edit exports even before a Review render mirrors it.
+    rcpts = {r.get("id"): r for r in _load_receipts(username)}
     for e in entries:
-        rb = brands.get((e.get("receipt") or {}).get("id"), "")
+        rc = rcpts.get((e.get("receipt") or {}).get("id"))
+        rb = (rc or {}).get("card_brand") or ""
         e["receipt_type"] = "A" if (e.get("cash") or rb in ("visa", "other")) else "D"
+        if e.get("cash") and rc is not None:
+            e["cash_reason"] = rc.get("cash_reason") or e.get("cash_reason")
     try:
         xlsx_bytes, out_fn = _build_xlsx_from_entries(entries)
     except FileNotFoundError as e:

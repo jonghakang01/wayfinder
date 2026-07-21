@@ -1937,6 +1937,7 @@ def _render_ocr_staging_review(user: str) -> str:
     <div class="stg-row"><span class="stg-lbl">Handwritten</span><span class="stg-val">{hw_v}</span></div>
     <div class="stg-row"><span class="stg-lbl">Card</span><span class="stg-val">{_esc({"amex": "AMEX", "visa": "Visa", "other": "Cash"}.get(e.get("card_brand") or "", "–"))}</span></div>
     <div class="stg-row"><span class="stg-lbl">w/</span><span class="stg-val">{_esc(e.get("ocr_companions") or "–")}</span></div>
+    {'<div class="stg-row stg-reason"><span class="stg-lbl">Reason for Cash</span><input type="text" name="cash_reason_' + eid + '" maxlength="120" value="' + _esc(e.get("cash_reason") or "") + '" placeholder="e.g. Vendor does not accept cards" style="flex:1;margin-left:10px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:.78rem;padding:3px 6px"></div>' if (e.get("card_brand") or "") == "other" else ''}
     {fx_row}
   </div>
 </div>''')
@@ -2388,6 +2389,10 @@ select.sb-act{padding:5px 8px}
     <div class="detail-row" title="Handwritten companion note — appended to the SAP purpose column"><span class="key">With (w/)</span>
       <span class="val" id="dCompanions">–</span>
       <input id="eCompanions" type="text" placeholder="e.g. sds" style="display:none;width:130px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:.82rem;padding:2px 6px">
+    </div>
+    <div class="detail-row" id="dCashReasonRow" title="Reason for Cash — exported to the SAP xlsx (column S). Cash receipts only."><span class="key">Reason for Cash</span>
+      <span class="val" id="dCashReason">–</span>
+      <input id="eCashReason" type="text" maxlength="120" placeholder="e.g. Vendor does not accept cards" style="display:none;width:100%;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:.82rem;padding:2px 6px">
     </div>
     <div class="detail-row"><span class="key">Printed $</span>
       <span class="val" id="dPrinted">–</span>
@@ -2923,6 +2928,10 @@ function openPanel(e){
   $('dHand').style.color = hand ? '' : '#f59e0b';
   $('dMerchant').textContent = e.ocr_merchant || '–';
   $('dCompanions').textContent = e.ocr_companions ? ('w/ ' + e.ocr_companions) : '–';
+  // Reason for Cash: only meaningful on cash receipts — hide the row otherwise.
+  $('dCashReasonRow').style.display = (e.card_brand === 'other') ? '' : 'none';
+  $('dCashReason').textContent = e.cash_reason || '–';
+  $('eCashReason').value = e.cash_reason || '';
   $('dModel').textContent = e.ocr_model || '–';
   $('dCard').innerHTML = cardBadge(e.card_brand);
   $('dUsage').textContent = e.usage || 'Regular';
@@ -2972,7 +2981,7 @@ function closePanel(){
   exitPanelEdit();
 }
 
-const PANEL_EDIT_FIELDS = ['dDate','dMerchant','dCompanions','dPrinted','dHand','dCard','dUsage'];
+const PANEL_EDIT_FIELDS = ['dDate','dMerchant','dCompanions','dCashReason','dPrinted','dHand','dCard','dUsage'];
 function exitPanelEdit(){
   PANEL_EDIT_FIELDS.forEach(function(id){
     var s = $(id); var e = $(id.replace('d','e')); if(!s||!e) return;
@@ -2999,6 +3008,7 @@ async function savePanelEdit(){
     ocr_date:                 $('eDate').value,
     ocr_merchant:             $('eMerchant').value,
     ocr_companions:           $('eCompanions').value.trim() || '__clear__',
+    cash_reason:              $('eCashReason').value.trim() || '__clear__',
     ocr_printed_amount:       $('ePrinted').value,
     ocr_handwritten_amount:   $('eHand').value,
     card_brand:               $('eCard').value,
@@ -3670,10 +3680,24 @@ function _imgLbKey(e){ if(e.key==='Escape') closeImgLb(); }
         +   '<div><label style="' + LABEL_STYLE + '">w/ (companions)</label>'
         +     '<input class="ocr-field" data-field="ocr_companions" data-id="' + eid + '" type="text" value="' + ((e.ocr_companions || '')).replace(/"/g,'&quot;') + '" placeholder="e.g. sds" style="' + INPUT_STYLE + '"></div>'
         + '</div>'
+        // Reason for Cash: SAP col S — only shown while Card type is Cash.
+        + '<div class="ocr-reason-row" style="display:' + ((e.card_brand || '') === 'other' ? 'block' : 'none') + '">'
+        +   '<label style="' + LABEL_STYLE + '">Reason for Cash</label>'
+        +   '<input class="ocr-field" data-field="cash_reason" data-id="' + eid + '" type="text" maxlength="120" value="' + ((e.cash_reason || '')).replace(/"/g,'&quot;') + '" placeholder="e.g. Vendor does not accept cards" style="' + INPUT_STYLE + '">'
+        + '</div>'
         + fxRow
         + '</div></div>';
     }).join('');
   }
+
+  // Card type → Cash reveals the Reason for Cash input on that card.
+  document.addEventListener('change', function(ev) {
+    var t = ev.target;
+    if (!t.classList || !t.classList.contains('ocr-field') || t.dataset.field !== 'card_brand') return;
+    var row = t.closest('.ocr-card');
+    var rr = row && row.querySelector('.ocr-reason-row');
+    if (rr) rr.style.display = (t.value === 'other') ? 'block' : 'none';
+  });
 
   window.openOcrModal = function() {
     overlay.style.display = 'flex';
