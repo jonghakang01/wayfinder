@@ -891,6 +891,17 @@ def _sync_cash_pool(username: str) -> None:
         _apply_receipt_match(entry, r, receipts)
         entries.append(entry)
         dirty = True
+    # Cash rows classify like statement rows: same keyword rules fill
+    # G/L / Ser. / Purpose (backfills pre-2026-07-21 rows too, when the SAP
+    # export didn't carry cash lines).
+    rules = _load_kw()
+    for e in entries:
+        if e.get("cash") and not e.get("gl"):
+            gl, ser, purpose = _classify(e.get("merchant") or "", rules)
+            if gl is None:
+                gl, ser, purpose = 53410177, "160", "Coffee, Snack and meal"
+            e.update(gl=gl, ser=ser, purpose=purpose)
+            dirty = True
     kept = []
     for e in entries:
         if e.get("cash") and (e.get("receipt") or {}).get("id") not in cash_rids:
@@ -1235,7 +1246,7 @@ def _build_xlsx_from_entries(entries: list) -> tuple:
             purpose = (purpose + " w/ " + companions).strip()
 
         c = [
-            cell("A", rnum, FIXED["receipt_type"], "str"),
+            cell("A", rnum, e.get("receipt_type") or FIXED["receipt_type"], "str"),
             cell("B", rnum, FIXED["employee_id"], "num"),
             cell("C", rnum, FIXED["payee"], "str"),
             cell("D", rnum, "", "num"),
@@ -3697,6 +3708,12 @@ def _handle_review_download(username: str, query: dict):
     entries = _select_review_entries(username, query)
     if not entries:
         return ("html", "<h2 style='padding:40px'>No open transactions to download.</h2>", 404)
+    # Receipt Type (col A): D = AMEX statement charge; everything else —
+    # cash, personal Visa, any non-AMEX method — is reimbursed as cash → A.
+    brands = {r.get("id"): (r.get("card_brand") or "") for r in _load_receipts(username)}
+    for e in entries:
+        rb = brands.get((e.get("receipt") or {}).get("id"), "")
+        e["receipt_type"] = "A" if (e.get("cash") or rb in ("visa", "other")) else "D"
     try:
         xlsx_bytes, out_fn = _build_xlsx_from_entries(entries)
     except FileNotFoundError as e:

@@ -994,7 +994,9 @@ def _render_review(user: str) -> str:
             if r.get("cash"):
                 brand = "other"
                 pay_chip = ('<span class="rv-gl rv-cash" title="Cash receipt — not on the AMEX statement. '
-                            'Exported to the SAP xlsx with the Reason for Cash column (fill it in before upload).">💵 Cash</span>')
+                            'Exported to the SAP xlsx as Receipt Type A with the Reason for Cash column '
+                            '(fill it in before upload).">💵 Cash</span>'
+                            + (f'<span class="rv-gl">G/L {_esc(r.get("gl"))}</span>' if r.get("gl") else ''))
             else:
                 brand = (_rcpt_attrs.get(rc.get("id"), ("", ""))[0] if is_matched else "") or "amex"
                 label = {"amex": "AMEX", "visa": "Visa", "other": "Cash"}.get(brand, brand.upper())
