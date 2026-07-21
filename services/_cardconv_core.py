@@ -3590,6 +3590,26 @@ def _handle_review_companions(username: str, body: dict):
     return ("json", {"ok": True})
 
 
+def _handle_review_cash_reason(username: str, body: dict):
+    """POST /cardconv/review/cash_reason — set the 'Reason for Cash' on a
+    cash pool row. Flows into the SAP xlsx column S on export."""
+    def _val(k):
+        v = body.get(k, "")
+        return (v[0] if isinstance(v, list) else str(v)).strip()
+    rid = _val("id")
+    if not rid:
+        return ("json", {"error": "missing id"}, 400)
+    pool = _load_tx_pool(username)
+    entry = next((e for e in pool["entries"] if e.get("id") == rid), None)
+    if entry is None:
+        return ("json", {"error": "not found"}, 404)
+    if not entry.get("cash"):
+        return ("json", {"error": "not a cash row"}, 400)
+    entry["cash_reason"] = _val("reason")[:120] or None
+    _save_tx_pool(username, pool)
+    return ("json", {"ok": True})
+
+
 def _handle_review_usage(username: str, body: dict):
     """POST /cardconv/review/usage — set the usage tag on a pool transaction.
 

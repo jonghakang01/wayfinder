@@ -1044,6 +1044,16 @@ def _render_review(user: str) -> str:
                 # Inline usage editor (same tags as the Ledger; edits write to the
                 # ledger entry, so both surfaces always agree).
                 usage_sel = _usage_sel("rcpt", rc.get("id") or "", _row_usage(r))
+                # Cash rows: editable 'Reason for Cash' — exported to SAP col S.
+                reason_line = ''
+                if r.get("cash"):
+                    reason = r.get("cash_reason")
+                    reason_line = (
+                        f'<div class="rv-card-line">💬 '
+                        f'<span class="rv-comp-edit" onclick="rvEditCashReason(this)" '
+                        f'data-id="{_esc(r.get("id") or "")}" data-cur="{_esc(reason or "")}" '
+                        f'title="Reason for Cash — exported to the SAP xlsx (column S)">'
+                        + (_esc(reason) if reason else '+ Reason for Cash') + '</span></div>')
                 receipt_block = (
                     '<div class="rv-receipt matched">'
                       f'<img class="rv-thumb" src="{tn}" loading="lazy" '
@@ -1054,7 +1064,7 @@ def _render_review(user: str) -> str:
                         f'<div class="rv-card-line rv-card-merchant">{_esc(rc.get("ocr_merchant")) or "–"}</div>'
                         f'<div class="rv-card-line rv-card-amt">{_money((live_rc or rc).get("ocr_amount"), live_rc or rc)}</div>'
                         f'<div class="rv-card-line">🏷 {usage_sel}</div>'
-                        f'{comp}{link}'
+                        f'{reason_line}{comp}{link}'
                       '</div>'
                     '</div>')
             else:
@@ -1433,6 +1443,20 @@ async function rvEditComp(el){{
   if(!d.ok){{ alert('Update failed: ' + (d.error || r.status)); return; }}
   el.dataset.cur = val;
   el.textContent = val ? ('w/ ' + val) : '+ Add w/';
+}}
+
+// 'Reason for Cash' editor on cash rows — stored on the pool row and
+// exported into the SAP xlsx (column S).
+async function rvEditCashReason(el){{
+  const v = prompt('Reason for Cash — leave blank and press OK to clear:', el.dataset.cur || '');
+  if(v === null) return;
+  const val = v.trim();
+  const r = await fetch('/cardconv/review/cash_reason',
+    {{method:'POST', body: new URLSearchParams({{id: el.dataset.id, reason: val}})}});
+  const d = await r.json().catch(function(){{ return {{}}; }});
+  if(!d.ok){{ alert('Update failed: ' + (d.error || r.status)); return; }}
+  el.dataset.cur = val;
+  el.textContent = val || '+ Reason for Cash';
 }}
 
 // File / un-file a transaction as receipt-less (no receipt exists for it).

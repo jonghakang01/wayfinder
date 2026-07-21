@@ -48,6 +48,8 @@ def handle(method, path, body, ctx=None):
         return _handle_review_usage(user, body)
     if method == "POST" and path == "/cardconv/review/companions":
         return _handle_review_companions(user, body)
+    if method == "POST" and path == "/cardconv/review/cash_reason":
+        return _handle_review_cash_reason(user, body)
     if method == "POST" and path == "/cardconv/review/no_receipt":
         return _handle_review_no_receipt(user, body)
     if method == "POST" and path == "/cardconv/review/match":
