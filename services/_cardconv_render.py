@@ -985,6 +985,18 @@ def _render_review(user: str) -> str:
                               'background:rgba(245,158,11,.15);color:#f59e0b">⏳ APPROVAL IN PROGRESS</span>')
             else:
                 done_badge = ''
+            # Payment chip: cash rows keep the 💵 badge; everything else is a
+            # statement line = AMEX charge by definition, but a matched
+            # receipt's own card type wins (legacy visa rows possible).
+            if r.get("cash"):
+                brand = "other"
+                pay_chip = ('<span class="rv-gl rv-cash" title="Cash receipt — not on the AMEX statement, '
+                            'excluded from the SAP xlsx (included in receipt/expense exports)">💵 Cash</span>')
+            else:
+                brand = (_rcpt_attrs.get(rc.get("id"), ("", ""))[0] if is_matched else "") or "amex"
+                label = {"amex": "AMEX", "visa": "Visa", "other": "Cash"}.get(brand, brand.upper())
+                pay_chip = (f'<span class="rv-gl rv-brand" title="Payment card type">💳 {label}</span>'
+                            f'<span class="rv-gl">G/L {_esc(r.get("gl"))}</span>')
             # Transaction (CSV line item) header
             txn = (
                 f'<label class="rv-cb-wrap"><input type="checkbox" class="rv-cb" data-id="{_esc(r.get("id",""))}"></label>'
@@ -995,9 +1007,7 @@ def _render_review(user: str) -> str:
                   '</div>'
                   '<div class="rv-txn-meta">'
                     f'<span class="rv-amt">{_money(r.get("amount"))}</span>'
-                    + ('<span class="rv-gl rv-cash" title="Cash receipt — not on the AMEX statement, '
-                       'excluded from the SAP xlsx (included in receipt/expense exports)">💵 Cash</span>'
-                       if r.get("cash") else f'<span class="rv-gl">G/L {_esc(r.get("gl"))}</span>') +
+                    f'{pay_chip}'
                   '</div>'
                 '</div>')
             # Inline matched-receipt mini card, or unmatched + loss-reason input
@@ -1091,7 +1101,7 @@ def _render_review(user: str) -> str:
                 f'<div class="{item_cls}" data-date="{row_date}" '
                 f'data-merchant="{row_merchant}" '
                 f'data-status="{st}" '
-                f'data-card="{_esc(_rcpt_attrs.get(rc.get("id"), ("", ""))[0])}" '
+                f'data-card="{_esc(brand)}" '
                 f'data-usage="{_esc(_row_usage(r))}" '
                 f'data-noreceipt="{"1" if r.get("no_receipt") else "0"}" '
                 f'data-matched="{"1" if is_matched else "0"}">{txn}{receipt_block}</div>')
@@ -1170,6 +1180,7 @@ def _render_review(user: str) -> str:
 .rv-amt{{font-size:1.05rem;font-weight:700;color:var(--text)}}
 .rv-gl{{font-size:.74rem;color:var(--text-muted)}}
 .rv-cash{{color:#22c55e;font-weight:700}}
+.rv-brand{{color:var(--accent);font-weight:600}}
 .rv-receipt{{flex:1;min-width:0;border-left:1px solid var(--border);padding-left:14px}}
 .rv-receipt.matched{{display:flex;gap:14px;align-items:center}}
 .rv-thumb{{width:200px;height:170px;flex:none;border-radius:8px;object-fit:cover;border:1px solid var(--border);background:var(--surface-3);cursor:zoom-in;transition:border-color .12s}}
