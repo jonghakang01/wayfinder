@@ -846,9 +846,10 @@ def _sync_cash_pool(username: str) -> None:
     Cash spend never appears on the AMEX statement CSV, so Review would
     otherwise hide it. Each cash receipt gets a synthetic matched pool row
     (id 'cash_<receipt id>', no G/L): visible, taggable and settle-tracked
-    like any transaction, included in the receipt/expense exports, but kept
-    out of the SAP upload xlsx. Un-marking the receipt as cash removes the
-    row again and frees the receipt for normal statement matching."""
+    like any transaction, included in every export — the SAP xlsx fills the
+    'Reason for Cash' column from cash_reason (blank = fill in by hand).
+    Un-marking the receipt as cash removes the row again and frees the
+    receipt for normal statement matching."""
     receipts = _load_receipts(username)
     pool = _load_tx_pool(username)
     entries = pool.get("entries", [])
@@ -1253,7 +1254,9 @@ def _build_xlsx_from_entries(entries: list) -> tuple:
             cell("P", rnum, "", "num"),
             cell("Q", rnum, "", "num"),
             cell("R", rnum, purpose, "str"),
-            cell("S", rnum, "", "num"),
+            # 'Reason for Cash' — only meaningful on cash lines; free text in
+            # the template. Blank means "fill in by hand before upload".
+            cell("S", rnum, (e.get("cash_reason") or "") if e.get("cash") else "", "str"),
             cell("T", rnum, masked, "str"),
             cell("U", rnum, last, "str"),
             cell("V", rnum, first, "str"),
@@ -3688,15 +3691,12 @@ def _select_review_entries(username: str, query: dict) -> list:
 def _handle_review_download(username: str, query: dict):
     """GET /cardconv/review/download — xlsx of open (or explicitly selected)
     transactions, built on demand from the pool."""
-    # Cash rows are synthetic pool mirrors of cash receipts — real expenses,
-    # but not statement lines, so they must never enter the SAP upload file.
-    selected = _select_review_entries(username, query)
-    entries = [e for e in selected if not e.get("cash")]
+    # Cash rows (synthetic pool mirrors of cash receipts) ARE exported: the
+    # SAP template has a 'Reason for Cash' column for exactly these lines
+    # (2026-07-21, 강프로 — reversal of the earlier exclusion).
+    entries = _select_review_entries(username, query)
     if not entries:
-        msg = ("Cash receipts are excluded from the SAP upload file — "
-               "use the ⬇ xlsx (Receipt) export for cash items."
-               if selected else "No open transactions to download.")
-        return ("html", f"<h2 style='padding:40px'>{msg}</h2>", 404)
+        return ("html", "<h2 style='padding:40px'>No open transactions to download.</h2>", 404)
     try:
         xlsx_bytes, out_fn = _build_xlsx_from_entries(entries)
     except FileNotFoundError as e:

@@ -990,8 +990,8 @@ def _render_review(user: str) -> str:
             # receipt's own card type wins (legacy visa rows possible).
             if r.get("cash"):
                 brand = "other"
-                pay_chip = ('<span class="rv-gl rv-cash" title="Cash receipt — not on the AMEX statement, '
-                            'excluded from the SAP xlsx (included in receipt/expense exports)">💵 Cash</span>')
+                pay_chip = ('<span class="rv-gl rv-cash" title="Cash receipt — not on the AMEX statement. '
+                            'Exported to the SAP xlsx with the Reason for Cash column (fill it in before upload).">💵 Cash</span>')
             else:
                 brand = (_rcpt_attrs.get(rc.get("id"), ("", ""))[0] if is_matched else "") or "amex"
                 label = {"amex": "AMEX", "visa": "Visa", "other": "Cash"}.get(brand, brand.upper())
@@ -1612,18 +1612,8 @@ if(rvDl){{
       }}).catch(e => alert('Error: ' + e));
     }}, 800);
   }}
-  // Cash never enters the SAP file — catch an all-cash selection before we
-  // navigate away to a server error page and lose the working context.
-  function rvCashOnlySelection(){{
-    const sel = Array.from(document.querySelectorAll('.rv-cb:checked')).map(cb => cb.closest('.rv-item'));
-    return sel.length > 0 && sel.every(it => it.dataset.cash === '1');
-  }}
   rvDl.addEventListener('click', () => {{
     rvCloseExport();
-    if(rvCashOnlySelection()){{
-      alert('Cash receipts are excluded from the SAP xlsx.\\nUse ⬇ xlsx (Receipt) to export cash items.');
-      return;
-    }}
     window.location = '/cardconv/review/download?' + rvDlParams().toString();
     rvOfferInProgress();
   }});
@@ -1636,19 +1626,14 @@ if(rvDl){{
   $('rvDownloadBoth').addEventListener('click', () => {{
     rvCloseExport();
     const q = rvDlParams().toString();
-    const cashOnly = rvCashOnlySelection();
-    if(cashOnly)
-      alert('Selection is all Cash — downloading the Receipt xlsx only (Cash never enters the SAP file).');
-    const urls = cashOnly ? ['/cardconv/review/expense_report?']
-                          : ['/cardconv/review/download?', '/cardconv/review/expense_report?'];
-    urls.forEach(u => {{
+    ['/cardconv/review/download?', '/cardconv/review/expense_report?'].forEach(u => {{
       const f = document.createElement('iframe');
       f.style.display = 'none';
       f.src = u + q;
       document.body.appendChild(f);
       setTimeout(() => f.remove(), 60000);
     }});
-    if(!cashOnly) rvOfferInProgress();
+    rvOfferInProgress();
   }});
   // Reflect the selection count on the download buttons.
   document.addEventListener('change', e => {{
