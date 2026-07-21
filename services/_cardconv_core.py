@@ -927,6 +927,7 @@ def _apply_receipt_match(entry: dict, receipt: dict, receipts: list):
         if mfid and s.get("file_id") == mfid and s.get("ocr_bbox")
     ]
     entry["matched"] = True
+    entry["no_receipt"] = False  # a receipt turned up after all
     entry["receipt"] = {
         "file_id":      mfid,
         "id":           receipt.get("id"),
@@ -3492,6 +3493,30 @@ def _handle_review_reason(username: str, body: dict):
             _save_tx_pool(username, pool)
             return ("json", {"ok": True})
     return ("json", {"error": "not found"}, 404)
+
+
+def _handle_review_no_receipt(username: str, body: dict):
+    """POST /cardconv/review/no_receipt — file a transaction as receipt-less.
+
+    Body: {id, on: '1'|'0'}. Marks an unmatched transaction as "no receipt
+    exists" so it stops counting as an open matching problem. Cleared
+    automatically if a receipt does match later."""
+    def _val(k):
+        v = body.get(k, "")
+        return (v[0] if isinstance(v, list) else str(v)).strip()
+    rid = _val("id")
+    on = _val("on") == "1"
+    if not rid:
+        return ("json", {"error": "missing id"}, 400)
+    pool = _load_tx_pool(username)
+    entry = next((e for e in pool["entries"] if e.get("id") == rid), None)
+    if entry is None:
+        return ("json", {"error": "not found"}, 404)
+    if on and entry.get("matched"):
+        return ("json", {"error": "이미 영수증이 매칭된 거래입니다"}, 400)
+    entry["no_receipt"] = on
+    _save_tx_pool(username, pool)
+    return ("json", {"ok": True})
 
 
 def _handle_review_usage(username: str, body: dict):

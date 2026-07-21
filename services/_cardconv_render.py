@@ -914,7 +914,8 @@ def _render_review(user: str) -> str:
     open_rows   = [e for e in rows if (e.get("status") or "open") == "open"]
     total       = len(open_rows)
     matched     = sum(1 for e in open_rows if e.get("matched"))
-    unmatched   = total - matched
+    no_rcpt_n   = sum(1 for e in open_rows if not e.get("matched") and e.get("no_receipt"))
+    unmatched   = total - matched - no_rcpt_n
     inprog_n    = sum(1 for e in rows if e.get("status") == "in_progress")
     completed_n = sum(1 for e in rows if e.get("status") == "completed")
     li          = pool.get("last_ingest") or {}
@@ -1048,13 +1049,29 @@ def _render_review(user: str) -> str:
                         f'class="btn btn-ghost btn-sm" '
                         f'style="margin-top:6px;font-size:.74rem;color:var(--accent)">'
                         f'🔗 Match manually</button>')
+                nr_btn = ''
+                if is_open:
+                    if r.get("no_receipt"):
+                        nr_btn = (f'<button type="button" class="btn btn-ghost btn-sm" '
+                                  f'onclick="rvNoReceipt(\'{_esc(r.get("id") or "")}\', false)" '
+                                  f'style="margin-top:6px;font-size:.74rem" '
+                                  f'title="Put this back into the unmatched queue">↩ Undo no-receipt</button>')
+                    else:
+                        nr_btn = (f'<button type="button" class="btn btn-ghost btn-sm" '
+                                  f'onclick="rvNoReceipt(\'{_esc(r.get("id") or "")}\', true)" '
+                                  f'style="margin-top:6px;font-size:.74rem;color:var(--text-muted)" '
+                                  f'title="No receipt exists for this transaction — file it as receipt-less">'
+                                  f'📄 No receipt</button>')
+                head_line = ('<div class="rv-nomatch nr">📄 No receipt — filed as receipt-less</div>'
+                             if r.get("no_receipt")
+                             else '<div class="rv-nomatch">❌ No receipt matched</div>')
                 receipt_block = (
-                    '<div class="rv-receipt unmatched">'
-                      '<div class="rv-nomatch">❌ No receipt matched</div>'
+                    f'<div class="rv-receipt unmatched">'
+                      f'{head_line}'
                       f'<div class="rv-card-line">🏷 {_usage_sel("tx", r.get("id") or "", _row_usage(r))}</div>'
-                      f'{match_btn}'
+                      f'{"" if r.get("no_receipt") else match_btn}{nr_btn}'
                     '</div>')
-            item_cls = 'rv-item' + ('' if is_matched else ' unmatched') + ('' if st == "completed" else '')
+            item_cls = 'rv-item' + ('' if is_matched or r.get("no_receipt") else ' unmatched')
             if st == "completed":
                 item_cls += ' done'
             row_date = _esc(r.get("date")) or ""
@@ -1065,6 +1082,7 @@ def _render_review(user: str) -> str:
                 f'data-status="{st}" '
                 f'data-card="{_esc(_rcpt_attrs.get(rc.get("id"), ("", ""))[0])}" '
                 f'data-usage="{_esc(_row_usage(r))}" '
+                f'data-noreceipt="{"1" if r.get("no_receipt") else "0"}" '
                 f'data-matched="{"1" if is_matched else "0"}">{txn}{receipt_block}</div>')
         body_html = "".join(items)
 
@@ -1095,7 +1113,7 @@ def _render_review(user: str) -> str:
 <title>🔍 Review · Wayfinder</title>
 <link rel="stylesheet" href="/static/style.css?v={CSS_VER}">
 <style>{_CC_TAB_CSS}
-.stat-grid{{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:16px}}
+.stat-grid{{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-bottom:16px}}
 .stat-card{{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md);padding:16px 20px;text-align:center}}
 .stat-click{{cursor:pointer;transition:border-color .12s}}
 .stat-click:hover{{border-color:var(--accent)}}
@@ -1170,6 +1188,7 @@ def _render_review(user: str) -> str:
 .rv-usage-sel:hover{{border-color:var(--border)}}
 .rv-usage-sel:focus{{border-color:var(--accent);outline:none}}
 .rv-nomatch{{color:var(--danger);font-size:.84rem;font-weight:700;margin-bottom:6px}}
+.rv-nomatch.nr{{color:var(--text-muted)}}
 
 @media(max-width:600px){{.rv-item{{flex-direction:column;gap:10px}}.rv-txn{{flex:none}}.rv-receipt{{flex:none;border-left:none;border-top:1px solid var(--border);padding-left:0;padding-top:10px}}}}
 .rv-foot{{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 4px;flex-wrap:wrap}}
@@ -1190,7 +1209,8 @@ def _render_review(user: str) -> str:
   <div class="stat-grid">
     <div class="stat-card stat-click active" data-rvview="open" title="Open transactions"><div class="stat-value" id="rvTotal">{total}</div><div class="stat-label">Open</div></div>
     <div class="stat-card stat-click" data-rvview="matched" title="Open + receipt matched"><div class="stat-value" id="rvMatched" style="color:#22c55e">{matched}</div><div class="stat-label">Matched</div></div>
-    <div class="stat-card stat-click" data-rvview="unmatched" title="Open + no receipt"><div class="stat-value" id="rvUnmatched" style="color:#ef4444">{unmatched}</div><div class="stat-label">Unmatched</div></div>
+    <div class="stat-card stat-click" data-rvview="unmatched" title="Open, still waiting for a receipt"><div class="stat-value" id="rvUnmatched" style="color:#ef4444">{unmatched}</div><div class="stat-label">Unmatched</div></div>
+    <div class="stat-card stat-click" data-rvview="noreceipt" title="Filed as receipt-less — no receipt exists for these"><div class="stat-value" style="color:#94a3b8">{no_rcpt_n}</div><div class="stat-label">📄 No Receipt</div></div>
     <div class="stat-card stat-click" data-rvview="in_progress" title="Submitted to SAP, awaiting approval"><div class="stat-value" style="color:#f59e0b">{inprog_n}</div><div class="stat-label">⏳ In progress</div></div>
     <div class="stat-card stat-click" data-rvview="completed" title="Settlement completed"><div class="stat-value" style="color:#818cf8">{completed_n}</div><div class="stat-label">✔ Completed</div></div>
   </div>
@@ -1290,7 +1310,10 @@ function applyFilter(){{
   document.querySelectorAll('.rv-item').forEach(it => {{
     const d = it.dataset.date || '';
     const show = (it.dataset.status === rvView)
-      && (rvMatchedF === 'all' || it.dataset.matched === rvMatchedF)
+      && (rvMatchedF === 'all'
+          || (rvMatchedF === 'nr' ? it.dataset.noreceipt === '1'
+              : rvMatchedF === '0' ? (it.dataset.matched === '0' && it.dataset.noreceipt !== '1')
+              : it.dataset.matched === rvMatchedF))
       && (!from || !d || d >= from) && (!to || !d || d <= to)
       && (!mq || (it.dataset.merchant || '').includes(mq))
       && (cardF === 'all' || (cardF === 'unknown' ? !it.dataset.card : it.dataset.card === cardF))
@@ -1347,6 +1370,15 @@ async function rvChangeUsage(sel){{
   rvSyncUsageFilter();
 }}
 
+// File / un-file a transaction as receipt-less (no receipt exists for it).
+async function rvNoReceipt(id, on){{
+  const r = await fetch('/cardconv/review/no_receipt',
+    {{method:'POST', body: new URLSearchParams({{id: id, on: on ? '1' : '0'}})}});
+  const d = await r.json().catch(function(){{ return {{}}; }});
+  if(!d.ok){{ alert('Update failed: ' + (d.error || r.status)); return; }}
+  location.reload();  // stats + row styling are server-rendered
+}}
+
 // Rebuild the Usage filter dropdown from what's on screen, keeping the selection.
 function rvSyncUsageFilter(){{
   const seen = new Set();
@@ -1368,6 +1400,7 @@ const RV_VIEWS = {{
   open:        {{view: 'open',        matched: 'all'}},
   matched:     {{view: 'open',        matched: '1'}},
   unmatched:   {{view: 'open',        matched: '0'}},
+  noreceipt:   {{view: 'open',        matched: 'nr'}},
   in_progress: {{view: 'in_progress', matched: 'all'}},
   completed:   {{view: 'completed',   matched: 'all'}},
 }};
