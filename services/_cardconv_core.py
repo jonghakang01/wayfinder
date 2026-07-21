@@ -3690,9 +3690,13 @@ def _handle_review_download(username: str, query: dict):
     transactions, built on demand from the pool."""
     # Cash rows are synthetic pool mirrors of cash receipts — real expenses,
     # but not statement lines, so they must never enter the SAP upload file.
-    entries = [e for e in _select_review_entries(username, query) if not e.get("cash")]
+    selected = _select_review_entries(username, query)
+    entries = [e for e in selected if not e.get("cash")]
     if not entries:
-        return ("html", "<h2 style='padding:40px'>No open transactions to download.</h2>", 404)
+        msg = ("Cash receipts are excluded from the SAP upload file — "
+               "use the ⬇ xlsx (Receipt) export for cash items."
+               if selected else "No open transactions to download.")
+        return ("html", f"<h2 style='padding:40px'>{msg}</h2>", 404)
     try:
         xlsx_bytes, out_fn = _build_xlsx_from_entries(entries)
     except FileNotFoundError as e:
