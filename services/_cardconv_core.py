@@ -2625,6 +2625,15 @@ def _handle_image_proxy(username: str, file_id: str, bbox: list = None):
     try:
         from PIL import Image as _Img, ImageOps as _IOP
         content = service.files().get_media(fileId=file_id).execute()
+        if content[:5] == b"%PDF-":
+            # PDF receipt: rasterize page 1 so <img> consumers can show it;
+            # fall back to the raw PDF when pymupdf is unavailable.
+            try:
+                import fitz
+                doc = fitz.open(stream=content, filetype="pdf")
+                content = doc[0].get_pixmap(matrix=fitz.Matrix(2, 2)).tobytes("png")
+            except Exception:
+                return ("binary", content, "application/pdf", None)
         img = _Img.open(io.BytesIO(content))
         img = _IOP.exif_transpose(img)   # auto-rotate
         img = img.convert("RGB")

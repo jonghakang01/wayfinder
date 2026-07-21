@@ -1839,8 +1839,9 @@ def _render_ocr_staging_review(user: str) -> str:
         else:
             fx_badge, fx_row = '', ''
 
+        drive_link = _esc(e.get("drive_url") or "")
         img_html = (f'<img src="{proxy}" class="stg-thumb" loading="lazy" '
-                    f'onerror="this.style.display=\'none\'">'
+                    f'data-drive="{drive_link}" onerror="stgImgFail(this)">'
                     if proxy else '<div class="stg-nophoto">No image</div>')
 
         ocr_ok = e.get("ocr_status") == "done" and e.get("ocr_merchant")
@@ -1907,6 +1908,10 @@ def _render_ocr_staging_review(user: str) -> str:
 .stg-empty{{text-align:center;color:var(--text-muted);padding:60px 20px}}
 </style>
 </head><body>
+<nav>
+  <span class="nav-brand">💳 Cheil AMEX Expense Assistant</span>
+  <span class="nav-user">👤 {user} &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
+</nav>
 {_tab_bar("ocr_review", user)}
 <div style="max-width:1100px;margin:0 auto;padding:20px 16px">
   <div class="stg-header">
@@ -1936,6 +1941,12 @@ def _render_ocr_staging_review(user: str) -> str:
   </form>
 </div>
 <script>
+// A failed thumbnail shows a visible fallback (never a silent black box).
+function stgImgFail(img) {{
+  const drive = img.dataset.drive;
+  const link = drive ? ' — <a href="' + drive + '" target="_blank" style="color:var(--accent)">Open in Drive</a>' : '';
+  img.outerHTML = '<div class="stg-nophoto">🧾 Preview unavailable' + link + '</div>';
+}}
 function toggleAll(on) {{
   document.querySelectorAll('#stgForm input[type=checkbox]').forEach(cb => cb.checked = on);
 }}
