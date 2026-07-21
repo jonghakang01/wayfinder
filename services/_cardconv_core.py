@@ -225,6 +225,8 @@ def _migrate_entry(e: dict) -> dict:
     # v2.5: handwritten "w/ NAME" companion note — flows into the SAP purpose.
     e.setdefault("ocr_companions", None)
     e.setdefault("ocr_handwriting", None)
+    # v2.7: actual settled USD from the matched statement line (vs FX estimate).
+    e.setdefault("usd_settled", None)
     # v2.6: printed transaction time (duplicate disambiguation) + user override
     # that pins an entry out of duplicate grouping ("this is a separate purchase").
     e.setdefault("ocr_time", None)
@@ -732,6 +734,7 @@ def _rematch_pool(username: str, only_receipt_ids=None) -> dict:
         if r.get("matched") and r.get("id") not in linked:
             r["matched"] = False
             r["match_status"] = "pending_match"
+            r["usd_settled"] = None
             dirty_heal = True
     receipts_map, fx_receipts, dirty = _build_receipt_index(receipts, username)
     if only_receipt_ids:
@@ -830,9 +833,27 @@ def _sync_cash_pool(username: str) -> None:
     pool = _load_tx_pool(username)
     entries = pool.get("entries", [])
     have = {e.get("id") for e in entries}
-    cash = [r for r in receipts if (r.get("card_brand") or "") == "other"]
-    cash_rids = {r.get("id") for r in cash}
+    # Receipts already linked to a REAL statement transaction are on the
+    # statement — never cash, whatever the OCR thought.
+    real_linked = {(e.get("receipt") or {}).get("id"): e for e in entries
+                   if e.get("matched") and not e.get("cash")}
     dirty = False
+    # Heal OCR 'other' misreads on statement-matched receipts (+ backfill the
+    # settled USD amount for pre-existing matches).
+    for r in receipts:
+        e = real_linked.get(r.get("id"))
+        if e is None:
+            continue
+        if (r.get("card_brand") or "") == "other":
+            r["card_brand"] = "amex"
+            dirty = True
+        if r.get("usd_settled") is None and e.get("amount") is not None:
+            r["usd_settled"] = e.get("amount")
+            dirty = True
+    cash = [r for r in receipts
+            if (r.get("card_brand") or "") == "other"
+            and r.get("id") not in real_linked]
+    cash_rids = {r.get("id") for r in cash}
     for r in cash:
         cid = f"cash_{r.get('id')}"
         if cid in have:
@@ -852,13 +873,20 @@ def _sync_cash_pool(username: str) -> None:
     kept = []
     for e in entries:
         if e.get("cash") and (e.get("receipt") or {}).get("id") not in cash_rids:
+            rid = (e.get("receipt") or {}).get("id")
+            if rid in real_linked:
+                # Duplicate: the receipt is genuinely on the statement (FX
+                # match) — the real transaction row wins, drop the mirror and
+                # leave the receipt matched to it.
+                dirty = True
+                continue
             # Receipt deleted or no longer cash — drop the synthetic row and
             # release a still-existing receipt back to pending_match.
-            rid = (e.get("receipt") or {}).get("id")
             for r in receipts:
                 if r.get("id") == rid and r.get("matched"):
                     r["matched"] = False
                     r["match_status"] = "pending_match"
+                    r["usd_settled"] = None
             dirty = True
             continue
         kept.append(e)
@@ -877,8 +905,13 @@ def _apply_receipt_match(entry: dict, receipt: dict, receipts: list):
         receipt['matched_transaction'] = {
             'date': entry["date"], 'amount': entry["amount"], 'vendor': entry["merchant"],
         }
-        if not receipt.get('card_brand'):
-            receipt['card_brand'] = 'amex'  # CSV = AMEX statement
+        if not entry.get('cash'):
+            # A statement line IS ground truth: the purchase was charged to
+            # AMEX (overrides an OCR 'other' misread of Korean card slips),
+            # and its USD amount is the real settled figure — better than the
+            # FX estimate the OCR produced.
+            receipt['card_brand'] = 'amex'
+            receipt['usd_settled'] = entry.get('amount')
         if receipt.get('ocr_date') in (None, '', 'unknown') and entry["date"]:
             receipt['ocr_date_original'] = receipt.get('ocr_date')
             receipt['ocr_date'] = entry["date"]
@@ -900,6 +933,9 @@ def _apply_receipt_match(entry: dict, receipt: dict, receipts: list):
         "filename":     receipt.get("filename"),
         "drive_url":    receipt.get("drive_url"),
         "ocr_amount":   receipt.get("ocr_amount"),
+        "ocr_currency": receipt.get("ocr_currency"),
+        "usd_estimate": receipt.get("usd_estimate"),
+        "usd_settled":  receipt.get("usd_settled"),
         "ocr_date":     receipt.get("ocr_date"),
         "ocr_merchant": receipt.get("ocr_merchant"),
         "companions":   receipt.get("ocr_companions"),
@@ -2400,6 +2436,8 @@ def _handle_status_change(username: str, entry_id: str, body: dict):
                 # Matched ⇒ AMEX transaction; fill brand only when unknown.
                 if not e.get("card_brand"):
                     e["card_brand"] = "amex"
+            else:
+                e["usd_settled"] = None  # settled figure came from the link
             _save_ledger(username, ledger)
             return ("json", {"ok": True})
     return ("json", {"error": "not found"}, 404)

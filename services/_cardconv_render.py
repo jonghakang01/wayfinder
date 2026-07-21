@@ -946,8 +946,23 @@ def _render_review(user: str) -> str:
                 f'title="Usage tag — synced with the Ledger">'
                 f'{opts}<option value="__new__">+ New…</option></select>')
 
-    def _money(a):
-        return f'${a:,.2f}' if isinstance(a, (int, float)) else (_esc(a) or '–')
+    _FX_SYM = {"KRW": "₩", "JPY": "¥", "INR": "₹", "HKD": "HK$", "EUR": "€"}
+
+    def _money(a, rc=None):
+        """USD by default; with a receipt snapshot, print its own currency and
+        the settled/estimated USD conversion ("₩15,400 → $10.26")."""
+        if not isinstance(a, (int, float)):
+            return _esc(a) or '–'
+        cur = (rc or {}).get("ocr_currency")
+        if not cur or cur == "USD":
+            return f'${a:,.2f}'
+        sym = _FX_SYM.get(cur, cur + " ")
+        base = f'{sym}{a:,.0f}' if cur in ("KRW", "JPY") else f'{sym}{a:,.2f}'
+        if rc.get("usd_settled") is not None:
+            return f'{base} → ${rc["usd_settled"]:,.2f}'
+        if rc.get("usd_estimate") is not None:
+            return f'{base} → ~${rc["usd_estimate"]:,.2f}'
+        return base
 
     if not rows:
         body_html = ('<div style="text-align:center;color:var(--text-muted);padding:40px">'
@@ -1014,7 +1029,7 @@ def _render_review(user: str) -> str:
                       '<div class="rv-card-info">'
                         f'<div class="rv-card-line">🗓 {_esc(rc.get("ocr_date")) or "–"}</div>'
                         f'<div class="rv-card-line rv-card-merchant">{_esc(rc.get("ocr_merchant")) or "–"}</div>'
-                        f'<div class="rv-card-line rv-card-amt">{_money(rc.get("ocr_amount"))}</div>'
+                        f'<div class="rv-card-line rv-card-amt">{_money(rc.get("ocr_amount"), rc)}</div>'
                         f'<div class="rv-card-line">🏷 {usage_sel}</div>'
                         f'{comp}{link}'
                       '</div>'
@@ -2327,6 +2342,8 @@ function fmtAmtFx(e, a){
   const sym = FX_SYM[cur] || (cur + ' ');
   const noDec = (cur === 'KRW' || cur === 'JPY');
   const orig = sym + Number(a).toLocaleString(undefined, {maximumFractionDigits: noDec ? 0 : 2});
+  // Settled figure from the matched statement line beats the FX estimate.
+  if(e.usd_settled != null) return orig + ' → $' + Number(e.usd_settled).toFixed(2);
   return e.usd_estimate != null ? orig + ' → ~$' + Number(e.usd_estimate).toFixed(2) : orig;
 }
 
@@ -2468,9 +2485,17 @@ function renderLastSynced(iso){
 function rowHtml(e, i, opts){
   opts = opts || {};
   const h = e.ocr_handwritten_amount;
+  // Non-USD receipts print in their own currency (₩/₹/…), not a fake '$'.
+  const fmtCur = (v) => {
+    const cur = e.ocr_currency;
+    if(!cur || cur === 'USD') return fmtAmt(v);
+    const noDec = (cur === 'KRW' || cur === 'JPY');
+    return (FX_SYM[cur] || (cur + ' ')) +
+      Number(v).toLocaleString(undefined, {maximumFractionDigits: noDec ? 0 : 2});
+  };
   const handCell = (h===null||h===undefined)
     ? '<td style="color:var(--text-muted)">–</td>'
-    : '<td style="color:#f59e0b;font-weight:600">' + fmtAmt(h) + ' ✍️</td>';
+    : '<td style="color:#f59e0b;font-weight:600">' + fmtCur(h) + ' ✍️</td>';
   const actionCell = (e.match_status==='matched')
     ? '<td><button class="btn btn-ghost btn-sm act-undo" data-id="' + e.id +
       '" style="color:#f59e0b;padding:2px 8px" title="Undo match — reset to pending">↩ Undo</button></td>'
@@ -2503,7 +2528,8 @@ function rowHtml(e, i, opts){
     '<td data-label="Date">' + (e.ocr_date||'–') +
       (e.ocr_time ? ' <span style="color:var(--text-muted);font-size:.72rem">' + e.ocr_time + '</span>' : '') +
       dupTag + compTag + '</td>' +
-    '<td data-label="Printed" style="color:var(--text-muted)">' + fmtAmt(e.ocr_printed_amount) + '</td>' +
+    '<td data-label="Printed" style="color:var(--text-muted)">' +
+      ((e.ocr_printed_amount===null||e.ocr_printed_amount===undefined) ? '–' : fmtCur(e.ocr_printed_amount)) + '</td>' +
     handCell.replace('<td','<td data-label="Handwritten"') +
     '<td data-label="Final" style="font-weight:700">' + fmtAmtFx(e, e.ocr_amount) + '</td>' +
     '<td data-label="Merchant">' + (e.ocr_merchant||'–') +
