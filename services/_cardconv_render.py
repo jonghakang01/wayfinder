@@ -906,6 +906,7 @@ def _render_review(user: str) -> str:
     from server import CSS_VER
     _sync_cash_pool(user)            # mirror cash receipts into the pool (no-op when in sync)
     _reconcile_settle_status(user)   # self-heal pre-sync mismatches (no-op when consistent)
+    _heal_orphan_matches(user)       # self-heal one-sided match links (no-op when consistent)
     pool    = _load_tx_pool(user)
     # Newest transactions first; dateless rows sink to the bottom.
     rows    = sorted(pool.get("entries", []),

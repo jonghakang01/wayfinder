@@ -719,14 +719,11 @@ def _rematch_pool(username: str, only_receipt_ids=None) -> dict:
     only_receipt_ids restricts the candidate receipts (bulk re-match of a selection).
     """
     pool = _load_tx_pool(username)
-    todo = [e for e in pool.get("entries", [])
-            if e.get("status") == "open" and not e.get("matched")]
-    if not todo:
-        return {"matched": 0}
     receipts = _load_receipts(username)
     # Heal orphaned links first: a receipt can carry matched flags whose
     # transaction-side link no longer exists (e.g. dropped by migration).
-    # Left as-is the matcher skips it forever.
+    # Left as-is the matcher skips it forever. Runs even with no open
+    # transactions so a stale "Matched" badge never outlives its link.
     linked = {(e.get("receipt") or {}).get("id")
               for e in pool.get("entries", []) if e.get("matched")}
     dirty_heal = False
@@ -736,6 +733,12 @@ def _rematch_pool(username: str, only_receipt_ids=None) -> dict:
             r["match_status"] = "pending_match"
             r["usd_settled"] = None
             dirty_heal = True
+    todo = [e for e in pool.get("entries", [])
+            if e.get("status") == "open" and not e.get("matched")]
+    if not todo:
+        if dirty_heal:
+            _save_receipts(username, receipts)
+        return {"matched": 0}
     receipts_map, fx_receipts, dirty = _build_receipt_index(receipts, username)
     if only_receipt_ids:
         sel = set(only_receipt_ids)
@@ -754,6 +757,23 @@ def _rematch_pool(username: str, only_receipt_ids=None) -> dict:
     if dirty:
         _save_receipts(username, receipts)
     return {"matched": matched}
+
+
+def _heal_orphan_matches(username: str):
+    """Lazy self-heal for one-sided match links: a pool rebuild can drop the
+    transaction-side link while the receipt keeps its matched flags, so the
+    Ledger says "Matched" while Review shows the transaction open — and the
+    matcher skips matched receipts forever (2026-07-21 Sumiya case). Cheap
+    set check on every load; the full heal+rematch runs only on an actual
+    orphan, so this is a no-op when consistent."""
+    receipts = _load_receipts(username)
+    if not any(r.get("matched") for r in receipts):
+        return
+    pool = _load_tx_pool(username)
+    linked = {(e.get("receipt") or {}).get("id")
+              for e in pool.get("entries", []) if e.get("matched")}
+    if any(r.get("matched") and r.get("id") not in linked for r in receipts):
+        _rematch_pool(username)
 
 
 def _build_receipt_index(receipts: list, username: str):
@@ -2374,6 +2394,7 @@ def _annotate_settle_status(username: str, entries: list):
 def _handle_ledger_api(username: str, query: dict):
     """GET /cardconv/ledger/api — filtered JSON data."""
     _reconcile_settle_status(username)   # self-heal pre-sync mismatches (no-op when consistent)
+    _heal_orphan_matches(username)       # self-heal one-sided match links (no-op when consistent)
     ledger  = _load_ledger(username)
     entries = ledger["entries"]
     f = _parse_filter_params(query)
