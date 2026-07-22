@@ -171,6 +171,9 @@ _CC_TAB_CSS = (
     ".cc-tab{flex:0 0 auto;padding:10px 16px}"
     ".cc-info{width:20px;height:20px;font-size:.68rem}"
     ".cc-wf-close{padding:8px 12px}"
+    # Anchored tooltips clip off-screen on narrow viewports — surface them as a
+    # fixed bottom card instead (same click-to-toggle behavior).
+    ".cc-tip{position:fixed;left:12px;right:12px;top:auto;bottom:calc(12px + env(safe-area-inset-bottom));max-width:none;width:auto;z-index:250;box-shadow:0 -8px 30px rgba(0,0,0,.5)}"
     "}"
 )
 
@@ -1270,6 +1273,21 @@ def _render_review(user: str) -> str:
 .rv-bulkbar.has-sel{{transform:none}}
 body:has(.rv-bulkbar.has-sel) .container{{padding-bottom:170px}}
 body:has(.rv-bulkbar.has-sel) .wf-back,body:has(.rv-bulkbar.has-sel) #wfThemeBtn{{display:none}}
+/* Filter lineup (guideline §7): search leads full-width, then a strict 2-col
+   grid of top-labeled fields; anchored popovers become bottom sheets so they
+   can never render off-screen. */
+.filter-bar:not(.rv-bulkbar){{display:grid;grid-template-columns:1fr 1fr;gap:10px 8px;align-items:end}}
+.filter-bar:not(.rv-bulkbar) .fb-field{{display:flex;flex-direction:column;align-items:stretch;gap:4px}}
+.filter-bar:not(.rv-bulkbar) .fb-field>span:first-child{{font-size:.68rem}}
+.filter-bar:not(.rv-bulkbar) select,.filter-bar:not(.rv-bulkbar) input{{width:100%;min-width:0}}
+.filter-bar:not(.rv-bulkbar) .fb-search{{order:-1;grid-column:1/-1;flex-direction:row;align-items:center;gap:8px}}
+#rvCustomRange{{grid-column:1/-1;flex-direction:row;flex-wrap:nowrap;align-items:center;gap:6px}}
+#rvCustomRange input{{width:auto;flex:1}}
+#rvReset{{width:100%}}
+body:has(.fb-menu.open) .wf-back,body:has(.fb-menu.open) #wfThemeBtn{{display:none}}
+.fb-pop-wrap{{width:100%}}
+.fb-more-btn{{width:100%;justify-content:center;padding:9px 11px}}
+.fb-menu{{position:fixed;left:10px;right:10px;top:auto;bottom:calc(10px + env(safe-area-inset-bottom));min-width:0;z-index:160;box-shadow:0 -12px 34px rgba(0,0,0,.6)}}
 }}
 .rv-foot{{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 4px;flex-wrap:wrap}}
 </style>
@@ -2241,7 +2259,7 @@ __TABCSS__
 .th-sort{cursor:pointer;user-select:none}
 .th-sort:hover{color:var(--text)}
 .th-sort.on{color:var(--accent)}
-@media(max-width:768px){.fb-row2{gap:8px}.fb-row2 .fb-field{flex:1 1 45%;justify-content:space-between}}
+@media(max-width:768px){.fb-row2{gap:8px}}
 .fb-more-btn{background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:.78rem;font-weight:600;padding:5px 11px;cursor:pointer;display:inline-flex;align-items:center;gap:5px}
 .fb-more-btn:hover{border-color:var(--accent);color:var(--text)}
 .fb-more-btn .chev{transition:transform .18s}
@@ -2261,6 +2279,19 @@ select.sb-act{padding:5px 8px}
    edits on mobile. Bulk selbar docks to the bottom thumb zone while active. */
 @media(max-width:768px){.detail-panel{width:100vw}.stat-grid{grid-template-columns:1fr 1fr}.filter-bar{gap:8px;padding:9px 12px}.filter-bar .fb-field{flex-wrap:wrap}.preset-btn{padding:7px 12px}.row-check,.del-check input{width:20px;height:20px}.usage-sel,.card-sel{padding:6px 8px;max-width:none}.ledger-table,.ledger-table tbody,.ledger-table tr,.ledger-table td{display:block;width:100%}.ledger-table thead{display:none}.ledger-table tr{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md);margin-bottom:10px;padding:10px 12px;position:relative}.ledger-table tr:hover td{background:transparent}.ledger-table td{border-bottom:none!important;padding:5px 0;display:flex;justify-content:space-between;align-items:center;gap:10px;text-align:right}.ledger-table td::before{content:attr(data-label);font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);text-align:left}.ledger-table td[data-label=Select]{position:absolute;top:8px;right:10px;left:auto;width:auto;padding:6px}.ledger-table td[data-label=Select]::before{display:none}.ledger-table td[data-label=Date]{font-weight:700;font-size:.95rem;padding-right:34px}
 .ledger-table td[data-label=Printed],.ledger-table td[data-label=Handwritten],.ledger-table td[data-label=Card],.ledger-table td[data-label=Usage]{display:none}
+.filter-bar{display:grid;grid-template-columns:1fr 1fr;gap:10px 8px;align-items:end}
+.filter-bar .fb-field{display:flex;flex-direction:column;align-items:stretch;gap:4px;white-space:normal}
+.filter-bar .fb-field>span:first-child{font-size:.68rem}
+.filter-bar select,.filter-bar input{width:100%;min-width:0}
+.filter-bar .fb-search{order:-1;grid-column:1/-1;flex-direction:row;align-items:center;gap:8px}
+#fCustomRange{grid-column:1/-1;flex-direction:row;flex-wrap:nowrap;align-items:center}
+#fCustomRange input{width:auto;flex:1}
+.fb-spacer{display:none}
+body:has(.fb-menu.open) .wf-back,body:has(.fb-menu.open) #wfThemeBtn{display:none}
+#fReset{grid-column:1/-1;width:100%}
+.fb-pop-wrap{width:100%}
+.fb-more-btn{width:100%;justify-content:center;padding:9px 11px}
+.fb-menu{position:fixed;left:10px;right:10px;top:auto;bottom:calc(10px + env(safe-area-inset-bottom));min-width:0;z-index:160;box-shadow:0 -12px 34px rgba(0,0,0,.6)}
 .fb-selbar.show{position:fixed;left:0;right:0;bottom:0;z-index:130;margin:0;border-radius:14px 14px 0 0;background:var(--surface-3);border-color:var(--border-bright);box-shadow:0 -8px 24px rgba(0,0,0,.45);padding-bottom:calc(10px + env(safe-area-inset-bottom))}
 .fb-selbar .sb-edit-group{flex-wrap:wrap;border-left:none;padding-left:0}
 body:has(.fb-selbar.show) .container{padding-bottom:200px}
