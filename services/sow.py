@@ -1032,6 +1032,38 @@ def _render_doc_editor(user, sow, type_key, saved=False):
     return _shell(user, "SOW Editor", body)
 
 
+_MSA_PARS = None
+
+
+def _msa_paragraphs():
+    """Extract the MSA template's full text once: [(kind, text)] where kind is
+    'title' | 'h' (numbered section heading) | 'p'. Falls back to [] when
+    python-docx is unavailable (preview then shows the summary box)."""
+    global _MSA_PARS
+    if _MSA_PARS is not None:
+        return _MSA_PARS
+    try:
+        from docx import Document
+        doc = Document(os.path.join(_ASSETS, "msa_template.docx"))
+        out = []
+        for p in doc.paragraphs:
+            t = " ".join(p.text.split())
+            if not t:
+                continue
+            bold = any(r.bold for r in p.runs if r.text.strip())
+            if t == "MASTER SERVICES AGREEMENT":
+                kind = "title"
+            elif p.style.name == "List Paragraph" and bold:
+                kind = "h"
+            else:
+                kind = "p"
+            out.append((kind, t))
+        _MSA_PARS = out
+    except Exception:
+        _MSA_PARS = []
+    return _MSA_PARS
+
+
 _AGREEMENT_JS = """<script>
 var CFG = __CFG__;
 function $id(x){ return document.getElementById(x); }
@@ -1067,21 +1099,29 @@ def _render_agreement_editor(user, sow, type_key, saved=False):
 
     if kind == "msa":
         doc_title = "MASTER SERVICES AGREEMENT"
-        body_doc = f"""
-  <p class="legal">This Master Services Agreement (this "Agreement"), dated as of <b id="agrDate">{_esc(_fmt_long(sow.get('date')) or '____________')}</b> (the "Effective Date"), is made by and between Cheil USA Inc., a Delaware corporation ("Cheil"), and {vname} ("Contractor"). Cheil and Contractor may each be referred to herein as a "Party", and together as the "Parties".</p>
+        pars = _msa_paragraphs()
+        if pars:
+            chunks, sec_n = [], 0
+            for pk, txt in pars:
+                if pk == "title":
+                    continue  # rendered separately above the date slot
+                html = _esc(txt)
+                html = html.replace("XXX XX, 2026",
+                                    f'<b id="agrDate">{_esc(_fmt_long(sow.get("date")) or "____________")}</b>')
+                html = html.replace("(Your Company Name)", vname)
+                if pk == "h":
+                    sec_n += 1
+                    chunks.append(f'<h2 style="font-size:.95rem">{sec_n}. {html}</h2>')
+                else:
+                    chunks.append(f'<p class="legal">{html}</p>')
+            body_doc = "".join(chunks)
+        else:
+            body_doc = f"""
+  <p class="legal">This Master Services Agreement (this "Agreement"), dated as of <b id="agrDate">{_esc(_fmt_long(sow.get('date')) or '____________')}</b> (the "Effective Date"), is made by and between Cheil USA Inc., a Delaware corporation ("Cheil"), and {vname} ("Contractor").</p>
   <div style="background:var(--surface-2);border:1px dashed var(--border-bright);border-radius:10px;padding:16px 18px;margin:18px 0;font-size:.8rem;color:var(--text-muted);line-height:1.7">
-    §1 Services &amp; SOWs · §2 Fees &amp; Payment · §3 Independent Contractor · §4 Intellectual Property ·
-    §5 Confidentiality · §6 Representations &amp; Warranties · §7 Term &amp; Termination · §8 Indemnification ·
-    §9 Limitation of Liability · §10 Insurance (CGL / E&amp;O $5M) · Non-Solicit · General Provisions
-    <br><br>⚑ The full legal text (≈15 pages) exports <b>verbatim from the executed Cheil MSA template</b> —
-    only the two highlighted fields vary per vendor. Edit legal clauses in Word after export if Legal requires it.
-  </div>
-  <h2>Signatures</h2>
-  <div class="table-wrap"><table>
-    <tr><th>Cheil USA Inc.</th><th><span class="vendorName">{_esc(cur_vendor.get('name') or '(vendor)')}</span></th></tr>
-    <tr><td>By: ____________________</td><td>By: ____________________</td></tr>
-    <tr><td>Name / Title</td><td>Name / Title</td></tr>
-  </table></div>"""
+    ⚑ Full-text preview needs python-docx on this host — the export still contains the complete
+    legal text verbatim from the executed Cheil MSA template.
+  </div>"""
     else:
         clauses = "".join(f'<p class="legal">{_esc(par)}</p>' for par in NDA_BODY)
         body_doc = f"""
