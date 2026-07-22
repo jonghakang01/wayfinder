@@ -109,3 +109,32 @@ def test_nda_docx_builds():
     txt = re.sub(r"<[^>]+>", "", zipfile.ZipFile(io.BytesIO(blob)).read("word/document.xml").decode("utf-8", "ignore"))
     assert "CONFIDENTIALITY AND NONDISCLOSURE AGREEMENT" in txt
     assert "Acme Corp" in txt
+
+
+def test_schedule_overrides_apply_per_month():
+    m = _mod()
+    sow = {
+        "start": "2026-04-01", "end": "2026-06-30",
+        "res_mode": "monthly", "resources": [{"name": "A", "rate": 1000}],
+        "schedule_overrides": {"May-26": 750},
+    }
+    rows, fee, months = m._build_schedule(sow)
+    assert [r["amount"] for r in rows] == [1000, 750, 1000]
+    assert fee == 2750
+
+
+def test_legacy_types_collapse_to_merged_sow():
+    m = _mod()
+    assert m._sow_type({"type": "sea_role"}) == "sea_sow"
+    assert m._sow_type({"type": "agy_team", "direction": "agency"}) == "agy_sow"
+    assert m._sow_type({"type": "agy_msa"}) == "agy_msa"
+
+
+def test_sample_renders_full_document():
+    m = _mod()
+    html = m._render_example("sea_sow")
+    for needle in ["STATEMENT OF WORK", "Advertising Services Agreement",
+                   "Out-of-pocket Expense", "Signatures", "1-Jan-27", "ex-mark"]:
+        assert needle in html, needle
+    html2 = m._render_example("agy_sow")
+    assert "Master Services Agreement" in html2 and "Invictus" in html2

@@ -2584,6 +2584,7 @@ body:has(.fb-selbar.show) .wf-back,body:has(.fb-selbar.show) #wfThemeBtn{display
     <button class="btn btn-ghost btn-sm" id="dCompleteBtn" onclick="togglePanelComplete()" style="color:#818cf8;margin-top:6px;width:100%">✓ Mark Complete</button>
     <button class="btn btn-ghost btn-sm" id="reOcrBtn" onclick="reOCR()" style="color:#818cf8;margin-top:6px;width:100%">🔄 Re-OCR</button>
     <button class="btn btn-ghost btn-sm" id="manualAddBtn" onclick="openManualAdd()" style="color:#34d399;margin-top:2px;width:100%">➕ Manually add a receipt on this image</button>
+    <button class="btn btn-danger btn-sm" id="dDeleteBtn" onclick="deleteFromPanel()" style="margin-top:10px;width:100%">🗑 Delete this receipt</button>
   </div>
 </div>
 
@@ -3197,6 +3198,20 @@ async function setStatus(status){
     headers:{'Content-Type':'application/json'},
     body: JSON.stringify({status: status})
   });
+  closePanel();
+  load();
+}
+
+async function deleteFromPanel(){
+  if(!CUR_ID) return;
+  if(!confirm('Delete this receipt from the Ledger?\nIt will not be re-queued by future syncs (restore from 🪦 Discarded). The Drive photo is untouched.')) return;
+  const r = await fetch('/cardconv/ledger/delete', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ids: [CUR_ID]})
+  });
+  const d = await r.json().catch(() => ({}));
+  if(!d.ok){ toast('Delete failed', true); return; }
+  toast('Receipt deleted');
   closePanel();
   load();
 }

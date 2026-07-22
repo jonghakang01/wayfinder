@@ -19,28 +19,20 @@ META = {
 CHEIL_ENTITY = "Cheil USA, Inc."
 SAMSUNG_ENTITY = "Samsung Electronics America, Inc."
 
-# Document types drill down: direction → document kind (SOW / MSA / NDA) →
-# for SOWs, the rate-model family. Each maps to an executed-sample family.
+# Document types drill down: direction → document kind (SOW / MSA / NDA).
+# One SOW template per direction (2026-07-22, 강프로: team/individual merged) —
+# the rate model (monthly vs hourly resource table) is a toggle inside the
+# editor instead of a separate document type.
 TYPES = {
-    "sea_team": {
-        "dir": "samsung", "kind": "sow", "mode": "monthly", "icon": "👥",
-        "label": "Project Team SOW",
-        "desc": "Team engagement billed at monthly rates per member — FSOmni / Omni projects style.",
+    "sea_sow": {
+        "dir": "samsung", "kind": "sow", "mode": "hourly", "icon": "📝",
+        "label": "Statement of Work",
+        "desc": "SOW under the Advertising Services Agreement — resources billed hourly or at monthly rates (pick inside).",
     },
-    "sea_role": {
-        "dir": "samsung", "kind": "sow", "mode": "hourly", "icon": "🧑‍💻",
-        "label": "Individual Role SOW",
-        "desc": "Single role billed hourly (rate × hrs/month) — Data Engineer / PZN Data PM style.",
-    },
-    "agy_team": {
-        "dir": "agency", "kind": "sow", "mode": "monthly", "icon": "👥",
-        "label": "Project Team SOW",
-        "desc": "Vendor team at monthly rates under the vendor's MSA — IOT Marketplace (AIE) style.",
-    },
-    "agy_role": {
-        "dir": "agency", "kind": "sow", "mode": "hourly", "icon": "🧑‍💻",
-        "label": "Contractor Role SOW",
-        "desc": "Single contractor role billed hourly under the vendor's MSA — Invictus style.",
+    "agy_sow": {
+        "dir": "agency", "kind": "sow", "mode": "hourly", "icon": "📝",
+        "label": "Statement of Work",
+        "desc": "Vendor SOW under the vendor's MSA — resources billed hourly or at monthly rates (pick inside).",
     },
     "agy_msa": {
         "dir": "agency", "kind": "msa", "mode": None, "icon": "📜",
@@ -56,13 +48,15 @@ TYPES = {
 
 _ASSETS = os.path.join(os.path.dirname(__file__), "sow_assets")
 
-# Executed examples shown beside each template while drafting (curated from the
-# real signed documents in the sample set).
-EXAMPLES = {
-    "sea_role": {
-        "src": "Samsung_ Data Engineer.docx (executed)",
-        "title": "Data Engineer # 1", "project": "SEA eCom Data",
-        "date": "Dec 7, 2025", "by": "Jongha Kang", "for": "Nanda Kumar",
+# Full executed documents rendered beside the template (2026-07-22 강프로:
+# the whole Word document, title page through signatures, with the fill-in
+# fields highlighted so drafting maps 1:1 to the editor's slots).
+SAMPLES = {
+    "sea_sow": {
+        "src": "Samsung_ Data Engineer.docx (executed Dec 2025)",
+        "title": "Data Engineer # 1",
+        "date": "Dec 7, 2025", "project": "SEA eCom Data",
+        "by": "Jongha Kang", "for": "Nanda Kumar",
         "summary": ("This Statement of Work outlines the provision of Data Engineering "
                     "support focused on building and maintaining the data infrastructure "
                     "that enables analytics, and reporting initiatives across organizations. "
@@ -76,98 +70,78 @@ EXAMPLES = {
             "Ensure data quality, integrity, and reliability through validation checks, monitoring frameworks, and automated alerting mechanisms.",
             "Partner with Data Product Managers, analysts, and business stakeholders to understand data requirements and translate them into scalable engineering solutions.",
             "Optimize data pipelines and queries for performance, cost efficiency, and scalability across growing data volumes.",
+            "Manage and maintain data warehouse and/or lake environments, ensuring proper partitioning, indexing, and storage optimization.",
+            "Implement and enforce data governance best practices, including schema management, access controls, and documentation standards.",
             "Support real-time and near-real-time data processing needs where required for personalization and campaign activation.",
+            "Collaborate with engineering teams to improve data instrumentation, event tracking, and logging across digital platforms.",
+            "Troubleshoot data issues, perform root cause analysis, and implement long-term fixes to prevent recurrence.",
+            "Build reusable data frameworks, pipeline templates, and tooling to accelerate development and standardize engineering practices.",
             "Maintain clear documentation of data pipelines, schemas, transformations, and dependencies to support transparency and maintainability.",
         ],
-        "stakeholders": ("Samsung Manager: Durga R · durga.r@samsung.com · Chennai, India  |  "
-                         "Cheil Owner: Jongha Kang · jongha.kang@cheil.com · Mountain View, USA"),
-        "period": "March 23, 2026 → December 31, 2026",
-        "res_head": ["Profile", "Location", "Qty", "Months", "Hourly", "Hrs/Mo", "Cost"],
+        "stk": [["Durga R", "Jongha Kang"], ["durga.r@samsung.com", "jongha.kang@cheil.com"],
+                ["Chennai, India", "Mountain View, USA"]],
+        "start": "March 23, 2026", "end": "December 31, 2026",
+        "res_mode": "hourly",
         "res_rows": [["Data Engineer", "India", "1", "9.3", "$25", "168", "$39,060"]],
-        "fee": "$39,060 — invoiced monthly, first month prorated $1,260 (Mar 23 start), 1st of following month",
-    },
-    "sea_team": {
-        "src": "Cheil SOW eCom-FSOmni Apr_Oct 2026 v1.docx (executed)",
-        "title": "SEA eCommerce – Omni Projects (Apr ~ Oct 2026 initiatives)",
-        "project": "SEA eCommerce – Omni Projects", "date": "Jul 1, 2026",
-        "by": "Jamshed Palsetia", "for": "Jamshed Palsetia",
-        "summary": ("A skilled team of developers, engineers to engage and carry out Omni "
-                    "Channel integrations (TikTok and Amazon MCF) and Fulfillment Service "
-                    "project tasks for Samsung's systems."),
-        "deliverables": [
-            "Fast-Follow Enhancements and Go-Live Support: implementation of fast-follow enhancement requests on integration specs for Amazon MCF and TikTok, including returns, cancellations, automation of manual processes (syncs).",
-            "Develop the Blue Ribbon project initiative — provide Blue Ribbon service on the cart/checkout pages and allow downstream integration with NERP, WMS and third-party partners.",
-            "Operational Support and Live-services Monitoring of all Fulfillment systems and Omni production systems and related integrations.",
+        "fee": "$39,060",
+        "schedule": [
+            ["Mar-26", "$1,260", "1-Apr-26"], ["Apr-26", "$4,200", "1-May-26"],
+            ["May-26", "$4,200", "1-Jun-26"], ["Jun-26", "$4,200", "1-Jul-26"],
+            ["Jul-26", "$4,200", "1-Aug-26"], ["Aug-26", "$4,200", "1-Sep-26"],
+            ["Sep-26", "$4,200", "1-Oct-26"], ["Oct-26", "$4,200", "1-Nov-26"],
+            ["Nov-26", "$4,200", "1-Dec-26"], ["Dec-26", "$4,200", "1-Jan-27"],
         ],
-        "stakeholders": ("Samsung Manager & Budget Owner: Jamshed Palsetia · j.palsetia@samsung.com · Mountain View, CA  |  "
-                         "Cheil POC: Woosuk Jang · woosuk.j@cheil.com · Bellevue, WA"),
-        "period": "April 1, 2026 → September 30, 2026",
-        "res_head": ["No.", "Name", "Role", "Level", "Region", "Rate/Month"],
-        "res_rows": [["1", "Rajiv Mampuzha", "Technical Development Lead", "Principal", "US", "$30,168"]],
-        "fee": "$211,176 — invoiced monthly at month end",
     },
-    "agy_role": {
-        "src": "eComm Sr. Data Analyst — Cheil-Invictus SOW (executed)",
-        "title": "Sr. Data Analyst (Corp Marketing Dashboard Support)",
-        "project": "Corp Marketing Dashboard Support", "date": "Jan 17, 2025",
-        "vendor": "Invictus Data Inc (MSA dated Sep 28, 2023)",
+    "agy_sow": {
+        "src": "eComm Sr. Data Analyst — Cheil-Invictus SOW (executed Jan 2025)",
+        "title": "Sr. Data Analyst (Corp Marketing Dashboard Support Scope)",
+        "date": "Jan 17, 2025", "project": "Corp Marketing Dashboard Support",
+        "by": "", "for": "",
+        "vendor_name": "Invictus Data, Inc.",
+        "vendor_entity": ("Invictus Data Inc, with its principal place of business located "
+                          "at 675 Shady Creek Ln, Los Altos, CA – 94024"),
+        "msa_date": "September 28, 2023",
         "summary": ("A skilled Sr. Data Analyst for Bigdata platform to work as a part of a "
                     "growing team to provide business insights, analyze trends, build "
                     "dashboards, data mining using SQL, and other similar technologies."),
         "deliverables": [
-            "Analyze business performance, pinpoint key challenges, and present insights using clear and concise visualizations.",
+            "Analyze business performance, pinpoint key challenges, and present insights using clear and concise visualizations (charts, graphs, tables, or summaries).",
+            "Drive innovation by leveraging data to generate insights, develop business cases, and create scalable solutions that foster business growth.",
             "Collaborate with Category/Product Managers to guide product and business decisions through data-driven insights.",
-            "Provide data analysis and support for Ecommerce Operations and Trade-in strategies.",
+            "Provide data analysis and support for Ecommerce Operations and Trade-in strategies, ensuring alignment with business goals.",
+            "Take ownership of a key business area from a data perspective, conducting deep dives and delivering actionable insights.",
+            "Partner with product managers, business team members, and engineers to implement accurate tracking and tagging for critical business metrics.",
+            "Develop and refine processes to test, learn, and iterate, accelerating growth through continuous improvement.",
             "Extract actionable insights from data using SQL, Spark, Hive, and Tableau, summarizing findings for leadership teams.",
-            "Design and maintain Tableau dashboards; regularly audit dashboards and business metrics.",
+            "Design and maintain Tableau dashboards to meet business needs, while working with engineering teams to build data solutions.",
+            "Regularly audit dashboards and business metrics to identify trends, discrepancies, or issues with data pipelines.",
             "Provide ad-hoc analytics and reporting support for executive presentations and decision-making.",
         ],
-        "stakeholders": None,
-        "period": "December 1, 2024 → December 31, 2025",
-        "res_head": ["Resource Name", "Service Description", "Qty", "Unit Price/Hour", "Cost Total"],
-        "res_rows": [["Pranav Vishwanathan", "Sr. Data Analyst", "1", "$32", "$69,888"]],
-        "fee": "$69,888 — contractor invoices Cheil monthly at month end ($5,824/mo)",
-    },
-    "agy_team": {
-        "src": "IOT Marketplace Cheil_AIE SOW_20251117.docx (executed)",
-        "title": "IOT Marketplace platform integration",
-        "project": "IOT Marketplace", "date": "Oct 1, 2025",
-        "vendor": "AIENTERPRISE Inc (MSA dated May 30, 2024)",
-        "summary": ("A skilled team of developers, engineers, QA engineers, project manager "
-                    "to engage and carry out platform integration project tasks for Samsung "
-                    "USA's newly establishing IOT Marketplace with other internal systems."),
-        "deliverables": [
-            "Integration with Partners: alignment between partner and Samsung on integration specs for catalog, pricing, inventory, order creation, order status and return processing; dev complete for Samsung GPV2 interface development.",
-            "Platform Development: fulfiller integration, changes in fulfillment/order/cart/checkout backend and front-end services, search and recommendation, promotions, payment-integration impact preparation.",
+        "stk": [["Pranav Vishwanathan", ""], ["", ""], ["", ""]],
+        "start": "December 1, 2024", "end": "December 31, 2025",
+        "res_mode": "hourly",
+        "res_rows": [["Pranav Vishwanathan", "Sr. Data Analyst", "1", "13", "$32", "168", "$69,888"]],
+        "fee": "$69,888",
+        "schedule": [
+            ["Dec-24", "$5,824", "1-Jan-25"], ["Jan-25", "$5,824", "1-Feb-25"],
+            ["Feb-25", "$5,824", "1-Mar-25"], ["Mar-25", "$5,824", "1-Apr-25"],
+            ["Apr-25", "$5,824", "1-May-25"], ["May-25", "$5,824", "1-Jun-25"],
+            ["Jun-25", "$5,824", "1-Jul-25"], ["Jul-25", "$5,824", "1-Aug-25"],
+            ["Aug-25", "$5,824", "1-Sep-25"], ["Sep-25", "$5,824", "1-Oct-25"],
+            ["Oct-25", "$5,824", "1-Nov-25"], ["Nov, Dec-25", "$5,824", "1-Dec-25"],
         ],
-        "stakeholders": None,
-        "period": "November 1, 2025 → December 31, 2025",
-        "res_head": ["No.", "Name", "Role", "Level", "Region", "Rate/Month"],
-        "res_rows": [
-            ["1", "Rajiv Mampuzha", "Technical Development Lead", "Principal", "US", "$29,295"],
-            ["2", "Raghuraman Krishnan", "Project Manager", "NA", "India", "–"],
-            ["3", "Kevin Niasso", "Business Analyst", "NA", "India", "–"],
-            ["4", "Kamal Kanniyappan", "Backend Sr. Developer", "NA", "India", "$7,560"],
-            ["5", "Sukraj Mahalingam", "Backend Sr. Developer", "NA", "India", "$7,560"],
-            ["6", "Harsh Dilip Pawar", "Backend Sr. Developer", "NA", "India", "$7,560"],
-            ["7", "Smitha H E", "Backend Sr. Developer", "NA", "India", "$7,560"],
-            ["8", "Girish Biradar", "Quality Engineer", "NA", "India", "$7,560"],
-            ["9", "Mary Katari", "Quality Engineer", "NA", "India", "$7,560"],
-        ],
-        "fee": "$70,200/month, $140,400 for the two-month duration — invoiced 1st of following month",
     },
     "agy_msa": {
         "src": "MSA Cheil-AIEnterprise (executed May 31, 2024)",
         "note": ("Executed fill-in: Effective Date = May 31, 2024 · Contractor = AIEnterprise Inc. "
-                 "Everything else was the standard template text you see on the left — the only "
-                 "vendor-specific edits ever made were these two fields (plus a Non-Solicit clause "
-                 "Legal added for AIE)."),
+                 "The template on the left IS the full executed document — the highlighted date and "
+                 "vendor fields were the only vendor-specific edits."),
     },
     "agy_nda": {
         "src": "Cheil NY Vendor One-Way NDA (executed May 29, 2024)",
         "note": ("Executed fill-in: Effective Date = 05/29/2024 · Vendor = AIENTERPRISE INC. "
-                 "(signed by Sudhanshu Mohan, CEO). The body text is identical to the template "
-                 "on the left — only the date and vendor name vary."),
+                 "(signed by Sudhanshu Mohan, CEO). The template on the left is the full executed "
+                 "text — only the highlighted date and vendor name vary."),
     },
 }
 
@@ -369,13 +343,13 @@ def _save(user, data):
 
 
 def _sow_type(sow):
-    """Resolve a record's type key (legacy records infer from dir+mode)."""
+    """Resolve a record's type key. Legacy team/role types collapse into the
+    merged per-direction SOW type (the rate model lives on the record)."""
     t = sow.get("type")
     if t in TYPES:
         return t
     d = "agy" if sow.get("direction") == "agency" else "sea"
-    m = "role" if sow.get("res_mode") == "hourly" else "team"
-    return f"{d}_{m}"
+    return f"{d}_sow"
 
 
 # ── schedule math ────────────────────────────────────────────────────────────
@@ -422,15 +396,22 @@ def _build_schedule(sow):
     spans = _month_spans(start, end)
     monthly = _monthly_amount(sow)
     rule = sow.get("invoice_rule") or "next_first"
+    overrides = sow.get("schedule_overrides") or {}
     rows = []
     for y, m, frac in spans:
+        label = date(y, m, 1).strftime("%b-%y")
         amount = round(monthly * frac, 2)
+        if label in overrides:
+            try:
+                amount = round(float(overrides[label]), 2)
+            except (TypeError, ValueError):
+                pass
         if rule == "month_end":
             inv = date(y, m, calendar.monthrange(y, m)[1])
         else:
             inv = date(y + 1, 1, 1) if m == 12 else date(y, m + 1, 1)
         rows.append({
-            "label": date(y, m, 1).strftime("%b-%y"),
+            "label": label,
             "amount": amount,
             "invoice": inv.strftime("%-d-%b-%y"),
         })
@@ -776,6 +757,8 @@ select.slot{cursor:pointer}
 .ex-paper td{border:1px solid var(--border);padding:4px 6px}
 .ex-paper ul{padding-left:18px;margin:4px 0}
 .ex-paper li{margin-bottom:4px}
+.ex-paper .num{text-align:right;font-variant-numeric:tabular-nums}
+.ex-mark{background:rgba(56,189,248,.14);border-bottom:1.5px dashed rgba(56,189,248,.55);border-radius:3px;padding:0 3px;color:var(--text)}
 @media(max-width:1100px){.ed-wrap{grid-template-columns:1fr}.ex-col{position:static;max-height:none;order:2}}
 @media(max-width:768px){
   .sow-hero,.type-grid{grid-template-columns:1fr}
@@ -798,38 +781,99 @@ def _shell(user, title, body, wide=False):
 <div class="container" style="max-width:{'1800px' if wide else '1000px'}">{body}</div></body></html>"""
 
 
+def _mk(v, field):
+    """Highlighted fill-in value in the sample document — maps 1:1 to an
+    editable slot in the template on the left."""
+    return f'<mark class="ex-mark" title="Fill-in field: {_esc(field)}">{_esc(v)}</mark>'
+
+
 def _render_example(type_key):
-    ex = EXAMPLES.get(type_key)
+    ex = SAMPLES.get(type_key)
     if not ex:
         return ""
-    parts = [f'<div class="ex-badge">📖 Executed example · {_esc(ex["src"])}</div>']
+    head = f'<div class="ex-badge">📖 Executed document · {_esc(ex["src"])}</div>'
     if ex.get("note"):
-        parts.append(f'<p>{_esc(ex["note"])}</p>')
+        return ('<div class="ex-col"><div class="ex-paper">' + head +
+                f'<p>{_esc(ex["note"])}</p></div></div>')
+
+    is_agency = type_key.startswith("agy")
+    p = []
+    p.append(head)
+    p.append('<div style="font-size:.66rem;color:var(--text-muted);text-transform:uppercase;'
+             'letter-spacing:.06em;margin-bottom:14px">Highlighted = the fields you fill in on the left</div>')
+    # ── cover / head ──
+    if not is_agency:
+        p.append('<img src="/sow/asset/logo" alt="Cheil" style="max-width:220px;background:#fff;'
+                 'padding:8px 12px;border-radius:6px;margin-bottom:16px">')
+    p.append(f'<div style="font-size:1.05rem;font-weight:800;color:var(--text)">{_mk(ex["title"], "Title")}</div>')
+    p.append('<div style="font-weight:800;color:var(--text);margin:6px 0 12px">STATEMENT OF WORK</div>')
+    p.append(f'<p><b>DATE:</b> {_mk(ex["date"], "SOW Date")}<br>'
+             f'<b>CLIENT:</b> {_esc(CHEIL_ENTITY if is_agency else SAMSUNG_ENTITY)}<br>'
+             f'<b>PROJECT NAME:</b> {_mk(ex["project"], "Project Name")}<br>'
+             + (f'<b>PREPARED BY:</b> {_mk(ex["by"], "Prepared By")}<br>'
+                f'<b>PREPARED FOR:</b> {_mk(ex["for"], "Prepared For")}' if ex.get("by") else "")
+             + '</p>')
+    if not is_agency:
+        p.append('<div style="border-top:2px dashed var(--border-bright);margin:16px -30px;position:relative">'
+                 '<span style="position:absolute;top:-8px;left:50%;transform:translateX(-50%);'
+                 'background:var(--surface);padding:0 8px;font-size:.6rem;color:var(--text-muted);'
+                 'text-transform:uppercase;letter-spacing:.08em">Page 2</span></div>')
+    # ── preamble ──
+    if is_agency:
+        p.append("<p>" + _esc(PREAMBLE_AGENCY_1).replace("{sow_date}", _mk(ex["date"], "SOW Date"))
+                 .replace("{vendor_entity}", _mk(ex["vendor_entity"], "Vendor entity line")) + "</p>")
+        p.append("<p>" + _esc(PREAMBLE_AGENCY_2).replace("{msa_date}", _mk(ex["msa_date"], "Vendor MSA date")) + "</p>")
     else:
-        parts.append(f'<h3 style="margin-top:0;font-size:.95rem">{_esc(ex.get("title"))}</h3>')
-        meta = []
-        if ex.get("project"):
-            meta.append(f"PROJECT: {ex['project']}")
-        if ex.get("date"):
-            meta.append(f"DATE: {ex['date']}")
-        if ex.get("by"):
-            meta.append(f"PREPARED BY: {ex['by']} · FOR: {ex['for']}")
-        if ex.get("vendor"):
-            meta.append(f"VENDOR: {ex['vendor']}")
-        parts.append("<p>" + "<br>".join(_esc(m) for m in meta) + "</p>")
-        parts.append(f'<h3>Executive Summary</h3><p>{_esc(ex.get("summary"))}</p>')
-        parts.append("<h3>Deliverables / Scope</h3><ul>" +
-                     "".join(f"<li>{_esc(d)}</li>" for d in ex.get("deliverables", [])) + "</ul>")
-        if ex.get("stakeholders"):
-            parts.append(f'<h3>Stakeholders</h3><p>{_esc(ex["stakeholders"])}</p>')
-        parts.append(f'<h3>Service Period</h3><p>{_esc(ex.get("period"))}</p>')
-        if ex.get("res_rows"):
-            head = "".join(f"<th>{_esc(h)}</th>" for h in ex["res_head"])
-            rows = "".join("<tr>" + "".join(f"<td>{_esc(c)}</td>" for c in r) + "</tr>"
-                           for r in ex["res_rows"])
-            parts.append(f'<h3>Resources</h3><div style="overflow-x:auto"><table><tr>{head}</tr>{rows}</table></div>')
-        parts.append(f'<h3>Fee</h3><p>{_esc(ex.get("fee"))}</p>')
-    return '<div class="ex-col"><div class="ex-paper">' + "".join(parts) + "</div></div>"
+        p.append(f"<p>{_esc(PREAMBLE_SAMSUNG)}</p>")
+    # ── summary / deliverables ──
+    p.append(f'<h3>Executive Summary</h3><p>{_mk(ex["summary"], "Executive Summary")}</p>')
+    p.append(f'<h3>{"Service Description" if is_agency else "Deliverables"}</h3><ul>'
+             + "".join(f"<li>{_mk(d, 'Deliverables (one per line)')}</li>" for d in ex["deliverables"])
+             + "</ul>")
+    # ── stakeholders ──
+    stk_head = (ex.get("vendor_name", "Contractor") + " POC") if is_agency else "Samsung Manager for this Role"
+    labels = ["Name", "Email", "Location"]
+    stk_rows = "".join(
+        f"<tr><td><b>{labels[i]}</b></td><td>{_mk(row[0], 'Stakeholder') if row[0] else ''}</td>"
+        f"<td>{_mk(row[1], 'Stakeholder') if row[1] else ''}</td></tr>"
+        for i, row in enumerate(ex["stk"]))
+    p.append(f'<h3>Project Stakeholders</h3><div style="overflow-x:auto"><table>'
+             f'<tr><th></th><th>{_esc(stk_head)}</th><th>Cheil Project Management &amp; SOW Owner</th></tr>'
+             f'{stk_rows}</table></div>')
+    # ── period ──
+    p.append(f'<h3>Service Period</h3><p>Start Date : {_mk(ex["start"], "Start Date")}<br>'
+             f'End Date : {_mk(ex["end"], "End Date")}</p>')
+    # ── resources ──
+    payer = "Cheil shall pay Contractor" if is_agency else "Samsung shall pay Cheil"
+    p.append(f'<h3>{"Resource Planning" if is_agency else "Resource Management"}</h3>'
+             f'<p>In consideration for the provision of the Services and Deliverables under this SOW, '
+             f'{payer} in accordance with the following rates and fees, subject to the applicable '
+             f'terms and conditions of the Agreement:</p>')
+    res_head = ["Profile", "Location", "Qty", "# Months", "Hourly", "Hrs/Mo", "Cost"]
+    res_rows = "".join("<tr>" + "".join(f"<td>{_mk(c, 'Resources table')}</td>" for c in r) + "</tr>"
+                       for r in ex["res_rows"])
+    p.append('<div style="overflow-x:auto"><table><tr>'
+             + "".join(f"<th>{h}</th>" for h in res_head) + f"</tr>{res_rows}</table></div>")
+    # ── payment ──
+    p.append(f'<h3>Cost and Payment Schedule</h3><p><b>Fee : {_mk(ex["fee"], "auto-computed Fee")}</b></p>')
+    p.append(f"<p>{_esc(PAYMENT_INTRO_AGENCY if is_agency else PAYMENT_INTRO)}</p>")
+    sched_rows = "".join(
+        f"<tr><td>{_esc(r[0])}</td><td class=\"num\">{_mk(r[1], 'Monthly amount (auto, editable)')}</td>"
+        f"<td>{_esc(r[2])}</td></tr>" for r in ex["schedule"])
+    p.append('<div style="overflow-x:auto"><table><tr><th>Month</th><th>Amount</th><th>Invoice Date</th></tr>'
+             + sched_rows + f'<tr><td><b>Total</b></td><td class="num"><b>{_mk(ex["fee"], "Total")}</b></td><td></td></tr></table></div>')
+    p.append(f"<p>{_esc(CHANGE_ORDER_NOTE)}</p>")
+    # ── OOP + signatures ──
+    p.append("<h3>Out-of-pocket Expense</h3>" + "".join(
+        f"<p>{_esc(par)}</p>" for par in (OOP_AGENCY if is_agency else OOP_SAMSUNG).split("\n\n")))
+    left = CHEIL_ENTITY if is_agency else SAMSUNG_ENTITY
+    right = ex.get("vendor_name", CHEIL_ENTITY) if is_agency else CHEIL_ENTITY
+    p.append('<h3>Signatures</h3><p>IN WITNESS WHEREOF, the parties have caused this Statement of Work '
+             'to be duly executed by their authorized representatives as set forth below.</p>'
+             f'<div style="overflow-x:auto"><table><tr><th>{_esc(left)}</th><th>{_mk(right, "Counterpart") if is_agency else _esc(right)}</th></tr>'
+             '<tr><td>Signature: ______________</td><td>Signature: ______________</td></tr>'
+             '<tr><td>Name / Title / Date</td><td>Name / Title / Date</td></tr></table></div>')
+    return '<div class="ex-col"><div class="ex-paper">' + "".join(p) + "</div></div>"
 
 
 _EX_TOGGLE_JS = """<script>
@@ -905,11 +949,60 @@ def _render_landing(user):
   </a>
 </div>
 <div style="display:flex;align-items:center;justify-content:space-between;margin:0 0 12px">
-  <h2 style="font-size:1rem;font-weight:800;margin:0">My SOWs</h2>
+  <h2 style="font-size:1rem;font-weight:800;margin:0">My Documents</h2>
+  <a class="btn btn-secondary btn-sm" href="/sow/vendors">🏢 Vendors</a>
 </div>
 <div class="sow-list">{rows or '<div class="sow-meta" style="padding:36px;text-align:center">No SOWs yet — pick a counterpart above to start.</div>'}</div>
 {_DEL_JS}"""
     return _shell(user, "SOW Assistant", body)
+
+
+def _render_vendors(user, saved=False):
+    data = _load(user)
+    counts = {}
+    for s in data["sows"]:
+        vid = s.get("vendor_id")
+        if vid:
+            counts[vid] = counts.get(vid, 0) + 1
+    rows = []
+    for v in data["vendors"]:
+        n = counts.get(v["id"], 0)
+        del_btn = (f'<button type="button" class="btn btn-danger btn-sm" onclick="delVendor(\'{v["id"]}\')">🗑</button>'
+                   if n == 0 else
+                   f'<span style="font-size:.72rem;color:var(--text-muted)" title="Referenced by {n} document(s) — delete those first">{n} doc(s)</span>')
+        rows.append(f"""
+<form method="post" action="/sow/vendor/save" class="sow-card" style="display:grid;grid-template-columns:1fr 2fr 150px auto auto;gap:10px;align-items:center;padding:14px 18px">
+  <input type="hidden" name="id" value="{v['id']}">
+  <input class="slot" name="name" value="{_esc(v.get('name'))}" placeholder="Vendor name">
+  <input class="slot" name="entity_line" value="{_esc(v.get('entity_line'))}" placeholder="Entity line (name + address, used in the SOW/MSA preamble)">
+  <input class="slot" type="date" name="msa_date" value="{_esc(v.get('msa_date'))}" title="MSA date">
+  <button type="submit" class="btn btn-secondary btn-sm">💾 Save</button>
+  {del_btn}
+</form>""")
+    saved_banner = ('<div style="color:var(--success);font-size:.85rem;margin-bottom:12px">✓ Saved</div>'
+                    if saved else "")
+    body = f"""
+<div style="display:flex;align-items:center;gap:12px;margin:8px 0 4px">
+  <a class="btn btn-ghost btn-sm" href="/sow">←</a>
+  <h1 style="margin:0">🏢 Vendors</h1>
+</div>
+<p style="color:var(--text-muted);font-size:.86rem">One row per contractor — name, the entity line that lands in document preambles, and the MSA date. Referenced by Agency-side SOWs, MSAs and NDAs.</p>
+{saved_banner}
+<form method="post" action="/sow/vendor/save" class="sow-card" style="display:grid;grid-template-columns:1fr 2fr 150px auto;gap:10px;align-items:center;padding:14px 18px;border-style:dashed">
+  <input class="slot" name="name" placeholder="+ New vendor name — e.g. Invictus Data, Inc." required>
+  <input class="slot" name="entity_line" placeholder="Entity line — Invictus Data Inc, with its principal place of business located at ...">
+  <input class="slot" type="date" name="msa_date" title="MSA date">
+  <button type="submit" class="btn btn-primary btn-sm">+ Add</button>
+</form>
+<div style="display:flex;flex-direction:column;gap:0">{''.join(rows) or '<div class="sow-meta" style="padding:30px;text-align:center">No vendors yet.</div>'}</div>
+<script>
+function delVendor(id){{
+  if(!confirm('Delete this vendor?')) return;
+  fetch('/sow/vendor/delete', {{method:'POST', headers:{{'Content-Type':'application/x-www-form-urlencoded'}}, body:'id='+encodeURIComponent(id)}})
+    .then(function(){{ location.reload(); }});
+}}
+</script>"""
+    return _shell(user, "Vendors", body)
 
 
 def _render_types(user, dir_key):
@@ -953,8 +1046,10 @@ def _render_types(user, dir_key):
 
 _EDITOR_JS = """<script>
 var RES = __RES__;
+var OV = __OV__;   /* per-month amount overrides: {'Mar-26': 1260, ...} */
 var CFG = __CFG__;
 function $id(x){ return document.getElementById(x); }
+function mode(){ return $id('fMode').value; }
 function money(x){
   if(isNaN(x)) return '$0';
   var r = Math.round(x*100)/100;
@@ -980,50 +1075,79 @@ var MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','De
 function monthlyAmt(){
   var t = 0;
   RES.forEach(function(r){
-    if(CFG.mode === 'hourly') t += (parseFloat(r.hourly)||0)*(parseFloat(r.hrs)||0)*(parseFloat(r.qty)||1);
+    if(mode() === 'hourly') t += (parseFloat(r.hourly)||0)*(parseFloat(r.hrs)||0)*(parseFloat(r.qty)||1);
     else t += parseFloat(r.rate)||0;
   });
   return t;
 }
-function recompute(){
+var _months = 0;
+function schedRows(){
   var spans = monthSpans($id('fStart').value, $id('fEnd').value);
-  var monthly = monthlyAmt();
-  var rule = $id('fRule').value;
-  var tb = $id('schedBody'); tb.innerHTML = '';
-  var fee = 0, months = 0;
-  spans.forEach(function(sp){
+  var monthly = monthlyAmt(), rule = $id('fRule').value;
+  _months = 0;
+  return spans.map(function(sp){
     var y = sp[0], m = sp[1], frac = sp[2];
-    var amt = Math.round(monthly*frac*100)/100;
-    fee += amt; months += frac;
+    _months += frac;
+    var label = MON[m] + '-' + String(y).slice(2);
+    var auto = Math.round(monthly*frac*100)/100;
+    var amt = (OV[label] != null && OV[label] !== '') ? parseFloat(OV[label]) || 0 : auto;
     var inv;
     if(rule === 'month_end') inv = new Date(y, m+1, 0);
     else inv = (m===11) ? new Date(y+1, 0, 1) : new Date(y, m+1, 1);
-    var invS = inv.getDate() + '-' + MON[inv.getMonth()] + '-' + String(inv.getFullYear()).slice(2);
+    return {label: label, amt: amt, auto: auto, edited: OV[label] != null && OV[label] !== '',
+            inv: inv.getDate() + '-' + MON[inv.getMonth()] + '-' + String(inv.getFullYear()).slice(2)};
+  });
+}
+function feeOf(rows){ return rows.reduce(function(a, r){ return a + r.amt; }, 0); }
+function paintTotals(rows){
+  var fee = feeOf(rows);
+  document.querySelectorAll('.feeOut').forEach(function(el){ el.textContent = money(fee); });
+  $id('monthsOut') && ($id('monthsOut').textContent = Math.round(_months*10)/10);
+  var t = $id('schedTotal'); if(t) t.textContent = money(fee);
+  return fee;
+}
+function renderSched(){
+  var rows = schedRows();
+  var tb = $id('schedBody'); tb.innerHTML = '';
+  rows.forEach(function(r){
     var tr = document.createElement('tr');
-    tr.innerHTML = '<td>' + MON[m] + '-' + String(y).slice(2) + '</td><td class="num">' + money(amt) + '</td><td>' + invS + '</td>';
+    tr.innerHTML = '<td>' + r.label + '</td>'
+      + '<td class="num"><input class="slot sched-amt" data-label="' + r.label + '" value="' + r.amt + '"'
+      + ' title="' + (r.edited ? 'Edited — auto value ' + money(r.auto) : 'Auto from period × rates; type to override') + '"'
+      + (r.edited ? ' style="border-bottom-color:var(--warn)"' : '') + '></td>'
+      + '<td>' + r.inv + '</td>';
     tb.appendChild(tr);
   });
   var tr = document.createElement('tr');
-  tr.innerHTML = '<td><b>Total</b></td><td class="num"><b>' + money(fee) + '</b></td><td></td>';
+  tr.innerHTML = '<td><b>Total</b></td><td class="num"><b id="schedTotal"></b></td>'
+    + '<td><button type="button" class="btn btn-ghost btn-sm" onclick="OV={};renderSched()" title="Drop manual edits, back to auto">↺ auto</button></td>';
   tb.appendChild(tr);
-  document.querySelectorAll('.feeOut').forEach(function(el){ el.textContent = money(fee); });
-  $id('monthsOut') && ($id('monthsOut').textContent = Math.round(months*10)/10);
-  renderRes(months);  // exact months so line Cost === schedule total
-  var dEl = $id('preamDate');
-  if(dEl){
-    var dv = $id('fDate').value;
-    dEl.textContent = dv ? new Date(dv+'T00:00:00').toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'}) : '(date)';
-  }
+  paintTotals(rows);
 }
-function renderRes(months){
+function updateResComputed(){
+  if(mode() !== 'hourly') return;
+  document.querySelectorAll('#resBody tr').forEach(function(tr, i){
+    var r = RES[i] || {};
+    var cost = (parseFloat(r.hourly)||0)*(parseFloat(r.hrs)||0)*(parseFloat(r.qty)||1)*_months;
+    var tds = tr.querySelectorAll('td.num-ro');
+    if(tds[0]) tds[0].textContent = Math.round(_months*10)/10;
+    if(tds[1]) tds[1].textContent = money(cost);
+  });
+}
+var HEADS = {
+  hourly:  ['Profile','Location','Qty','# Months','Hourly USD','Hrs/Month','Cost'],
+  monthly: ['No.','Name','Role','Level','Region','Rate/Month USD']
+};
+function renderRes(){
+  var thead = document.querySelector('#resTableHead');
+  thead.innerHTML = '<tr>' + HEADS[mode()].map(function(h){ return '<th>' + h + '</th>'; }).join('') + '<th style="border:none"></th></tr>';
   var tb = $id('resBody'); tb.innerHTML = '';
   RES.forEach(function(r, i){
     var tr = document.createElement('tr'), html = '';
-    if(CFG.mode === 'hourly'){
-      var cost = (parseFloat(r.hourly)||0)*(parseFloat(r.hrs)||0)*(parseFloat(r.qty)||1)*(months||0);
+    if(mode() === 'hourly'){
       html = cell(r,'profile',i) + cell(r,'location',i) + cell(r,'qty',i) +
-             '<td class="num">' + (Math.round((months||0)*10)/10) + '</td>' + cell(r,'hourly',i) + cell(r,'hrs',i) +
-             '<td class="num">' + money(cost) + '</td>';
+             '<td class="num num-ro"></td>' + cell(r,'hourly',i) + cell(r,'hrs',i) +
+             '<td class="num num-ro"></td>';
     } else {
       html = '<td class="num">' + (i+1) + '</td>' + cell(r,'name',i) + cell(r,'role',i) +
              cell(r,'level',i) + cell(r,'region',i) + cell(r,'rate',i);
@@ -1031,19 +1155,41 @@ function renderRes(months){
     tr.innerHTML = html + '<td style="border:none"><button type="button" class="row-del" onclick="rmRow('+i+')">✕</button></td>';
     tb.appendChild(tr);
   });
+  updateResComputed();
 }
 function cell(r, k, i){
   var v = r[k] != null ? String(r[k]).replace(/"/g,'&quot;') : '';
   return '<td><input class="slot" data-k="'+k+'" data-i="'+i+'" value="'+v+'"></td>';
 }
-function addRow(){ RES.push({}); recompute(); }
-function rmRow(i){ RES.splice(i,1); recompute(); }
+function addRow(){ RES.push({}); renderRes(); renderSched(); updateResComputed(); }
+function rmRow(i){ RES.splice(i,1); renderRes(); renderSched(); updateResComputed(); }
+function modeSync(){ renderRes(); renderSched(); updateResComputed(); }
+/* Typing must never rebuild the input being typed in — update data + computed
+   cells in place; full re-renders only on structural events. */
 document.addEventListener('input', function(e){
+  if(e.target.classList && e.target.classList.contains('sched-amt')){
+    OV[e.target.dataset.label] = e.target.value;
+    paintTotals(schedRows());
+    return;
+  }
   var k = e.target.dataset && e.target.dataset.k;
-  if(k){ RES[parseInt(e.target.dataset.i)][k] = e.target.value; }
-  recompute();
+  if(k){
+    RES[parseInt(e.target.dataset.i)][k] = e.target.value;
+    renderSched(); updateResComputed();
+  }
 });
-document.addEventListener('change', recompute);
+document.addEventListener('change', function(e){
+  if(e.target.id === 'fStart' || e.target.id === 'fEnd' || e.target.id === 'fRule' || e.target.id === 'fDate'){
+    renderSched(); updateResComputed(); dateSyncPreamble();
+  }
+});
+function dateSyncPreamble(){
+  var dEl = $id('preamDate');
+  if(dEl){
+    var dv = $id('fDate').value;
+    dEl.textContent = dv ? new Date(dv+'T00:00:00').toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'}) : '(date)';
+  }
+}
 var vSel = $id('fVendor');
 function vendorSync(){
   if(!vSel) return;
@@ -1058,9 +1204,12 @@ document.getElementById('sowForm').addEventListener('submit', function(){
   $id('resJson').value = JSON.stringify(RES.filter(function(r){
     return Object.keys(r).some(function(k){ return String(r[k]||'').trim(); });
   }));
+  var clean = {};
+  Object.keys(OV).forEach(function(k){ if(String(OV[k]).trim() !== '') clean[k] = parseFloat(OV[k]) || 0; });
+  $id('ovJson').value = JSON.stringify(clean);
 });
 if(!RES.length) RES.push({});
-vendorSync(); recompute();
+vendorSync(); dateSyncPreamble(); renderRes(); renderSched(); updateResComputed();
 </script>"""
 
 
@@ -1073,7 +1222,7 @@ def _render_doc_editor(user, sow, type_key, saved=False):
     data = _load(user)
     t = TYPES[type_key]
     is_agency = t["dir"] == "agency"
-    mode = t["mode"]
+    mode = sow.get("res_mode") or t["mode"]
     vendors = {v["id"]: v for v in data["vendors"]}
     for v in vendors.values():
         v["msa_date_long"] = _fmt_long(v.get("msa_date"))
@@ -1111,13 +1260,6 @@ def _render_doc_editor(user, sow, type_key, saved=False):
     else:
         preamble = f'<p class="legal">{_esc(PREAMBLE_SAMSUNG)}</p>'
 
-    if mode == "hourly":
-        res_head = ("<tr><th>Profile</th><th>Location</th><th>Qty</th><th># Months</th>"
-                    "<th>Hourly Cost</th><th>Hrs/Month</th><th>Cost</th><th style='border:none'></th></tr>")
-    else:
-        res_head = ("<tr><th>No.</th><th>Name</th><th>Role</th><th>Level</th><th>Region</th>"
-                    "<th>Rate/Month (USD)</th><th style='border:none'></th></tr>")
-
     stk_client_label = (f'<span class="vendorName">{_esc(cur_vendor.get("name") or "Contractor")}</span> POC'
                         if is_agency else "Samsung Manager for this Role")
     client_line = CHEIL_ENTITY if is_agency else SAMSUNG_ENTITY
@@ -1127,12 +1269,13 @@ def _render_doc_editor(user, sow, type_key, saved=False):
     sig_right = (f'<span class="vendorName">{_esc(cur_vendor.get("name") or "Contractor")}</span>'
                  if is_agency else CHEIL_ENTITY)
 
-    cfg = {"mode": mode, "vendors": vendors}
+    cfg = {"vendors": vendors}
     body = f"""
 <form method="post" action="/sow/save" id="sowForm">
 <input type="hidden" name="id" value="{_esc(sow.get('id') or '')}">
 <input type="hidden" name="type" value="{type_key}">
 <input type="hidden" name="resources_json" id="resJson">
+<input type="hidden" name="schedule_overrides" id="ovJson">
 <div class="doc-bar">
   <a class="btn btn-ghost btn-sm" href="/sow" title="All SOWs">←</a>
   {dir_chip}<span style="font-size:.82rem;font-weight:700">{t['icon']} {_esc(t['label'])}</span>
@@ -1177,16 +1320,20 @@ def _render_doc_editor(user, sow, type_key, saved=False):
   <div class="meta-line"><b>Start Date :</b> <input class="slot" type="date" name="start" id="fStart" value="{_esc(sow.get('start'))}" required></div>
   <div class="meta-line"><b>End Date :</b> <input class="slot" type="date" name="end" id="fEnd" value="{_esc(sow.get('end'))}" required></div>
 
-  <h2>{'Resource Planning' if is_agency else 'Resource Management'}</h2>
+  <h2>{'Resource Planning' if is_agency else 'Resource Management'}
+    <select class="slot" name="res_mode" id="fMode" onchange="modeSync()" style="font-size:.76rem;margin-left:10px;vertical-align:middle" title="Rate model — switches the resource table columns">
+      <option value="hourly"{' selected' if mode == 'hourly' else ''}>Hourly (rate × hrs/month)</option>
+      <option value="monthly"{' selected' if mode == 'monthly' else ''}>Monthly rate per member</option>
+    </select></h2>
   <p class="legal">In consideration for the provision of the Services and Deliverables under this SOW, {'Cheil shall pay Contractor' if is_agency else 'Samsung shall pay Cheil'} in accordance with the following rates and fees, subject to the applicable terms and conditions of the Agreement:</p>
   <div class="table-wrap"><table>
-    <thead>{res_head}</thead>
+    <thead id="resTableHead"></thead>
     <tbody id="resBody"></tbody>
   </table></div>
   <button type="button" class="btn btn-ghost btn-sm add-row-btn" onclick="addRow()">+ Add resource</button>
 
   <h2>Cost and Payment Schedule</h2>
-  <p><b>Fee : <span class="feeOut">$0</span></b> <span style="color:var(--text-muted);font-size:.78rem">(<span id="monthsOut">0</span> months, auto-computed)</span></p>
+  <p><b>Fee : <span class="feeOut">$0</span></b> <span style="color:var(--text-muted);font-size:.78rem">(<span id="monthsOut">0</span> months · amounts are auto-filled, type in any month to override)</span></p>
   <p class="legal">{PAYMENT_INTRO_AGENCY if is_agency else PAYMENT_INTRO}
     <br>Invoice dates: <select class="slot" name="invoice_rule" id="fRule">
       <option value="next_first"{'' if sow.get('invoice_rule') == 'month_end' else ' selected'}>1st of following month</option>
@@ -1216,6 +1363,7 @@ def _render_doc_editor(user, sow, type_key, saved=False):
 </div>
 </form>
 """ + _EDITOR_JS.replace("__RES__", json.dumps(sow.get("resources", [])).replace("</", "<\\/")) \
+                .replace("__OV__", json.dumps(sow.get("schedule_overrides") or {}).replace("</", "<\\/")) \
                 .replace("__CFG__", json.dumps(cfg).replace("</", "<\\/")) + _EX_TOGGLE_JS
     return _shell(user, "SOW Editor", body, wide=True)
 
@@ -1384,6 +1532,34 @@ def handle(method, path, body, ctx):
         d = _f(body, "dir")
         return ("html", _render_types(user, "agy" if d == "agy" else "sea"))
 
+    if method == "GET" and path == "/sow/vendors":
+        return ("html", _render_vendors(user, saved=_f(body, "saved") == "1"))
+
+    if method == "POST" and path == "/sow/vendor/save":
+        data = _load(user)
+        vid = _f(body, "id")
+        name = _f(body, "name")
+        if not name:
+            return ("redirect", "/sow/vendors")
+        rec = {"id": vid or uuid.uuid4().hex[:8], "name": name,
+               "entity_line": _f(body, "entity_line"), "msa_date": _f(body, "msa_date")}
+        cur = next((v for v in data["vendors"] if v["id"] == vid), None)
+        if cur:
+            data["vendors"][data["vendors"].index(cur)] = rec
+        else:
+            data["vendors"].append(rec)
+        _save(user, data)
+        return ("redirect", "/sow/vendors?saved=1")
+
+    if method == "POST" and path == "/sow/vendor/delete":
+        data = _load(user)
+        vid = _f(body, "id")
+        if any(s.get("vendor_id") == vid for s in data["sows"]):
+            return ("redirect", "/sow/vendors")
+        data["vendors"] = [v for v in data["vendors"] if v["id"] != vid]
+        _save(user, data)
+        return ("redirect", "/sow/vendors")
+
     if method == "GET" and path == "/sow/asset/logo":
         logo = os.path.join(_ASSETS, "cheil_logo.png")
         if os.path.exists(logo):
@@ -1412,12 +1588,18 @@ def handle(method, path, body, ctx):
         data = _load(user)
         sid = _f(body, "id") or uuid.uuid4().hex[:10]
         tkey = _f(body, "type")
-        t = TYPES.get(tkey) or TYPES["sea_role"]
+        t = TYPES.get(tkey) or TYPES["sea_sow"]
         try:
             resources = json.loads(_f(body, "resources_json") or "[]")
             assert isinstance(resources, list)
         except Exception:
             resources = []
+        try:
+            overrides = json.loads(_f(body, "schedule_overrides") or "{}")
+            assert isinstance(overrides, dict)
+            overrides = {str(k): float(v) for k, v in overrides.items()}
+        except Exception:
+            overrides = {}
         # Inline vendor registration rides along with the save.
         vendor_id = _f(body, "vendor_id")
         v_name = _f(body, "v_name")
@@ -1447,9 +1629,9 @@ def handle(method, path, body, ctx):
             return ("redirect", f"/sow/edit?id={sid}&saved=1")
         rec = {
             "id": sid,
-            "type": tkey if tkey in TYPES else "sea_role",
+            "type": tkey if tkey in TYPES else "sea_sow",
             "direction": t["dir"],
-            "res_mode": t["mode"],
+            "res_mode": _f(body, "res_mode") if _f(body, "res_mode") in ("monthly", "hourly") else t["mode"],
             "date": _f(body, "date"),
             "title": _f(body, "title"),
             "project_name": _f(body, "project_name"),
@@ -1465,6 +1647,7 @@ def handle(method, path, body, ctx):
             "start": _f(body, "start"), "end": _f(body, "end"),
             "invoice_rule": _f(body, "invoice_rule") or "next_first",
             "resources": resources,
+            "schedule_overrides": overrides,
             "created": (sow or {}).get("created") or datetime.now().isoformat(),
             "updated": datetime.now().isoformat(),
         }
