@@ -2312,20 +2312,22 @@ def _get_completed_folder_id(service, username: str) -> str:
 def _archive_to_completed(username: str, file_ids: set) -> int:
     """Best-effort move of Drive originals into the Completed folder.
 
-    Returns the count moved. The ledger `completed` flag is the source of truth,
-    so any Drive failure is swallowed and reported only via the returned count.
+    Returns the set of file_ids actually moved — drive.file scope gets a 403
+    on files the user dropped into the folder directly, and only genuinely
+    moved files may have their archived_drive flag set (2026-07-22: the flag
+    was set for all attempts, so 8/9 'archived' files were still in Receipts).
     """
     if not file_ids:
-        return 0
+        return set()
     service = _get_drive_service(username)
     if not service:
-        return 0
+        return set()
     try:
         completed_id = _get_completed_folder_id(service, username)
         receipts_id = _get_receipts_folder_id(service, username)
     except Exception:
-        return 0
-    moved = 0
+        return set()
+    moved = set()
     for fid in file_ids:
         if not fid:
             continue
@@ -2338,25 +2340,25 @@ def _archive_to_completed(username: str, file_ids: set) -> int:
                 fileId=fid, addParents=completed_id,
                 removeParents=remove, fields='id,parents'
             ).execute()
-            moved += 1
+            moved.add(fid)
         except Exception:
             pass  # best-effort; ledger flag already reflects completion
     return moved
 
 
 def _restore_from_completed(username: str, file_ids: set) -> int:
-    """Best-effort move of Drive originals back from Completed to Receipts."""
+    """Best-effort move back from Completed to Receipts; returns moved fids."""
     if not file_ids:
-        return 0
+        return set()
     service = _get_drive_service(username)
     if not service:
-        return 0
+        return set()
     try:
         completed_id = _get_completed_folder_id(service, username)
         receipts_id = _get_receipts_folder_id(service, username)
     except Exception:
-        return 0
-    moved = 0
+        return set()
+    moved = set()
     for fid in file_ids:
         if not fid:
             continue
@@ -2365,7 +2367,7 @@ def _restore_from_completed(username: str, file_ids: set) -> int:
                 fileId=fid, addParents=receipts_id,
                 removeParents=completed_id, fields='id,parents'
             ).execute()
-            moved += 1
+            moved.add(fid)
         except Exception:
             pass
     return moved
@@ -2411,23 +2413,23 @@ def _apply_receipt_completion(username: str, ids: set, completed: bool) -> dict:
             continue
         (to_archive if want_archived else to_restore).add(fid)
 
-    moved = 0
-    if to_archive:
-        moved += _archive_to_completed(username, to_archive)
-    if to_restore:
-        moved += _restore_from_completed(username, to_restore)
-    # Sync archived_drive across every entry of each affected file.
+    ok_archive = _archive_to_completed(username, to_archive) if to_archive else set()
+    ok_restore = _restore_from_completed(username, to_restore) if to_restore else set()
+    # Sync archived_drive only for files whose Drive move actually succeeded —
+    # a 403 (user-dropped file, no write access) must not fake an archive.
     for e in ledger["entries"]:
         fid = e.get("file_id")
-        if fid in to_archive:
+        if fid in ok_archive:
             e["archived_drive"] = True
-        elif fid in to_restore:
+        elif fid in ok_restore:
             e["archived_drive"] = False
     _save_ledger(username, ledger)
     # `attempted` = Drive moves we tried; the UI warns when moved < attempted
-    # (e.g. Drive offline) while the ledger flag — the source of truth — is set.
+    # (Drive offline, or files the app has no write access to) while the ledger
+    # flag — the source of truth — is still set.
     return {"count": len(touched),
-            "moved": moved, "attempted": len(to_archive) + len(to_restore)}
+            "moved": len(ok_archive) + len(ok_restore),
+            "attempted": len(to_archive) + len(to_restore)}
 
 
 def _set_linked_tx_status(username: str, receipt_ids: set, status: str) -> int:
