@@ -69,3 +69,44 @@ def test_dup_hint_within_batch_and_missing_date(monkeypatch):
     assert entries[0]["dup_hint"] is None
     assert entries[1]["dup_hint"] == "staged"
     assert entries[2]["dup_hint"] is None
+
+
+def test_discard_tombstones_fid_so_sync_skips_it(monkeypatch):
+    st = _isolate(monkeypatch, [_staged("e1", fid="fX")], [])
+    st["discarded"] = {}
+    monkeypatch.setattr(core, "_load_discarded_fids", lambda u: dict(st["discarded"]))
+    monkeypatch.setattr(core, "_mark_discarded_fid",
+                        lambda u, f: st["discarded"].__setitem__(f, "t"))
+    core._handle_ocr_staging_discard_entry("u", {"id": "e1"})
+    assert "fX" in st["discarded"]
+
+    # sync must not re-stage the tombstoned file even though Drive still has it
+    class _Files:
+        def list(self, **kw):
+            class _R:
+                def execute(self):
+                    return {"files": [
+                        {"id": "fX", "name": "a.jpg", "mimeType": "image/jpeg"},
+                        {"id": "fY", "name": "b.jpg", "mimeType": "image/jpeg"},
+                    ]}
+            return _R()
+
+    class _Svc:
+        def files(self):
+            return _Files()
+
+    monkeypatch.setattr(core, "_get_drive_service", lambda u: _Svc())
+    monkeypatch.setattr(core, "_get_receipts_folder_id", lambda s, u: "folder")
+    monkeypatch.setattr(core, "_load_receipts", lambda u: [])
+    new = core._list_new_drive_files("u")
+    assert [f["id"] for f in new] == ["fY"]
+
+
+def test_discard_keeps_file_referenced_by_ledger_untombstoned(monkeypatch):
+    st = _isolate(monkeypatch, [_staged("e1", fid="fShared")],
+                  [{"file_id": "fShared", "ocr_amount": 1.0, "multi_ocr": True}])
+    st["discarded"] = {}
+    monkeypatch.setattr(core, "_mark_discarded_fid",
+                        lambda u, f: st["discarded"].__setitem__(f, "t"))
+    core._handle_ocr_staging_discard_entry("u", {"id": "e1"})
+    assert st["discarded"] == {}

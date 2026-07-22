@@ -372,6 +372,39 @@ def _clear_ocr_staging(username: str):
     if f.exists():
         f.unlink()
 
+
+# Discard tombstones: Drive trash can silently fail (drive.file scope can't
+# modify files the user dropped into the folder themselves), and an untrashed
+# file would be re-OCRed and re-staged by every sync — the "discarded receipt
+# keeps coming back" loop (2026-07-22). Tombstoned file_ids are skipped by
+# _list_new_drive_files regardless of the trash outcome.
+_DISCARDED_CAP = 500
+
+def _ocr_discarded_file(username: str) -> Path:
+    return DATA_DIR / f"ocr_discarded_{username}.json"
+
+def _load_discarded_fids(username: str) -> dict:
+    f = _ocr_discarded_file(username)
+    if f.exists():
+        try:
+            d = json.loads(f.read_text())
+            if isinstance(d, dict):
+                return d
+        except Exception:
+            pass
+    return {}
+
+def _mark_discarded_fid(username: str, fid: str):
+    if not fid:
+        return
+    _ensure_dirs()
+    d = _load_discarded_fids(username)
+    d[fid] = datetime.now().isoformat()
+    if len(d) > _DISCARDED_CAP:
+        for k in sorted(d, key=d.get)[:len(d) - _DISCARDED_CAP]:
+            d.pop(k, None)
+    _ocr_discarded_file(username).write_text(json.dumps(d, ensure_ascii=False, indent=2))
+
 def _handle_ocr_staging_discard_file(username: str, body: dict):
     """POST /cardconv/receipts/review/discard-file — drop every staged sub-entry
     of one photo and trash its Drive file so the next sync doesn't re-stage it.
@@ -388,6 +421,7 @@ def _handle_ocr_staging_discard_file(username: str, body: dict):
     removed = len(entries) - len(keep)
     staging["entries"] = keep
     _save_ocr_staging(username, staging)
+    _mark_discarded_fid(username, fid)
     trashed = False
     try:
         service = _get_drive_service(username)
@@ -424,6 +458,9 @@ def _handle_ocr_staging_discard_entry(username: str, body: dict):
         in_ledger = any(le.get("file_id") == fid
                         for le in _load_ledger(username).get("entries", []))
         if not still_staged and not in_ledger:
+            # Tombstone first — even if the Drive trash below fails, the file
+            # must never be re-staged by a later sync.
+            _mark_discarded_fid(username, fid)
             try:
                 service = _get_drive_service(username)
                 if service:
@@ -3138,9 +3175,10 @@ def _list_new_drive_files(username: str, service=None):
     done_fids = {r.get('file_id') for r in existing
                  if (r.get('multi_ocr') and r.get('ocr_amount') is not None)
                  or r.get('matched')}
-    # Skip files already in the staging queue.
+    # Skip files already in the staging queue, plus discarded tombstones
+    # (their Drive trash may have failed — see _mark_discarded_fid).
     staged_fids = {e.get("file_id") for e in _load_ocr_staging(username).get("entries", [])}
-    skip_fids = done_fids | staged_fids
+    skip_fids = done_fids | staged_fids | set(_load_discarded_fids(username))
     supported = {'image/jpeg', 'image/png', 'application/pdf', 'image/gif', 'image/webp'}
     return [f for f in results.get('files', [])
             if f.get('mimeType', '') in supported and f.get('id') not in skip_fids]
