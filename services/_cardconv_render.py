@@ -1998,7 +1998,7 @@ def _render_ocr_staging_review(user: str) -> str:
     <input type="checkbox" name="confirmed" value="{eid}" {"checked" if (ocr_ok and not dup_hint) else ""}>
     <span class="stg-check-lbl">Include</span>
     <button type="button" class="btn btn-danger btn-sm" style="margin-left:auto"
-      onclick="stgDiscardEntry('{eid}')" title="Reject this receipt (removes it from the queue)">🗑 Discard</button>
+      onclick="stgDiscardEntry('{eid}', '{dup_hint or ""}')" title="Reject this receipt (removes it from the queue)">🗑 Discard</button>
   </label>
   <div class="stg-img-wrap">{img_html}</div>
   <div class="stg-info">
@@ -2105,8 +2105,11 @@ function stgDiscardFile(fid, n) {{
     body: 'file_id=' + encodeURIComponent(fid)
   }}).then(function(r) {{ return r.json(); }}).then(function() {{ location.reload(); }});
 }}
-function stgDiscardEntry(id) {{
-  if (!confirm('Reject this receipt?\\nIt is removed from the queue; its photo is trashed on Drive unless another receipt still uses it.')) return;
+function stgDiscardEntry(id, dupHint) {{
+  var msg = dupHint === 'ledger'
+    ? 'This scan already exists in the Ledger.\\nDiscard removes only this queued copy — the Ledger row stays as-is (delete it from the Ledger list if you want it gone entirely).'
+    : 'Reject this receipt?\\nIt is removed from the queue; its photo is trashed on Drive unless another receipt still uses it.';
+  if (!confirm(msg)) return;
   fetch('/cardconv/receipts/review/discard-entry', {{
     method: 'POST', headers: {{'Content-Type': 'application/x-www-form-urlencoded'}},
     body: 'id=' + encodeURIComponent(id)
@@ -3832,7 +3835,11 @@ function _imgLbKey(e){ if(e.key==='Escape') closeImgLb(); }
   };
 
   window.ocrDiscardEntry = function(id) {
-    if (!confirm('Reject this receipt?\nIt is removed from the queue; its photo is trashed on Drive unless another receipt still uses it.')) return;
+    var ent = (_entries || []).find(function(e) { return e.id === id; }) || {};
+    var msg = ent.dup_hint === 'ledger'
+      ? 'This scan already exists in the Ledger.\nDiscard removes only this queued copy — the Ledger row stays as-is (delete it from the Ledger list if you want it gone entirely).'
+      : 'Reject this receipt?\nIt is removed from the queue; its photo is trashed on Drive unless another receipt still uses it.';
+    if (!confirm(msg)) return;
     fetch('/cardconv/receipts/review/discard-entry', {
       method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'},
       body: 'id=' + encodeURIComponent(id)
