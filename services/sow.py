@@ -19,6 +19,136 @@ META = {
 CHEIL_ENTITY = "Cheil USA, Inc."
 SAMSUNG_ENTITY = "Samsung Electronics America, Inc."
 
+# Document types drill down: direction → document kind (SOW / MSA / NDA) →
+# for SOWs, the rate-model family. Each maps to an executed-sample family.
+TYPES = {
+    "sea_team": {
+        "dir": "samsung", "kind": "sow", "mode": "monthly", "icon": "👥",
+        "label": "Project Team SOW",
+        "desc": "Team engagement billed at monthly rates per member — FSOmni / Omni projects style.",
+    },
+    "sea_role": {
+        "dir": "samsung", "kind": "sow", "mode": "hourly", "icon": "🧑‍💻",
+        "label": "Individual Role SOW",
+        "desc": "Single role billed hourly (rate × hrs/month) — Data Engineer / PZN Data PM style.",
+    },
+    "agy_team": {
+        "dir": "agency", "kind": "sow", "mode": "monthly", "icon": "👥",
+        "label": "Project Team SOW",
+        "desc": "Vendor team at monthly rates under the vendor's MSA — IOT Marketplace (AIE) style.",
+    },
+    "agy_role": {
+        "dir": "agency", "kind": "sow", "mode": "hourly", "icon": "🧑‍💻",
+        "label": "Contractor Role SOW",
+        "desc": "Single contractor role billed hourly under the vendor's MSA — Invictus style.",
+    },
+    "agy_msa": {
+        "dir": "agency", "kind": "msa", "mode": None, "icon": "📜",
+        "label": "Master Services Agreement",
+        "desc": "The standard Cheil MSA — pick the vendor and effective date; the full legal text exports as-is.",
+    },
+    "agy_nda": {
+        "dir": "agency", "kind": "nda", "mode": None, "icon": "🤐",
+        "label": "One-Way NDA",
+        "desc": "Confidentiality & nondisclosure agreement signed before vendor talks — vendor + date fill-in.",
+    },
+}
+
+_ASSETS = os.path.join(os.path.dirname(__file__), "sow_assets")
+
+# One-way NDA text lifted from the executed "Cheil NY Vendor One-Way NDA" (slots
+# for effective date and vendor name). Kept verbatim, including original quirks.
+NDA_TITLE = "CONFIDENTIALITY AND NONDISCLOSURE AGREEMENT"
+NDA_INTRO = (
+    'This CONFIDENTIALITY AND NONDISCLOSURE AGREEMENT (the "Agreement"), is '
+    'entered into as of {date} (the "Effective Date"), by and between {vendor} '
+    '(the "Vendor"), and Cheil USA, Inc. (the "Cheil").'
+)
+NDA_BODY = [
+    "WHEREAS, the Vendor and Cheil are engaged in, or may enter into, talks regarding "
+    "a potential business relationship, and the Vendor understands that Cheil has "
+    "disclosed or may disclose to the Vendor certain confidential and proprietary "
+    "information which has commercial and other value in the business of Cheil.",
+    "NOW, THEREFORE, in consideration of the foregoing, and the mutual covenants, "
+    "terms and conditions set forth herein, and other good and valuable consideration, "
+    "the receipt and sufficiency of which are hereby acknowledged, the parties hereto "
+    "hereby agree as follows.",
+    "1. For purposes of this Agreement, “Confidential Information” shall mean all "
+    "technical and business information relating to Cheil’s products, clients, "
+    "technology, software, processes, methods, services, research and development, "
+    "pricing, future business plans and all other information of Cheil or its clients "
+    "which may be disclosed by Cheil or to which the Vendor may be provided access by "
+    "Cheil in accordance with this Agreement.",
+    "2. Confidential Information shall not include any information that: (i) is or "
+    "becomes (through no improper action or inaction by the Vendor) generally "
+    "available to the public; (ii) was in its possession or known by it prior to "
+    "receipt from Cheil; (iii) was rightfully disclosed to him/her by a third party "
+    "without a breach of any confidentiality obligations; or (iv) was independently "
+    "developed by the Vendor without reference to any Confidential Information.",
+    "3. The Vendor agrees: (i) to hold the Confidential Information in confidence and "
+    "to take all reasonable precautions to protect such Confidential Information; "
+    "(ii) not to disclose any such Confidential Information or any information derived "
+    "therefrom to any third person; and (iii) not to make any use whatsoever at any "
+    "time of such Confidential Information except for the limited and sole internal "
+    "business purposes for which is has been disclosed by Cheil.  Any employee given "
+    "access to any such Confidential Information by the Vendor must have a legitimate "
+    "“need to know” such Confidential Information.  The Vendor is liable for all acts "
+    "and omissions of third parties to whom he/she discloses Confidential Information.  "
+    "Further, the Vendor may make disclosures required by valid order of any court or "
+    "other authorized governmental entity, provided the Vendor promptly notifies "
+    "Cheil, uses reasonable efforts to limit disclosure and assists Cheil, at Cheil's "
+    "expense, to obtain confidential treatment or a protective order for such "
+    "Confidential Information.  All Confidential Information is provided “AS IS” and "
+    "without any warranties, express, implied or otherwise, and no warranty is made "
+    "regarding its accuracy or completeness.  The Vendor shall not reverse engineer, "
+    "decompile, translate, adapt, or disassemble any software of the other party, or "
+    "attempt to make derivative works from such software.  No licenses or rights under "
+    "any patent, copyright, trademark or trade secret are granted, or are to be "
+    "implied, by this Agreement.  The Confidential Information shall remain the sole "
+    "property of Cheil and the Vendor shall not challenge or contest Cheil’s right to "
+    "own and use the Confidential Information or other intellectual property.",
+    "4. Immediately upon a request by Cheil at any time, the Vendor will turn over to "
+    "Cheil all Confidential Information and all documents or media containing any such "
+    "Confidential Information and any and all copies or extracts thereof.  The Vendor "
+    "understands that nothing herein: (i) requires the disclosure of any Confidential "
+    "Information by Cheil, which shall be disclosed, if at all, solely at the option "
+    "of Cheil; or (ii) requires Cheil to proceed with any proposed transaction or "
+    "other business relationship in connection with which Confidential Information "
+    "may be disclosed.",
+    "5. The Vendor acknowledges and agrees that due to the unique nature of the "
+    "Confidential Information, there can be no adequate remedy at law for any breach "
+    "of its obligations hereunder, that any such breach or any unauthorized use or "
+    "release of any Confidential Information will allow the Vendor or third parties "
+    "to unfairly compete with Cheil resulting in irreparable harm to Cheil and "
+    "therefore, that upon any such breach or any threat thereof, Cheil shall be "
+    "entitled to appropriate equitable relief in addition to whatever remedies it "
+    "might have at law and to be indemnified by the Vendor from any loss or harm, "
+    "including, without limitation, reasonable attorney’s fees and expenses, in "
+    "connection with any breach or enforcement of the Vendor’s obligations hereunder "
+    "or the unauthorized use or release of any such Confidential Information.  The "
+    "Vendor will notify Cheil in writing immediately upon becoming aware of the "
+    "occurrence of any such unauthorized release or other breach of confidentiality "
+    "obligations hereunder.",
+    "6. Neither party shall have the right to assign its rights or obligations under "
+    "this Agreement, whether expressly or by operation of law, without the prior "
+    "written consent of the other party.  This Agreement shall be binding on, and "
+    "inure to the benefit of, each party and their permitted successors and assigns.",
+    "7. This Agreement shall be governed by the laws of the State of New York, and "
+    "each party irrevocably submits to the exclusive jurisdiction of the courts "
+    "located in New York County, New York.  In the event that any of the provisions "
+    "of this Agreement shall be held by a court or other tribunal of competent "
+    "jurisdiction to be illegal, invalid or unenforceable, such provisions shall be "
+    "limited or eliminated to the minimum extent necessary so that this Agreement "
+    "shall otherwise remain in full force and effect.  This Agreement supersedes all "
+    "prior discussions and writings and constitutes the entire agreement between the "
+    "parties with respect to the limited subject matter set forth herein.  No waiver "
+    "or modification of this Agreement will be binding upon either party unless made "
+    "in writing and signed by a duly authorized representative of such party and no "
+    "failure or delay in enforcing any right will be deemed a waiver.",
+    "IN WITNESS WHEREOF, the parties have executed this Agreement as of the "
+    "Effective Date.",
+]
+
 # Fixed legal boilerplate lifted verbatim from executed SOW samples.
 PREAMBLE_SAMSUNG = (
     'This Statement of Work ("Statement of Work" or "SOW"), shall be construed and '
@@ -123,6 +253,16 @@ def _save(user, data):
         json.dump(data, fp, ensure_ascii=False, indent=2)
 
 
+def _sow_type(sow):
+    """Resolve a record's type key (legacy records infer from dir+mode)."""
+    t = sow.get("type")
+    if t in TYPES:
+        return t
+    d = "agy" if sow.get("direction") == "agency" else "sea"
+    m = "role" if sow.get("res_mode") == "hourly" else "team"
+    return f"{d}_{m}"
+
+
 # ── schedule math ────────────────────────────────────────────────────────────
 
 def _parse_date(s):
@@ -179,7 +319,10 @@ def _build_schedule(sow):
             "amount": amount,
             "invoice": inv.strftime("%-d-%b-%y"),
         })
-    return rows, round(sum(r["amount"] for r in rows), 2), round(sum(f for _, _, f in spans), 1)
+    # months comes back exact; round only for display so per-line Cost stays
+    # equal to the schedule total (a $-level mismatch reads as an error in a
+    # finance document).
+    return rows, round(sum(r["amount"] for r in rows), 2), sum(f for _, _, f in spans)
 
 
 def _money(x):
@@ -239,6 +382,14 @@ def _build_docx(sow, vendor):
                 cells[i].paragraphs[0].add_run(str(v)).bold = True
         return t
 
+    # SEA SOWs open with a cover (head) page: Cheil logo + title + meta block,
+    # then a page break into the legal preamble. Agency SOWs start directly.
+    if not is_agency:
+        logo = os.path.join(_ASSETS, "cheil_logo.png")
+        if os.path.exists(logo):
+            from docx.shared import Inches
+            doc.add_picture(logo, width=Inches(3.2))
+        p()
     p(sow.get("title") or sow.get("project_name") or "", bold=True, size=14)
     p("STATEMENT OF WORK", bold=True, size=13)
     p()
@@ -247,7 +398,10 @@ def _build_docx(sow, vendor):
     p(f"PROJECT NAME: {sow.get('project_name') or ''}")
     p(f"PREPARED BY: {sow.get('prepared_by') or ''}")
     p(f"PREPARED FOR: {sow.get('prepared_for') or ''}")
-    p()
+    if not is_agency:
+        doc.add_page_break()
+    else:
+        p()
 
     if is_agency:
         p(PREAMBLE_AGENCY_1.format(
@@ -290,7 +444,7 @@ def _build_docx(sow, vendor):
     p(f"End Date : {_fmt_long(sow.get('end'))}")
     p()
 
-    h("Resource Management")
+    h("Resource Management" if not is_agency else "Resource Planning")
     payer, payee = ("Cheil", "Contractor") if is_agency else ("Samsung", "Cheil")
     p(
         "In consideration for the provision of the Services and Deliverables under "
@@ -303,7 +457,7 @@ def _build_docx(sow, vendor):
             qty = float(r.get("qty") or 1)
             cost = float(r.get("hourly") or 0) * float(r.get("hrs") or 0) * qty * months_total
             rows.append([
-                r.get("profile") or "", r.get("location") or "", int(qty), months_total,
+                r.get("profile") or "", r.get("location") or "", int(qty), round(months_total, 1),
                 _money(r.get("hourly")), r.get("hrs") or "", _money(cost),
             ])
         table(
@@ -360,260 +514,623 @@ def _build_docx(sow, vendor):
     return buf.getvalue()
 
 
-# ── html ─────────────────────────────────────────────────────────────────────
+def _replace_in_par(par, old, new):
+    """Replace `old` with `new` across a paragraph's runs, splicing at run
+    boundaries so surrounding formatting survives (docx runs split words)."""
+    full = "".join(r.text for r in par.runs)
+    idx = full.find(old)
+    if idx < 0:
+        return False
+    end = idx + len(old)
+    pos = 0
+    for r in par.runs:
+        r_start, r_end = pos, pos + len(r.text)
+        if r_end <= idx or r_start >= end:
+            pos = r_end
+            continue
+        keep_head = r.text[: max(0, idx - r_start)]
+        keep_tail = r.text[max(0, min(len(r.text), end - r_start)):]
+        if r_start <= idx:
+            r.text = keep_head + new + keep_tail
+        else:
+            r.text = keep_tail
+        pos = r_end
+    return True
+
+
+def _build_msa_docx(sow, vendor):
+    """Fill the stored MSA template (executed-format docx) with the vendor
+    name and effective date; every other clause exports byte-identical."""
+    from docx import Document
+    doc = Document(os.path.join(_ASSETS, "msa_template.docx"))
+    reps = [
+        ("XXX XX, 2026", _fmt_long(sow.get("date")) or "____________"),
+        ("(Your Company Name)", (vendor or {}).get("name") or "____________________"),
+    ]
+    def walk(pars):
+        for par in pars:
+            for old, new in reps:
+                while _replace_in_par(par, old, new):
+                    pass
+    walk(doc.paragraphs)
+    for t in doc.tables:
+        for row in t.rows:
+            for c in row.cells:
+                walk(c.paragraphs)
+    buf = io.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
+
+
+def _build_nda_docx(sow, vendor):
+    from docx import Document
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.shared import Pt
+
+    doc = Document()
+    normal = doc.styles["Normal"]
+    normal.font.name = "Times New Roman"
+    normal.font.size = Pt(11)
+    title = doc.add_paragraph()
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    title.add_run(NDA_TITLE).bold = True
+    doc.add_paragraph()
+    doc.add_paragraph(NDA_INTRO.format(
+        date=_fmt_long(sow.get("date")) or "____________",
+        vendor=(vendor or {}).get("name") or "______________________",
+    ))
+    for par in NDA_BODY:
+        doc.add_paragraph()
+        doc.add_paragraph(par)
+    doc.add_paragraph()
+    sig = doc.add_table(rows=4, cols=2)
+    sig.rows[0].cells[0].paragraphs[0].add_run(CHEIL_ENTITY).bold = True
+    sig.rows[0].cells[1].paragraphs[0].add_run(
+        (vendor or {}).get("name") or "[_____________________]").bold = True
+    for i, lbl in enumerate(["By: _________________________", "Name:", "Title:"], 1):
+        for c in range(2):
+            sig.rows[i].cells[c].text = lbl
+    buf = io.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
+
+
+# ── html shells ──────────────────────────────────────────────────────────────
 
 def _esc(s):
     return (str(s or "").replace("&", "&amp;").replace("<", "&lt;")
             .replace(">", "&gt;").replace('"', "&quot;"))
 
 
+_CSS = """
+.sow-hero{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:20px 0 34px}
+.dir-card{display:flex;flex-direction:column;gap:10px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-xl);padding:30px 28px;text-decoration:none;color:var(--text);transition:.2s;position:relative;overflow:hidden}
+.dir-card::before{content:"";position:absolute;top:0;left:0;right:0;height:3px;background:var(--dir-color,var(--accent));opacity:.85}
+.dir-card:hover{border-color:var(--dir-color,var(--accent));transform:translateY(-3px);box-shadow:var(--shadow-lg)}
+.dir-icon{font-size:2.2rem}
+.dir-name{font-size:1.15rem;font-weight:800;letter-spacing:-.02em}
+.dir-desc{font-size:.82rem;color:var(--text-muted);line-height:1.5}
+.type-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:20px 0}
+.type-card{display:flex;gap:14px;align-items:flex-start;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:20px;text-decoration:none;color:var(--text);transition:.2s}
+.type-card:hover{border-color:var(--accent);transform:translateY(-2px);box-shadow:var(--shadow-md)}
+.type-icon{font-size:1.6rem}
+.type-name{font-weight:800;font-size:.95rem;margin-bottom:4px}
+.type-desc{font-size:.78rem;color:var(--text-muted);line-height:1.5}
+.sow-list{display:flex;flex-direction:column;gap:10px}
+.sow-row{display:flex;align-items:center;gap:14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px 18px;flex-wrap:wrap}
+.sow-row:hover{border-color:var(--accent)}
+.sow-title{font-weight:700;color:var(--text);font-size:.92rem}
+.sow-meta{font-size:.76rem;color:var(--text-muted)}
+.sow-fee{font-weight:700;color:var(--success);font-variant-numeric:tabular-nums;margin-left:auto}
+.dir-chip{font-size:.64rem;font-weight:700;padding:2px 8px;border-radius:10px;white-space:nowrap}
+.dir-samsung{color:#38bdf8;background:rgba(56,189,248,.12)}
+.dir-agency{color:#fb923c;background:rgba(251,146,60,.12)}
+/* ── document preview editor ── */
+.doc-bar{position:sticky;top:52px;z-index:60;display:flex;align-items:center;gap:10px;background:var(--surface-3);border:1px solid var(--border-bright);border-radius:var(--radius-md);padding:10px 14px;margin-bottom:18px;flex-wrap:wrap}
+.doc-bar .spacer{flex:1}
+.paper{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:46px 52px;max-width:860px;margin:0 auto 60px;line-height:1.55;font-size:.9rem;color:var(--text)}
+.paper h2{font-size:1.05rem;font-weight:800;margin:26px 0 8px}
+.paper .doc-title{font-size:1.25rem;font-weight:800}
+.paper .legal{color:var(--text-muted);font-size:.8rem;margin:10px 0}
+.paper table{width:100%;border-collapse:collapse;margin:10px 0;font-size:.84rem}
+.paper th{border:1px solid var(--border-bright);padding:7px 9px;font-size:.7rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);text-align:left;background:var(--surface-2)}
+.paper td{border:1px solid var(--border);padding:6px 9px}
+.paper .num{text-align:right;font-variant-numeric:tabular-nums}
+.slot{background:rgba(56,189,248,.07);border:none;border-bottom:1.5px dashed rgba(56,189,248,.55);border-radius:4px 4px 0 0;color:var(--text);font:inherit;padding:2px 6px;outline:none;min-width:60px}
+.slot:focus{background:rgba(56,189,248,.14);border-bottom-color:var(--accent)}
+textarea.slot{width:100%;border:1.5px dashed rgba(56,189,248,.45);border-radius:8px;padding:8px 10px;resize:vertical;line-height:1.5}
+select.slot{cursor:pointer}
+.paper td .slot{width:100%;min-width:0;padding:3px 5px}
+.meta-line{display:flex;gap:8px;align-items:baseline;margin:2px 0}
+.meta-line b{font-size:.8rem;letter-spacing:.03em;white-space:nowrap}
+.ro-note{font-size:.68rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-top:26px}
+.row-del{background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:.9rem;padding:4px 8px}
+.row-del:hover{color:var(--danger)}
+.add-row-btn{margin-top:6px}
+@media(max-width:768px){
+  .sow-hero,.type-grid{grid-template-columns:1fr}
+  .paper{padding:22px 16px}
+  .doc-bar{top:0;position:static}
+  .paper .table-wrap{overflow-x:auto}
+  .paper .table-wrap table{min-width:620px}
+  .sow-fee{margin-left:0;flex-basis:100%}
+}
+"""
+
+
 def _shell(user, title, body):
     return f"""<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>📝 {_esc(title)} · Wayfinder</title><link rel="stylesheet" href="/static/style.css">
-<style>
-.sow-card{{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px 20px;margin-bottom:14px}}
-.sow-list{{display:flex;flex-direction:column;gap:12px}}
-.sow-row{{display:flex;align-items:center;gap:14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px 18px;flex-wrap:wrap}}
-.sow-row:hover{{border-color:var(--accent)}}
-.sow-title{{font-weight:700;color:var(--text);font-size:.95rem}}
-.sow-meta{{font-size:.78rem;color:var(--text-muted)}}
-.sow-fee{{font-weight:700;color:var(--success);font-variant-numeric:tabular-nums;margin-left:auto}}
-.dir-chip{{font-size:.66rem;font-weight:700;padding:2px 8px;border-radius:10px;white-space:nowrap}}
-.dir-samsung{{color:#38bdf8;background:rgba(56,189,248,.12)}}
-.dir-agency{{color:#fb923c;background:rgba(251,146,60,.12)}}
-.f-grid{{display:grid;grid-template-columns:1fr 1fr;gap:12px}}
-.f-field{{display:flex;flex-direction:column;gap:4px}}
-.f-field>span{{font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted)}}
-.f-field input,.f-field select,.f-field textarea{{background:var(--surface-2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:.88rem;padding:9px 11px;outline:none;width:100%}}
-.f-field input:focus,.f-field select:focus,.f-field textarea:focus{{border-color:var(--accent)}}
-.f-wide{{grid-column:1/-1}}
-.sec-title{{font-size:.8rem;font-weight:800;color:var(--text);margin:0 0 12px;display:flex;align-items:center;gap:8px}}
-.sec-title::before{{content:"";width:4px;height:1em;border-radius:99px;background:var(--accent)}}
-.res-table{{width:100%;border-collapse:collapse;font-size:.84rem}}
-.res-table th{{font-size:.68rem;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)}}
-.res-table td{{padding:5px 4px}}
-.res-table input{{width:100%;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.84rem;padding:7px 9px;outline:none}}
-.res-table input:focus{{border-color:var(--accent)}}
-.sched-table{{width:100%;border-collapse:collapse;font-size:.84rem}}
-.sched-table th{{font-size:.68rem;text-transform:uppercase;color:var(--text-muted);text-align:left;padding:6px 10px;border-bottom:1px solid var(--border)}}
-.sched-table td{{padding:6px 10px;border-bottom:1px solid var(--border);font-variant-numeric:tabular-nums}}
-.sched-table tr:last-child td{{border-bottom:none;font-weight:700}}
-@media(max-width:768px){{
-  .f-grid{{grid-template-columns:1fr}}
-  .res-wrap{{overflow-x:auto}}
-  .res-table{{min-width:560px}}
-  .sow-fee{{margin-left:0;flex-basis:100%}}
-}}
-</style></head><body>
+<style>{_CSS}</style></head><body>
 <nav><span class="nav-brand">📝 SOW Assistant</span>
 <span class="nav-user">👤 {_esc(user)} &nbsp;·&nbsp; <a href="/logout">Logout</a></span></nav>
 <div class="container" style="max-width:1000px">{body}</div></body></html>"""
 
 
-def _render_list(user):
-    data = _load(user)
+def _sow_rows(user, data):
     rows = []
     for s in sorted(data["sows"], key=lambda x: x.get("updated", ""), reverse=True):
-        _, fee, _ = _build_schedule(s)
+        t = TYPES[_sow_type(s)]
+        if t["kind"] == "sow":
+            _, fee, _ = _build_schedule(s)
+            fee = _money(fee)
+        else:
+            fee = "—"
         d = s.get("direction", "samsung")
-        chip = f'<span class="dir-chip dir-{d}">{"with Samsung" if d == "samsung" else "with Agency"}</span>'
+        chip = f'<span class="dir-chip dir-{d}">{"SEA" if d == "samsung" else "Agency"} · {_esc(t["label"])}</span>'
         rows.append(
             f'<div class="sow-row">'
             f'<div><div class="sow-title">{_esc(s.get("title") or s.get("project_name") or "(untitled)")}</div>'
-            f'<div class="sow-meta">{chip} &nbsp;{_esc(s.get("start") or "")} ~ {_esc(s.get("end") or "")}</div></div>'
-            f'<span class="sow-fee">{_money(fee)}</span>'
+            f'<div class="sow-meta">{chip} &nbsp;{_esc(s.get("start") or s.get("date") or "")}{(" ~ " + _esc(s.get("end"))) if s.get("end") else ""}</div></div>'
+            f'<span class="sow-fee">{fee}</span>'
             f'<span style="display:flex;gap:8px">'
             f'<a class="btn btn-secondary btn-sm" href="/sow/edit?id={s["id"]}">✎ Edit</a>'
             f'<a class="btn btn-primary btn-sm" href="/sow/docx?id={s["id"]}">⬇ docx</a>'
             f'<button class="btn btn-danger btn-sm" onclick="delSow(\'{s["id"]}\')">🗑</button>'
             f'</span></div>'
         )
-    body = f"""
-<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin:8px 0 20px;flex-wrap:wrap">
-  <h1 style="margin:0">Statements of Work</h1>
-  <a class="btn btn-primary" href="/sow/new">+ New SOW</a>
-</div>
-<div class="sow-list">{''.join(rows) or '<div class="sow-meta" style="padding:40px;text-align:center">No SOWs yet — create the first one.</div>'}</div>
-<script>
-function delSow(id){{
+    return "".join(rows)
+
+
+_DEL_JS = """<script>
+function delSow(id){
   if(!confirm('Delete this SOW?')) return;
-  fetch('/sow/delete', {{method:'POST', headers:{{'Content-Type':'application/x-www-form-urlencoded'}}, body:'id='+encodeURIComponent(id)}})
-    .then(function(){{ location.reload(); }});
-}}
+  fetch('/sow/delete', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'id='+encodeURIComponent(id)})
+    .then(function(){ location.reload(); });
+}
 </script>"""
+
+
+def _render_landing(user):
+    data = _load(user)
+    rows = _sow_rows(user, data)
+    body = f"""
+<h1 style="margin:8px 0 4px">Statements of Work</h1>
+<p style="color:var(--text-muted);font-size:.86rem;margin-bottom:6px">Who is this SOW with?</p>
+<div class="sow-hero">
+  <a class="dir-card" href="/sow/types?dir=sea" style="--dir-color:#38bdf8">
+    <span class="dir-icon">🔵</span>
+    <span class="dir-name">with Samsung (SEA)</span>
+    <span class="dir-desc">Cheil as Agency — inbound SOW under the Advertising Services Agreement (Sep 16, 2022). Samsung pays Cheil.</span>
+  </a>
+  <a class="dir-card" href="/sow/types?dir=agy" style="--dir-color:#fb923c">
+    <span class="dir-icon">🟠</span>
+    <span class="dir-name">with Agency (Vendor)</span>
+    <span class="dir-desc">Cheil as Client — outbound SOW under each vendor's MSA. Cheil pays the contractor.</span>
+  </a>
+</div>
+<div style="display:flex;align-items:center;justify-content:space-between;margin:0 0 12px">
+  <h2 style="font-size:1rem;font-weight:800;margin:0">My SOWs</h2>
+</div>
+<div class="sow-list">{rows or '<div class="sow-meta" style="padding:36px;text-align:center">No SOWs yet — pick a counterpart above to start.</div>'}</div>
+{_DEL_JS}"""
     return _shell(user, "SOW Assistant", body)
 
 
-def _render_editor(user, sow=None, saved=False):
-    data = _load(user)
-    sow = sow or {}
-    is_agency = sow.get("direction") == "agency"
-    res_mode = sow.get("res_mode") or "monthly"
-    vendors = data["vendors"]
-    vend_opts = "".join(
-        f'<option value="{v["id"]}"{" selected" if v["id"] == sow.get("vendor_id") else ""}>{_esc(v["name"])}</option>'
-        for v in vendors
-    )
-    schedule, fee, months_total = _build_schedule(sow) if sow.get("start") else ([], 0, 0)
-    sched_html = ""
-    if schedule:
-        srows = "".join(
-            f'<tr><td>{r["label"]}</td><td>{_money(r["amount"])}</td><td>{r["invoice"]}</td></tr>'
-            for r in schedule
-        )
-        sched_html = f"""
-<div class="sow-card">
-  <div class="sec-title">Payment Schedule (auto · {months_total} months)</div>
-  <table class="sched-table">
-    <tr><th>Month</th><th>Amount</th><th>Invoice Date</th></tr>
-    {srows}
-    <tr><td>Total</td><td>{_money(fee)}</td><td></td></tr>
-  </table>
-</div>"""
-    # Raw JSON for the <script> block — HTML-escaping would corrupt it; only
-    # guard against a literal </script> terminator.
-    res_json = json.dumps(sow.get("resources", [])).replace("</", "<\\/")
-    saved_banner = (
-        '<div style="background:rgba(52,211,153,.12);border:1px solid rgba(52,211,153,.35);'
-        'color:var(--success);border-radius:10px;padding:10px 14px;margin-bottom:14px;font-size:.85rem">'
-        "✓ Saved — payment schedule recomputed below.</div>" if saved else ""
-    )
+def _render_types(user, dir_key):
+    is_agy = dir_key == "agy"
+    name = "with Agency (Vendor)" if is_agy else "with Samsung (SEA)"
+
+    def cards(kind):
+        out = []
+        for key, t in TYPES.items():
+            if key.startswith(dir_key) and t["kind"] == kind:
+                out.append(
+                    f'<a class="type-card" href="/sow/new?type={key}">'
+                    f'<span class="type-icon">{t["icon"]}</span>'
+                    f'<span><div class="type-name">{_esc(t["label"])}</div>'
+                    f'<div class="type-desc">{_esc(t["desc"])}</div></span></a>'
+                )
+        return "".join(out)
+
+    sections = f"""
+<h2 style="font-size:.92rem;font-weight:800;margin:22px 0 0">Statement of Work</h2>
+<div class="type-grid">{cards('sow')}</div>"""
+    if is_agy:
+        sections += f"""
+<h2 style="font-size:.92rem;font-weight:800;margin:10px 0 0">Agreements</h2>
+<div class="type-grid">{cards('msa')}{cards('nda')}</div>"""
+    else:
+        sections += ('<p style="color:var(--text-muted);font-size:.78rem">Master agreement with Samsung '
+                     '(Advertising Services Agreement, Sep 16 2022) already exists — SOWs reference it; '
+                     'MSA/NDA drafting lives under <a href="/sow/types?dir=agy" style="color:var(--accent)">with Agency</a>.</p>')
     body = f"""
-<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin:8px 0 20px;flex-wrap:wrap">
-  <h1 style="margin:0">{'Edit SOW' if sow.get('id') else 'New SOW'}</h1>
-  <span style="display:flex;gap:8px">
-    {f'<a class="btn btn-primary" href="/sow/docx?id={sow["id"]}">⬇ Download docx</a>' if sow.get('id') else ''}
-    <a class="btn btn-ghost" href="/sow">← All SOWs</a>
-  </span>
+<div style="display:flex;align-items:center;gap:12px;margin:8px 0 4px">
+  <a class="btn btn-ghost btn-sm" href="/sow">←</a>
+  <h1 style="margin:0">{name}</h1>
 </div>
-{saved_banner}
+<p style="color:var(--text-muted);font-size:.86rem">Pick the document type — the template opens as a live preview; fill in the highlighted fields.</p>
+{sections}"""
+    return _shell(user, "Document Type", body)
+
+
+# ── document editor ──────────────────────────────────────────────────────────
+
+_EDITOR_JS = """<script>
+var RES = __RES__;
+var CFG = __CFG__;
+function $id(x){ return document.getElementById(x); }
+function money(x){
+  if(isNaN(x)) return '$0';
+  var r = Math.round(x*100)/100;
+  return '$' + (Math.abs(r-Math.round(r))<0.005 ? Math.round(r).toLocaleString('en-US')
+              : r.toLocaleString('en-US', {minimumFractionDigits:2}));
+}
+function monthSpans(s, e){
+  if(!s || !e) return [];
+  var sd = new Date(s+'T00:00:00'), ed = new Date(e+'T00:00:00');
+  if(ed < sd) return [];
+  var out = [], y = sd.getFullYear(), m = sd.getMonth();
+  while(y < ed.getFullYear() || (y === ed.getFullYear() && m <= ed.getMonth())){
+    var last = new Date(y, m+1, 0).getDate();
+    var d1 = (y===sd.getFullYear() && m===sd.getMonth()) ? sd.getDate() : 1;
+    var d2 = (y===ed.getFullYear() && m===ed.getMonth()) ? ed.getDate() : last;
+    var frac = (d1===1 && d2===last) ? 1 : Math.min(1, Math.round((d2-d1+1)/30*100)/100);
+    out.push([y, m, frac]);
+    m++; if(m===12){ m=0; y++; }
+  }
+  return out;
+}
+var MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function monthlyAmt(){
+  var t = 0;
+  RES.forEach(function(r){
+    if(CFG.mode === 'hourly') t += (parseFloat(r.hourly)||0)*(parseFloat(r.hrs)||0)*(parseFloat(r.qty)||1);
+    else t += parseFloat(r.rate)||0;
+  });
+  return t;
+}
+function recompute(){
+  var spans = monthSpans($id('fStart').value, $id('fEnd').value);
+  var monthly = monthlyAmt();
+  var rule = $id('fRule').value;
+  var tb = $id('schedBody'); tb.innerHTML = '';
+  var fee = 0, months = 0;
+  spans.forEach(function(sp){
+    var y = sp[0], m = sp[1], frac = sp[2];
+    var amt = Math.round(monthly*frac*100)/100;
+    fee += amt; months += frac;
+    var inv;
+    if(rule === 'month_end') inv = new Date(y, m+1, 0);
+    else inv = (m===11) ? new Date(y+1, 0, 1) : new Date(y, m+1, 1);
+    var invS = inv.getDate() + '-' + MON[inv.getMonth()] + '-' + String(inv.getFullYear()).slice(2);
+    var tr = document.createElement('tr');
+    tr.innerHTML = '<td>' + MON[m] + '-' + String(y).slice(2) + '</td><td class="num">' + money(amt) + '</td><td>' + invS + '</td>';
+    tb.appendChild(tr);
+  });
+  var tr = document.createElement('tr');
+  tr.innerHTML = '<td><b>Total</b></td><td class="num"><b>' + money(fee) + '</b></td><td></td>';
+  tb.appendChild(tr);
+  document.querySelectorAll('.feeOut').forEach(function(el){ el.textContent = money(fee); });
+  $id('monthsOut') && ($id('monthsOut').textContent = Math.round(months*10)/10);
+  renderRes(months);  // exact months so line Cost === schedule total
+  var dEl = $id('preamDate');
+  if(dEl){
+    var dv = $id('fDate').value;
+    dEl.textContent = dv ? new Date(dv+'T00:00:00').toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'}) : '(date)';
+  }
+}
+function renderRes(months){
+  var tb = $id('resBody'); tb.innerHTML = '';
+  RES.forEach(function(r, i){
+    var tr = document.createElement('tr'), html = '';
+    if(CFG.mode === 'hourly'){
+      var cost = (parseFloat(r.hourly)||0)*(parseFloat(r.hrs)||0)*(parseFloat(r.qty)||1)*(months||0);
+      html = cell(r,'profile',i) + cell(r,'location',i) + cell(r,'qty',i) +
+             '<td class="num">' + (Math.round((months||0)*10)/10) + '</td>' + cell(r,'hourly',i) + cell(r,'hrs',i) +
+             '<td class="num">' + money(cost) + '</td>';
+    } else {
+      html = '<td class="num">' + (i+1) + '</td>' + cell(r,'name',i) + cell(r,'role',i) +
+             cell(r,'level',i) + cell(r,'region',i) + cell(r,'rate',i);
+    }
+    tr.innerHTML = html + '<td style="border:none"><button type="button" class="row-del" onclick="rmRow('+i+')">✕</button></td>';
+    tb.appendChild(tr);
+  });
+}
+function cell(r, k, i){
+  var v = r[k] != null ? String(r[k]).replace(/"/g,'&quot;') : '';
+  return '<td><input class="slot" data-k="'+k+'" data-i="'+i+'" value="'+v+'"></td>';
+}
+function addRow(){ RES.push({}); recompute(); }
+function rmRow(i){ RES.splice(i,1); recompute(); }
+document.addEventListener('input', function(e){
+  var k = e.target.dataset && e.target.dataset.k;
+  if(k){ RES[parseInt(e.target.dataset.i)][k] = e.target.value; }
+  recompute();
+});
+document.addEventListener('change', recompute);
+var vSel = $id('fVendor');
+function vendorSync(){
+  if(!vSel) return;
+  var v = CFG.vendors[vSel.value] || {};
+  var en = $id('preamVendor'), md = $id('preamMsa'), nm = document.querySelectorAll('.vendorName');
+  if(en) en.textContent = v.entity_line || v.name || '(vendor — register below)';
+  if(md) md.textContent = v.msa_date_long || '(MSA date)';
+  nm.forEach(function(el){ el.textContent = v.name || 'Contractor'; });
+}
+if(vSel) vSel.addEventListener('change', vendorSync);
+document.getElementById('sowForm').addEventListener('submit', function(){
+  $id('resJson').value = JSON.stringify(RES.filter(function(r){
+    return Object.keys(r).some(function(k){ return String(r[k]||'').trim(); });
+  }));
+});
+if(!RES.length) RES.push({});
+vendorSync(); recompute();
+</script>"""
+
+
+def _slot(name, value, ph="", extra="", tag="input"):
+    return (f'<input class="slot" name="{name}" value="{_esc(value)}" '
+            f'placeholder="{_esc(ph)}" {extra}>')
+
+
+def _render_doc_editor(user, sow, type_key, saved=False):
+    data = _load(user)
+    t = TYPES[type_key]
+    is_agency = t["dir"] == "agency"
+    mode = t["mode"]
+    vendors = {v["id"]: v for v in data["vendors"]}
+    for v in vendors.values():
+        v["msa_date_long"] = _fmt_long(v.get("msa_date"))
+    cur_vendor = vendors.get(sow.get("vendor_id")) or {}
+    vend_opts = "".join(
+        f'<option value="{vid}"{" selected" if vid == sow.get("vendor_id") else ""}>{_esc(v["name"])}</option>'
+        for vid, v in vendors.items()
+    )
+    dir_chip = ('<span class="dir-chip dir-agency">Agency</span>' if is_agency
+                else '<span class="dir-chip dir-samsung">SEA</span>')
+    saved_note = ('<span style="color:var(--success);font-size:.8rem;font-weight:700">✓ Saved</span>'
+                  if saved else "")
+    vendor_bar = ""
+    if is_agency:
+        vendor_bar = f"""
+  <span style="display:flex;align-items:center;gap:6px;font-size:.78rem;color:var(--text-muted)">Vendor
+    <select class="slot" name="vendor_id" id="fVendor" style="min-width:150px">
+      <option value="">— pick —</option>{vend_opts}
+    </select>
+  </span>
+  <details style="position:relative"><summary class="btn btn-ghost btn-sm" style="list-style:none">+ New vendor</summary>
+    <div style="position:absolute;top:calc(100% + 8px);left:0;z-index:80;background:var(--surface-3);border:1px solid var(--border-bright);border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:8px;min-width:300px;box-shadow:var(--shadow-lg)">
+      <input class="slot" name="v_name" placeholder="Vendor name — e.g. Invictus Data, Inc.">
+      <input class="slot" name="v_entity" placeholder="Entity line (name + address for preamble)">
+      <input class="slot" type="date" name="v_msa" title="MSA date">
+      <span style="font-size:.7rem;color:var(--text-muted)">Saved together on 💾 Save</span>
+    </div>
+  </details>"""
+
+    # ── document body ──
+    if is_agency:
+        preamble = f"""
+<p class="legal">This Statement of Work ("Statement of Work" or "SOW") is made effective as of <b id="preamDate">{_esc(_fmt_long(sow.get('date')) or '(date)')}</b> (the "Statement of Work Effective Date") by and between Cheil USA Inc., a Delaware corporation with its principal of business located at 837 Washington Street, 4th Floor, New York, NY 10014 on behalf of itself and its affiliates and subsidiaries ("Cheil") and <b id="preamVendor">{_esc(cur_vendor.get('entity_line') or cur_vendor.get('name') or '(vendor — register above)')}</b> ("Contractor").  Contractor and Cheil may each be referred to herein as a "Party", and, together as the "Parties".</p>
+<p class="legal">This SOW is governed by, incorporated into, and made part of, that certain Master Services Agreement (the "Agreement"), dated as of <b id="preamMsa">{_esc(cur_vendor.get('msa_date_long') or '(MSA date)')}</b>, by and between Cheil and Contractor. This SOW defines the Services that Contractor shall provide to Cheil in accordance with the terms of the Agreement and this SOW. […] To the extent there is a conflict between the terms of this SOW and the Agreement, the terms of the Agreement shall control, except for terms where the Agreement expressly permits the SOW to control in the event of conflict with the Agreement.</p>"""
+    else:
+        preamble = f'<p class="legal">{_esc(PREAMBLE_SAMSUNG)}</p>'
+
+    if mode == "hourly":
+        res_head = ("<tr><th>Profile</th><th>Location</th><th>Qty</th><th># Months</th>"
+                    "<th>Hourly Cost</th><th>Hrs/Month</th><th>Cost</th><th style='border:none'></th></tr>")
+    else:
+        res_head = ("<tr><th>No.</th><th>Name</th><th>Role</th><th>Level</th><th>Region</th>"
+                    "<th>Rate/Month (USD)</th><th style='border:none'></th></tr>")
+
+    stk_client_label = (f'<span class="vendorName">{_esc(cur_vendor.get("name") or "Contractor")}</span> POC'
+                        if is_agency else "Samsung Manager for this Role")
+    client_line = CHEIL_ENTITY if is_agency else SAMSUNG_ENTITY
+    oop_html = "".join(f'<p class="legal">{_esc(par)}</p>'
+                       for par in (OOP_AGENCY if is_agency else OOP_SAMSUNG).split("\n\n"))
+    sig_left = CHEIL_ENTITY if is_agency else SAMSUNG_ENTITY
+    sig_right = (f'<span class="vendorName">{_esc(cur_vendor.get("name") or "Contractor")}</span>'
+                 if is_agency else CHEIL_ENTITY)
+
+    cfg = {"mode": mode, "vendors": vendors}
+    body = f"""
 <form method="post" action="/sow/save" id="sowForm">
 <input type="hidden" name="id" value="{_esc(sow.get('id') or '')}">
+<input type="hidden" name="type" value="{type_key}">
 <input type="hidden" name="resources_json" id="resJson">
-
-<div class="sow-card">
-  <div class="sec-title">Basics</div>
-  <div class="f-grid">
-    <div class="f-field"><span>Direction</span>
-      <select name="direction" id="fDir" onchange="dirSync()">
-        <option value="samsung"{'' if is_agency else ' selected'}>with Samsung (Cheil = Agency)</option>
-        <option value="agency"{' selected' if is_agency else ''}>with Agency (Cheil = Client)</option>
-      </select></div>
-    <div class="f-field"><span>SOW Date</span><input type="date" name="date" value="{_esc(sow.get('date') or date.today().isoformat())}"></div>
-    <div class="f-field f-wide"><span>Title (document heading)</span><input name="title" value="{_esc(sow.get('title'))}" placeholder="e.g. Data Engineer # 1"></div>
-    <div class="f-field f-wide"><span>Project Name</span><input name="project_name" value="{_esc(sow.get('project_name'))}" placeholder="e.g. SEA eCom Data"></div>
-    <div class="f-field"><span>Prepared By</span><input name="prepared_by" value="{_esc(sow.get('prepared_by'))}"></div>
-    <div class="f-field"><span>Prepared For</span><input name="prepared_for" value="{_esc(sow.get('prepared_for'))}"></div>
-    <div class="f-field f-wide" id="vendorBlock" style="{'' if is_agency else 'display:none'}">
-      <span>Vendor (MSA registry)</span>
-      <select name="vendor_id">{vend_opts or '<option value="">— none registered —</option>'}</select>
-      <details style="margin-top:8px"><summary style="font-size:.78rem;color:var(--text-muted);cursor:pointer">+ Register new vendor</summary>
-        <div class="f-grid" style="margin-top:10px">
-          <div class="f-field"><span>Vendor name</span><input name="v_name" placeholder="e.g. Invictus Data, Inc."></div>
-          <div class="f-field"><span>MSA date</span><input type="date" name="v_msa"></div>
-          <div class="f-field f-wide"><span>Entity line (name + address, for preamble)</span><input name="v_entity" placeholder="Invictus Data Inc, with its principal place of business located at ..."></div>
-        </div>
-      </details>
-    </div>
-  </div>
+<div class="doc-bar">
+  <a class="btn btn-ghost btn-sm" href="/sow" title="All SOWs">←</a>
+  {dir_chip}<span style="font-size:.82rem;font-weight:700">{t['icon']} {_esc(t['label'])}</span>
+  {vendor_bar}
+  <span class="spacer"></span>
+  {saved_note}
+  {f'<a class="btn btn-secondary btn-sm" href="/sow/docx?id={sow["id"]}">⬇ docx</a>' if sow.get('id') else ''}
+  <button type="submit" class="btn btn-primary btn-sm">💾 Save</button>
 </div>
 
-<div class="sow-card">
-  <div class="sec-title">Summary & Scope</div>
-  <div class="f-grid">
-    <div class="f-field f-wide"><span>Executive Summary</span><textarea name="exec_summary" rows="3">{_esc(sow.get('exec_summary'))}</textarea></div>
-    <div class="f-field f-wide"><span>Deliverables / Service Description (one per line → bullets)</span><textarea name="deliverables" rows="6">{_esc(sow.get('deliverables'))}</textarea></div>
-  </div>
-</div>
+<div class="paper">
+  {'<img src="/sow/asset/logo" alt="Cheil × Samsung" style="max-width:300px;margin-bottom:22px;background:#fff;padding:10px 14px;border-radius:8px">' if not is_agency else ''}
+  <div class="doc-title">{_slot('title', sow.get('title'), 'SOW title — e.g. Data Engineer # 1', 'style="width:100%;font-weight:800;font-size:1.15rem"')}</div>
+  <div style="font-weight:800;margin:8px 0 18px">STATEMENT OF WORK</div>
 
-<div class="sow-card">
-  <div class="sec-title">Stakeholders</div>
-  <div class="f-grid">
-    <div class="f-field"><span id="cLabel">{'Vendor POC' if is_agency else 'Samsung Manager'} — Name</span><input name="stk_c_name" value="{_esc(sow.get('stk_c_name'))}"></div>
-    <div class="f-field"><span>Cheil Owner — Name</span><input name="stk_a_name" value="{_esc(sow.get('stk_a_name'))}"></div>
-    <div class="f-field"><span>Email</span><input name="stk_c_email" value="{_esc(sow.get('stk_c_email'))}"></div>
-    <div class="f-field"><span>Email</span><input name="stk_a_email" value="{_esc(sow.get('stk_a_email'))}"></div>
-    <div class="f-field"><span>Location</span><input name="stk_c_loc" value="{_esc(sow.get('stk_c_loc'))}"></div>
-    <div class="f-field"><span>Location</span><input name="stk_a_loc" value="{_esc(sow.get('stk_a_loc'))}"></div>
-  </div>
-</div>
+  <div class="meta-line"><b>DATE:</b> <input class="slot" type="date" name="date" id="fDate" value="{_esc(sow.get('date') or date.today().isoformat())}"></div>
+  <div class="meta-line"><b>CLIENT:</b> <span>{client_line}</span></div>
+  <div class="meta-line"><b>PROJECT NAME:</b> {_slot('project_name', sow.get('project_name'), 'e.g. SEA eCom Data', 'style="flex:1"')}</div>
+  <div class="meta-line"><b>PREPARED BY:</b> {_slot('prepared_by', sow.get('prepared_by'), 'name')}</div>
+  <div class="meta-line"><b>PREPARED FOR:</b> {_slot('prepared_for', sow.get('prepared_for'), 'name')}</div>
+  {'<div style="border-top:2px dashed var(--border-bright);margin:26px -52px;position:relative"><span style="position:absolute;top:-9px;left:50%;transform:translateX(-50%);background:var(--surface);padding:0 10px;font-size:.64rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em">Page 2</span></div>' if not is_agency else ''}
 
-<div class="sow-card">
-  <div class="sec-title">Service Period & Invoicing</div>
-  <div class="f-grid">
-    <div class="f-field"><span>Start Date</span><input type="date" name="start" value="{_esc(sow.get('start'))}" required></div>
-    <div class="f-field"><span>End Date</span><input type="date" name="end" value="{_esc(sow.get('end'))}" required></div>
-    <div class="f-field f-wide"><span>Invoice Date Rule</span>
-      <select name="invoice_rule">
-        <option value="next_first"{'' if sow.get('invoice_rule') == 'month_end' else ' selected'}>1st of following month</option>
-        <option value="month_end"{' selected' if sow.get('invoice_rule') == 'month_end' else ''}>Last day of service month</option>
-      </select></div>
-  </div>
-</div>
+  {preamble}
 
-<div class="sow-card">
-  <div class="sec-title">Resources</div>
-  <div class="f-grid" style="margin-bottom:12px">
-    <div class="f-field"><span>Rate Model</span>
-      <select name="res_mode" id="fMode" onchange="modeSync()">
-        <option value="monthly"{'' if res_mode == 'hourly' else ' selected'}>Monthly rate (Name/Role/Level/Region)</option>
-        <option value="hourly"{' selected' if res_mode == 'hourly' else ''}>Hourly (Profile/Qty/Hrs per month)</option>
-      </select></div>
-  </div>
-  <div class="res-wrap">
-  <table class="res-table" id="resTable"><thead></thead><tbody></tbody></table>
-  </div>
-  <button type="button" class="btn btn-ghost btn-sm" onclick="addRow()" style="margin-top:10px">+ Add resource</button>
-</div>
+  <h2>Executive Summary</h2>
+  <textarea class="slot" name="exec_summary" rows="3" placeholder="What service does this SOW provide?">{_esc(sow.get('exec_summary'))}</textarea>
 
-<div style="display:flex;gap:10px;margin:18px 0 40px">
-  <button type="submit" class="btn btn-primary btn-lg">💾 Save & Recompute</button>
+  <h2>{'Service Description' if is_agency else 'Deliverables'}</h2>
+  <textarea class="slot" name="deliverables" rows="7" placeholder="One item per line — rendered as bullets in the document">{_esc(sow.get('deliverables'))}</textarea>
+
+  <h2>Project Stakeholders</h2>
+  <div class="table-wrap"><table>
+    <tr><th></th><th>{stk_client_label}</th><th>Cheil Project Management &amp; SOW Owner</th></tr>
+    <tr><td><b>Name</b></td><td><input class="slot" name="stk_c_name" value="{_esc(sow.get('stk_c_name'))}"></td><td><input class="slot" name="stk_a_name" value="{_esc(sow.get('stk_a_name'))}"></td></tr>
+    <tr><td><b>Email</b></td><td><input class="slot" name="stk_c_email" value="{_esc(sow.get('stk_c_email'))}"></td><td><input class="slot" name="stk_a_email" value="{_esc(sow.get('stk_a_email'))}"></td></tr>
+    <tr><td><b>Location</b></td><td><input class="slot" name="stk_c_loc" value="{_esc(sow.get('stk_c_loc'))}"></td><td><input class="slot" name="stk_a_loc" value="{_esc(sow.get('stk_a_loc'))}"></td></tr>
+  </table></div>
+
+  <h2>Service Period</h2>
+  <div class="meta-line"><b>Start Date :</b> <input class="slot" type="date" name="start" id="fStart" value="{_esc(sow.get('start'))}" required></div>
+  <div class="meta-line"><b>End Date :</b> <input class="slot" type="date" name="end" id="fEnd" value="{_esc(sow.get('end'))}" required></div>
+
+  <h2>{'Resource Planning' if is_agency else 'Resource Management'}</h2>
+  <p class="legal">In consideration for the provision of the Services and Deliverables under this SOW, {'Cheil shall pay Contractor' if is_agency else 'Samsung shall pay Cheil'} in accordance with the following rates and fees, subject to the applicable terms and conditions of the Agreement:</p>
+  <div class="table-wrap"><table>
+    <thead>{res_head}</thead>
+    <tbody id="resBody"></tbody>
+  </table></div>
+  <button type="button" class="btn btn-ghost btn-sm add-row-btn" onclick="addRow()">+ Add resource</button>
+
+  <h2>Cost and Payment Schedule</h2>
+  <p><b>Fee : <span class="feeOut">$0</span></b> <span style="color:var(--text-muted);font-size:.78rem">(<span id="monthsOut">0</span> months, auto-computed)</span></p>
+  <p class="legal">{PAYMENT_INTRO_AGENCY if is_agency else PAYMENT_INTRO}
+    <br>Invoice dates: <select class="slot" name="invoice_rule" id="fRule">
+      <option value="next_first"{'' if sow.get('invoice_rule') == 'month_end' else ' selected'}>1st of following month</option>
+      <option value="month_end"{' selected' if sow.get('invoice_rule') == 'month_end' else ''}>last day of service month</option>
+    </select></p>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Month</th><th>Amount</th><th>Invoice Date</th></tr></thead>
+    <tbody id="schedBody"></tbody>
+  </table></div>
+  <p class="legal">{_esc(CHANGE_ORDER_NOTE)}</p>
+
+  <h2>Out-of-pocket Expense</h2>
+  {oop_html}
+
+  <h2>Signatures</h2>
+  <p class="legal">IN WITNESS WHEREOF, the parties have caused this Statement of Work to be duly executed by their authorized representatives as set forth below.</p>
+  <div class="table-wrap"><table>
+    <tr><th>{sig_left}</th><th>{sig_right}</th></tr>
+    <tr><td>Signature: ____________________</td><td>Signature: ____________________</td></tr>
+    <tr><td>Name: ____________________</td><td>Name: ____________________</td></tr>
+    <tr><td>Title: ____________________</td><td>Title: ____________________</td></tr>
+    <tr><td>Date: ____________________</td><td>Date: ____________________</td></tr>
+  </table></div>
+  <div class="ro-note">Highlighted fields are editable · everything else exports as-is to .docx</div>
 </div>
 </form>
-{sched_html}
-<script>
-var RES = {res_json};
-var COLS = {{
-  monthly: [['name','Name'],['role','Role'],['level','Level'],['region','Region'],['rate','Rate/Month USD']],
-  hourly:  [['profile','Profile'],['location','Location'],['qty','Qty'],['hourly','Hourly USD'],['hrs','Hrs/Month']]
-}};
-function mode(){{ return document.getElementById('fMode').value; }}
-function renderTable(){{
-  var cols = COLS[mode()];
-  var head = '<tr>' + cols.map(function(c){{ return '<th>'+c[1]+'</th>'; }}).join('') + '<th></th></tr>';
-  document.querySelector('#resTable thead').innerHTML = head;
-  var tb = document.querySelector('#resTable tbody');
-  tb.innerHTML = '';
-  RES.forEach(function(r, i){{
-    var tr = document.createElement('tr');
-    tr.innerHTML = cols.map(function(c){{
-      return '<td><input data-k="'+c[0]+'" data-i="'+i+'" value="'+(r[c[0]]!=null?String(r[c[0]]).replace(/"/g,'&quot;'):'')+'"></td>';
-    }}).join('') + '<td><button type="button" class="btn btn-danger btn-sm" onclick="rmRow('+i+')">✕</button></td>';
-    tb.appendChild(tr);
-  }});
-}}
-function addRow(){{ RES.push({{}}); renderTable(); }}
-function rmRow(i){{ RES.splice(i,1); renderTable(); }}
-function modeSync(){{ renderTable(); }}
-function dirSync(){{
-  var ag = document.getElementById('fDir').value === 'agency';
-  document.getElementById('vendorBlock').style.display = ag ? '' : 'none';
-  document.getElementById('cLabel').textContent = (ag ? 'Vendor POC' : 'Samsung Manager') + ' — Name';
-}}
-document.addEventListener('input', function(e){{
-  var k = e.target.dataset && e.target.dataset.k;
-  if(k) RES[parseInt(e.target.dataset.i)][k] = e.target.value;
-}});
-document.getElementById('sowForm').addEventListener('submit', function(){{
-  document.getElementById('resJson').value = JSON.stringify(RES.filter(function(r){{
-    return Object.keys(r).some(function(k){{ return String(r[k]||'').trim(); }});
-  }}));
-}});
-if(!RES.length) RES.push({{}});
-renderTable();
-</script>"""
+""" + _EDITOR_JS.replace("__RES__", json.dumps(sow.get("resources", [])).replace("</", "<\\/")) \
+                .replace("__CFG__", json.dumps(cfg).replace("</", "<\\/"))
     return _shell(user, "SOW Editor", body)
+
+
+_AGREEMENT_JS = """<script>
+var CFG = __CFG__;
+function $id(x){ return document.getElementById(x); }
+function vendorSync(){
+  var v = CFG.vendors[$id('fVendor').value] || {};
+  document.querySelectorAll('.vendorName').forEach(function(el){
+    el.textContent = v.name || '______________________';
+  });
+}
+function dateSync(){
+  var dv = $id('fDate').value, el = $id('agrDate');
+  if(el) el.textContent = dv ? new Date(dv+'T00:00:00').toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'}) : '____________';
+}
+document.addEventListener('change', function(){ vendorSync(); dateSync(); });
+vendorSync(); dateSync();
+</script>"""
+
+
+def _render_agreement_editor(user, sow, type_key, saved=False):
+    data = _load(user)
+    t = TYPES[type_key]
+    kind = t["kind"]
+    vendors = {v["id"]: v for v in data["vendors"]}
+    cur_vendor = vendors.get(sow.get("vendor_id")) or {}
+    vend_opts = "".join(
+        f'<option value="{vid}"{" selected" if vid == sow.get("vendor_id") else ""}>{_esc(v["name"])}</option>'
+        for vid, v in vendors.items()
+    )
+    saved_note = ('<span style="color:var(--success);font-size:.8rem;font-weight:700">✓ Saved</span>'
+                  if saved else "")
+    vname = f'<b class="vendorName">{_esc(cur_vendor.get("name") or "______________________")}</b>'
+    date_slot = f'<input class="slot" type="date" name="date" id="fDate" value="{_esc(sow.get("date") or date.today().isoformat())}">'
+
+    if kind == "msa":
+        doc_title = "MASTER SERVICES AGREEMENT"
+        body_doc = f"""
+  <p class="legal">This Master Services Agreement (this "Agreement"), dated as of <b id="agrDate">{_esc(_fmt_long(sow.get('date')) or '____________')}</b> (the "Effective Date"), is made by and between Cheil USA Inc., a Delaware corporation ("Cheil"), and {vname} ("Contractor"). Cheil and Contractor may each be referred to herein as a "Party", and together as the "Parties".</p>
+  <div style="background:var(--surface-2);border:1px dashed var(--border-bright);border-radius:10px;padding:16px 18px;margin:18px 0;font-size:.8rem;color:var(--text-muted);line-height:1.7">
+    §1 Services &amp; SOWs · §2 Fees &amp; Payment · §3 Independent Contractor · §4 Intellectual Property ·
+    §5 Confidentiality · §6 Representations &amp; Warranties · §7 Term &amp; Termination · §8 Indemnification ·
+    §9 Limitation of Liability · §10 Insurance (CGL / E&amp;O $5M) · Non-Solicit · General Provisions
+    <br><br>⚑ The full legal text (≈15 pages) exports <b>verbatim from the executed Cheil MSA template</b> —
+    only the two highlighted fields vary per vendor. Edit legal clauses in Word after export if Legal requires it.
+  </div>
+  <h2>Signatures</h2>
+  <div class="table-wrap"><table>
+    <tr><th>Cheil USA Inc.</th><th><span class="vendorName">{_esc(cur_vendor.get('name') or '(vendor)')}</span></th></tr>
+    <tr><td>By: ____________________</td><td>By: ____________________</td></tr>
+    <tr><td>Name / Title</td><td>Name / Title</td></tr>
+  </table></div>"""
+    else:
+        clauses = "".join(f'<p class="legal">{_esc(par)}</p>' for par in NDA_BODY)
+        body_doc = f"""
+  <p class="legal">This CONFIDENTIALITY AND NONDISCLOSURE AGREEMENT (the "Agreement"), is entered into as of <b id="agrDate">{_esc(_fmt_long(sow.get('date')) or '____________')}</b> (the "Effective Date"), by and between {vname} (the "Vendor"), and Cheil USA, Inc. (the "Cheil").</p>
+  {clauses}
+  <div class="table-wrap"><table>
+    <tr><th>Cheil USA, Inc.</th><th><span class="vendorName">{_esc(cur_vendor.get('name') or '[_____________________]')}</span></th></tr>
+    <tr><td>By: ____________________</td><td>By: ____________________</td></tr>
+    <tr><td>Name:</td><td>Name:</td></tr>
+    <tr><td>Title:</td><td>Title:</td></tr>
+  </table></div>"""
+        doc_title = NDA_TITLE
+
+    cfg = {"vendors": vendors}
+    body = f"""
+<form method="post" action="/sow/save" id="sowForm">
+<input type="hidden" name="id" value="{_esc(sow.get('id') or '')}">
+<input type="hidden" name="type" value="{type_key}">
+<div class="doc-bar">
+  <a class="btn btn-ghost btn-sm" href="/sow" title="All documents">←</a>
+  <span class="dir-chip dir-agency">Agency</span>
+  <span style="font-size:.82rem;font-weight:700">{t['icon']} {_esc(t['label'])}</span>
+  <span style="display:flex;align-items:center;gap:6px;font-size:.78rem;color:var(--text-muted)">Vendor
+    <select class="slot" name="vendor_id" id="fVendor" style="min-width:150px">
+      <option value="">— pick —</option>{vend_opts}
+    </select>
+  </span>
+  <details style="position:relative"><summary class="btn btn-ghost btn-sm" style="list-style:none">+ New vendor</summary>
+    <div style="position:absolute;top:calc(100% + 8px);left:0;z-index:80;background:var(--surface-3);border:1px solid var(--border-bright);border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:8px;min-width:300px;box-shadow:var(--shadow-lg)">
+      <input class="slot" name="v_name" placeholder="Vendor name — e.g. Invictus Data, Inc.">
+      <input class="slot" name="v_entity" placeholder="Entity line (name + address)">
+      <input class="slot" type="date" name="v_msa" title="MSA date">
+      <span style="font-size:.7rem;color:var(--text-muted)">Saved together on 💾 Save</span>
+    </div>
+  </details>
+  <span class="spacer"></span>
+  {saved_note}
+  {f'<a class="btn btn-secondary btn-sm" href="/sow/docx?id={sow["id"]}">⬇ docx</a>' if sow.get('id') else ''}
+  <button type="submit" class="btn btn-primary btn-sm">💾 Save</button>
+</div>
+<div class="paper">
+  <div style="text-align:center;font-weight:800;font-size:1.05rem;margin-bottom:20px">{doc_title}</div>
+  <div class="meta-line" style="margin-bottom:14px"><b>EFFECTIVE DATE:</b> {date_slot}</div>
+  {body_doc}
+  <div class="ro-note">Highlighted fields are editable · everything else exports as-is to .docx</div>
+</div>
+</form>
+""" + _AGREEMENT_JS.replace("__CFG__", json.dumps(cfg).replace("</", "<\\/"))
+    return _shell(user, t["label"], body)
 
 
 # ── routing ──────────────────────────────────────────────────────────────────
@@ -629,10 +1146,24 @@ def handle(method, path, body, ctx):
     user = ctx.get("user", "guest")
 
     if method == "GET" and path == "/sow":
-        return ("html", _render_list(user))
+        return ("html", _render_landing(user))
+
+    if method == "GET" and path.startswith("/sow/types"):
+        d = _f(body, "dir")
+        return ("html", _render_types(user, "agy" if d == "agy" else "sea"))
+
+    if method == "GET" and path == "/sow/asset/logo":
+        logo = os.path.join(_ASSETS, "cheil_logo.png")
+        if os.path.exists(logo):
+            return ("binary", open(logo, "rb").read(), "image/png")
+        return ("html", "", )
 
     if method == "GET" and path.startswith("/sow/new"):
-        return ("html", _render_editor(user))
+        tkey = _f(body, "type")
+        if tkey not in TYPES:
+            return ("redirect", "/sow")
+        render = _render_doc_editor if TYPES[tkey]["kind"] == "sow" else _render_agreement_editor
+        return ("html", render(user, {}, tkey))
 
     if method == "GET" and path.startswith("/sow/edit"):
         # GET dispatch strips the query string; params arrive as the body dict.
@@ -641,11 +1172,15 @@ def handle(method, path, body, ctx):
         sow = next((s for s in data["sows"] if s["id"] == sid), None)
         if not sow:
             return ("redirect", "/sow")
-        return ("html", _render_editor(user, sow, saved=_f(body, "saved") == "1"))
+        tkey = _sow_type(sow)
+        render = _render_doc_editor if TYPES[tkey]["kind"] == "sow" else _render_agreement_editor
+        return ("html", render(user, sow, tkey, saved=_f(body, "saved") == "1"))
 
     if method == "POST" and path == "/sow/save":
         data = _load(user)
         sid = _f(body, "id") or uuid.uuid4().hex[:10]
+        tkey = _f(body, "type")
+        t = TYPES.get(tkey) or TYPES["sea_role"]
         try:
             resources = json.loads(_f(body, "resources_json") or "[]")
             assert isinstance(resources, list)
@@ -662,9 +1197,27 @@ def handle(method, path, body, ctx):
                 "msa_date": _f(body, "v_msa"),
             })
         sow = next((s for s in data["sows"] if s["id"] == sid), None)
+        if t["kind"] != "sow":
+            vend = next((v for v in data["vendors"] if v["id"] == vendor_id), None)
+            label = "MSA" if t["kind"] == "msa" else "NDA"
+            rec = {
+                "id": sid, "type": tkey, "direction": t["dir"], "kind": t["kind"],
+                "date": _f(body, "date"), "vendor_id": vendor_id,
+                "title": f"{label} — {(vend or {}).get('name') or 'vendor TBD'}",
+                "created": (sow or {}).get("created") or datetime.now().isoformat(),
+                "updated": datetime.now().isoformat(),
+            }
+            if sow:
+                data["sows"][data["sows"].index(sow)] = rec
+            else:
+                data["sows"].append(rec)
+            _save(user, data)
+            return ("redirect", f"/sow/edit?id={sid}&saved=1")
         rec = {
             "id": sid,
-            "direction": _f(body, "direction") or "samsung",
+            "type": tkey if tkey in TYPES else "sea_role",
+            "direction": t["dir"],
+            "res_mode": t["mode"],
             "date": _f(body, "date"),
             "title": _f(body, "title"),
             "project_name": _f(body, "project_name"),
@@ -679,7 +1232,6 @@ def handle(method, path, body, ctx):
             "stk_a_loc": _f(body, "stk_a_loc"),
             "start": _f(body, "start"), "end": _f(body, "end"),
             "invoice_rule": _f(body, "invoice_rule") or "next_first",
-            "res_mode": _f(body, "res_mode") or "monthly",
             "resources": resources,
             "created": (sow or {}).get("created") or datetime.now().isoformat(),
             "updated": datetime.now().isoformat(),
@@ -705,9 +1257,12 @@ def handle(method, path, body, ctx):
         if not sow:
             return ("redirect", "/sow")
         vendor = next((v for v in data["vendors"] if v["id"] == sow.get("vendor_id")), None)
-        blob = _build_docx(sow, vendor)
+        kind = TYPES[_sow_type(sow)]["kind"]
+        builder = {"sow": _build_docx, "msa": _build_msa_docx, "nda": _build_nda_docx}[kind]
+        blob = builder(sow, vendor)
         safe = "".join(c if c.isalnum() or c in " ._-" else "_" for c in (sow.get("title") or "SOW"))[:60].strip()
-        fname = f"Cheil_SOW_{safe}_{sow.get('date') or date.today().isoformat()}.docx"
+        prefix = {"sow": "Cheil_SOW", "msa": "Cheil_MSA", "nda": "Cheil_NDA"}[kind]
+        fname = f"{prefix}_{safe}_{sow.get('date') or date.today().isoformat()}.docx"
         return ("file_inline", blob,
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document", fname)
 

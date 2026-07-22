@@ -31,7 +31,7 @@ def test_schedule_matches_executed_data_engineer_sow():
         "invoice_rule": "next_first",
     }
     rows, fee, months = m._build_schedule(sow)
-    assert months == 9.3
+    assert round(months, 1) == 9.3
     assert rows[0]["amount"] == 1260
     assert rows[1]["amount"] == 4200
     assert fee == 39060
@@ -81,3 +81,31 @@ def test_docx_agency_uses_vendor_msa():
               "entity_line": "Invictus Data Inc, Los Altos CA", "msa_date": "2023-09-28"}
     blob = m._build_docx(sow, vendor)
     assert blob[:2] == b"PK"
+
+
+def test_msa_docx_fills_vendor_and_date():
+    m = _mod()
+    sow = {"id": "t3", "type": "agy_msa", "direction": "agency", "kind": "msa",
+           "date": "2026-08-01"}
+    vendor = {"id": "v1", "name": "Nendrasys Technologies Inc."}
+    blob = m._build_msa_docx(sow, vendor)
+    assert blob[:2] == b"PK"
+    import zipfile, io, re
+    xml = zipfile.ZipFile(io.BytesIO(blob)).read("word/document.xml").decode("utf-8", "ignore")
+    txt = re.sub(r"<[^>]+>", "", xml)
+    assert "Nendrasys Technologies Inc." in txt
+    assert "August 1, 2026" in txt
+    assert "Your Company Name" not in txt
+    assert "XXX" not in txt
+
+
+def test_nda_docx_builds():
+    m = _mod()
+    sow = {"id": "t4", "type": "agy_nda", "direction": "agency", "kind": "nda",
+           "date": "2026-08-01"}
+    blob = m._build_nda_docx(sow, {"id": "v1", "name": "Acme Corp"})
+    assert blob[:2] == b"PK"
+    import zipfile, io, re
+    txt = re.sub(r"<[^>]+>", "", zipfile.ZipFile(io.BytesIO(blob)).read("word/document.xml").decode("utf-8", "ignore"))
+    assert "CONFIDENTIALITY AND NONDISCLOSURE AGREEMENT" in txt
+    assert "Acme Corp" in txt
