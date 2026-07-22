@@ -87,11 +87,11 @@ input, textarea, select, button { font-family: inherit; font-size: inherit; }
 body { font-family: 'Pretendard Variable', Pretendard, -apple-system, system-ui, sans-serif; background: var(--bg-deep); color: var(--text); line-height: 1.5; -webkit-font-smoothing: antialiased; min-height: 100vh; }
 
 /* Nav */
-nav { background: rgba(15,23,42,0.92); backdrop-filter: blur(12px); padding: 13px 32px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; border-bottom: 1px solid rgba(255,255,255,0.07); }
+nav { background: rgba(15,23,42,0.92); backdrop-filter: blur(12px); padding: 13px 32px; display: flex; align-items: center; justify-content: space-between; gap: 12px; position: sticky; top: 0; z-index: 100; border-bottom: 1px solid rgba(255,255,255,0.07); }
 nav a { color: var(--slate-400); text-decoration: none; font-size: 0.875rem; transition: color 0.15s; }
 nav a:hover { color: white; }
-.nav-brand { color: white; font-weight: 800; font-size: 1.05rem; letter-spacing: -0.02em; }
-.nav-user { color: var(--slate-500); font-size: 0.82rem; display: flex; align-items: center; gap: 10px; }
+.nav-brand { color: white; font-weight: 800; font-size: 1.05rem; letter-spacing: -0.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.nav-user { color: var(--slate-500); font-size: 0.82rem; display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .nav-user a { color: var(--slate-400); padding: 5px 11px; border-radius: 8px; background: rgba(255,255,255,0.05); transition: 0.2s; }
 .nav-user a:hover { color: white; background: rgba(255,255,255,0.1); }
 .nav-back { color: var(--slate-400); font-size: 0.82rem; text-decoration: none; display: flex; align-items: center; gap: 4px; }
@@ -194,6 +194,20 @@ details.bucket-section[open] .service-grid { margin-top:14px; }
   .btn-lg { height:48px; }
 }
 .empty { text-align: center; color: #94a3b8; padding: 48px 0; }
+
+/* Tap ergonomics (all viewports — harmless on desktop) */
+a, button, select, label, input[type=checkbox], input[type=radio] { touch-action: manipulation; }
+.btn:active { transform: scale(0.97); }
+
+/* Mobile guardrails — docs/mobile_ux_guideline.md. 768px = standard mobile breakpoint.
+   16px input floor kills iOS focus auto-zoom; min-width beats any width:Npx on
+   undersized checkboxes without touching per-component CSS. */
+@media (max-width: 768px) {
+  input:not([type=checkbox]):not([type=radio]):not([type=file]):not([type=range]),
+  select, textarea { font-size: 16px !important; min-height: 42px; }
+  input[type=checkbox], input[type=radio] { min-width: 20px; min-height: 20px; }
+  .nav-brand { font-size: 0.95rem; }
+}
 
 /* Mobile responsive */
 @media (max-width: 600px) {
@@ -385,7 +399,7 @@ PWA_INJECT = (
 # Small floating "back to home" link injected into every app page (not the home/login,
 # which carry the <!--wf-root--> sentinel).
 WAYFINDER_BACK = (
-    '<a href="/" title="Back to Wayfinder" '
+    '<a href="/" class="wf-back" title="Back to Wayfinder" '
     'style="position:fixed;left:16px;bottom:16px;z-index:9999;display:inline-flex;'
     'align-items:center;gap:6px;padding:8px 14px;background:rgba(17,24,39,.92);'
     'color:#cbd5e1;border:1px solid #334155;border-radius:99px;font-size:.78rem;'

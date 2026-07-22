@@ -162,6 +162,16 @@ _CC_TAB_CSS = (
     "box-shadow:0 4px 16px rgba(0,0,0,.18);line-height:1.5;"
     "white-space:normal;text-align:left;top:calc(100% + 6px);left:0}"
     ".cc-tip.tip-right{left:auto;right:0}"
+    # Mobile (≤768 = standard breakpoint, docs/mobile_ux_guideline.md): tabs never
+    # wrap — one scrollable pill row, last pill peeking at the edge as the cue.
+    "@media(max-width:768px){"
+    ".cc-tabbar{padding:8px 0}"
+    ".cc-tabs{display:flex;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}"
+    ".cc-tabs::-webkit-scrollbar{display:none}"
+    ".cc-tab{flex:0 0 auto;padding:10px 16px}"
+    ".cc-info{width:20px;height:20px;font-size:.68rem}"
+    ".cc-wf-close{padding:8px 12px}"
+    "}"
 )
 
 
@@ -189,7 +199,10 @@ def _tab_bar(active: str, user: str) -> str:
         't=document.querySelector(".cc-tabbar");if(!n||!t)return;'
         'var f=function(){t.style.top=n.offsetHeight+"px";'
         'document.documentElement.style.setProperty("--cc-sticky-top",(n.offsetHeight+t.offsetHeight-10)+"px")};'
-        'f();window.addEventListener("resize",f);})();</script>'
+        'f();window.addEventListener("resize",f);'
+        'var a=t.querySelector(".cc-tab.active"),r=a&&a.parentElement;'
+        'if(r&&r.scrollWidth>r.clientWidth)r.scrollLeft=a.offsetLeft-(r.clientWidth-a.offsetWidth)/2;'
+        '})();</script>'
     )
     return '<div class="cc-tabbar">' + "".join(out) + '</div>' + sync_js + _workflow_bar(active, user)
 
@@ -1207,7 +1220,7 @@ def _render_review(user: str) -> str:
 .rv-receipt.matched{{display:flex;gap:14px;align-items:center}}
 .rv-thumb{{width:200px;height:170px;flex:none;border-radius:8px;object-fit:cover;border:1px solid var(--border);background:var(--surface-3);cursor:zoom-in;transition:border-color .12s}}
 @media(max-width:900px){{.rv-txn{{flex-basis:220px}}.rv-h-txn{{flex-basis:220px}}.rv-thumb{{width:150px;height:140px}}}}
-@media(max-width:600px){{.rv-head{{display:none}}}}
+@media(max-width:768px){{.rv-head{{display:none}}}}
 .rv-thumb:hover{{border-color:var(--accent)}}
 .rv-lb{{position:fixed;inset:0;background:rgba(2,6,23,.82);display:none;align-items:center;justify-content:center;z-index:1000;padding:24px}}
 .rv-lb.open{{display:flex}}
@@ -1236,9 +1249,29 @@ def _render_review(user: str) -> str:
 .rv-nomatch{{color:var(--danger);font-size:.84rem;font-weight:700;margin-bottom:6px}}
 .rv-nomatch.nr{{color:var(--text-muted)}}
 
-@media(max-width:600px){{.rv-item{{flex-direction:column;gap:10px}}.rv-txn{{flex:none}}.rv-receipt{{flex:none;border-left:none;border-top:1px solid var(--border);padding-left:0;padding-top:10px}}}}
+/* Mobile card anatomy (docs/mobile_ux_guideline.md §5): checkbox docks top-right
+   with a padded 44px hit zone, thumb shrinks to a chip-size preview, txn block
+   (merchant + amount) leads. Bulk bar rides fixed at the bottom thumb zone and
+   only surfaces while a selection exists (§6). */
+@media(max-width:768px){{
+.rv-item{{flex-direction:column;gap:10px;position:relative}}
+.rv-txn{{flex:none}}
+.rv-receipt{{flex:none;border-left:none;border-top:1px solid var(--border);padding-left:0;padding-top:10px}}
+.rv-receipt.matched{{gap:10px;align-items:flex-start}}
+.rv-thumb{{width:84px;height:84px}}
+.rv-cb-wrap{{position:absolute;top:0;right:0;padding:12px}}
+.rv-merchant{{padding-right:40px}}
+.rv-usage-sel{{max-width:none}}
+.stat-grid{{grid-template-columns:1fr 1fr 1fr;gap:8px}}
+.stat-card{{padding:10px 8px}}
+.stat-value{{font-size:1.25rem}}
+.rv-hint{{display:none}}
+.rv-bulkbar{{position:fixed;left:0;right:0;bottom:0;z-index:130;margin:0;border-radius:14px 14px 0 0;border-bottom:none;background:var(--surface-3);box-shadow:0 -8px 24px rgba(0,0,0,.45);transform:translateY(115%);transition:transform .2s;padding-bottom:calc(10px + env(safe-area-inset-bottom))}}
+.rv-bulkbar.has-sel{{transform:none}}
+body:has(.rv-bulkbar.has-sel) .container{{padding-bottom:170px}}
+body:has(.rv-bulkbar.has-sel) .wf-back,body:has(.rv-bulkbar.has-sel) #wfThemeBtn{{display:none}}
+}}
 .rv-foot{{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 4px;flex-wrap:wrap}}
-@media(max-width:600px){{.stat-grid{{grid-template-columns:1fr 1fr 1fr}}}}
 </style>
 </head><body>
 <nav>
@@ -1299,16 +1332,17 @@ def _render_review(user: str) -> str:
     {download_btn}
   </div>
 
-  <div class="filter-bar" style="gap:10px">
+  <div class="filter-bar rv-bulkbar" id="rvBulkBar" style="gap:10px">
     <label style="display:flex;align-items:center;gap:6px;font-size:.8rem;color:var(--text-muted);cursor:pointer">
       <input type="checkbox" id="rvSelAll" style="width:15px;height:15px;accent-color:var(--accent);cursor:pointer"> Select all
     </label>
+    <span class="fb-selcount" id="rvSelCount" hidden>0 selected</span>
     <button class="btn btn-secondary btn-sm" id="rvMarkProg" title="Submitted to SAP, awaiting approval">⏳ Mark in progress</button>
     <button class="btn btn-primary btn-sm" id="rvMarkDone">✔ Mark completed</button>
     <button class="btn btn-ghost btn-sm" id="rvMarkOpen">↩ Reopen</button>
     <button class="btn btn-ghost btn-sm" id="rvRematch" title="Match open transactions against the receipt ledger">↻ Re-match receipts</button>
     <span style="flex:1"></span>
-    <span style="font-size:.76rem;color:var(--text-muted)">Click a card above to switch views</span>
+    <span class="rv-hint" style="font-size:.76rem;color:var(--text-muted)">Click a card above to switch views</span>
   </div>
 
   <div class="notepad-card">
@@ -1381,6 +1415,10 @@ function applyFilter(){{
     if(!show) it.querySelector('.rv-cb').checked = false;
   }});
   $('rvSelAll').checked = false;
+  // Programmatic unchecks fire no change event — resync the count/bar listener
+  // via a row checkbox (rvSelAll has its own select-all side effect).
+  const rcb = document.querySelector('.rv-cb');
+  if(rcb) rcb.dispatchEvent(new Event('change', {{bubbles: true}}));
   rvSaveState();
 }}
 
@@ -1670,13 +1708,17 @@ if(rvDl){{
     }});
     rvOfferInProgress();
   }});
-  // Reflect the selection count on the download buttons.
+  // Reflect the selection count on the download buttons and the bulk bar
+  // (on mobile the bar stays off-canvas until a selection exists).
   document.addEventListener('change', e => {{
     if(!e.target.classList || (!e.target.classList.contains('rv-cb') && e.target.id !== 'rvSelAll')) return;
     const n = document.querySelectorAll('.rv-cb:checked').length;
     rvDl.textContent = n ? ('⬇ xlsx (SAP · ' + n + ' selected)') : '⬇ xlsx (SAP)';
     $('rvDownloadReport').textContent = n ? ('⬇ xlsx (Receipt · ' + n + ' selected)') : '⬇ xlsx (Receipt)';
     $('rvDownloadBoth').innerHTML = '⬇ Both' + (n ? (' (' + n + ' selected)') : '') + ' <small>SAP + Receipt</small>';
+    $('rvBulkBar').classList.toggle('has-sel', n > 0);
+    $('rvSelCount').hidden = !n;
+    $('rvSelCount').textContent = n + ' selected';
   }});
 }}
 
@@ -2199,7 +2241,7 @@ __TABCSS__
 .th-sort{cursor:pointer;user-select:none}
 .th-sort:hover{color:var(--text)}
 .th-sort.on{color:var(--accent)}
-@media(max-width:640px){.fb-row2{gap:8px}.fb-row2 .fb-field{flex:1 1 45%;justify-content:space-between}}
+@media(max-width:768px){.fb-row2{gap:8px}.fb-row2 .fb-field{flex:1 1 45%;justify-content:space-between}}
 .fb-more-btn{background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:.78rem;font-weight:600;padding:5px 11px;cursor:pointer;display:inline-flex;align-items:center;gap:5px}
 .fb-more-btn:hover{border-color:var(--accent);color:var(--text)}
 .fb-more-btn .chev{transition:transform .18s}
@@ -2213,7 +2255,16 @@ __TABCSS__
 select.sb-act{padding:5px 8px}
 .fb-selbar.show{display:flex}
 .fb-selcount{font-size:.8rem;font-weight:700;color:var(--text)}
-@media(max-width:640px){.detail-panel{width:100vw}.stat-grid{grid-template-columns:1fr 1fr}.filter-bar{gap:8px;padding:9px 12px}.filter-bar .fb-field{flex-wrap:wrap}.preset-btn{padding:7px 12px}.row-check,.del-check input{width:20px;height:20px}.usage-sel,.card-sel{padding:6px 8px;max-width:none}.ledger-table,.ledger-table tbody,.ledger-table tr,.ledger-table td{display:block;width:100%}.ledger-table thead{display:none}.ledger-table tr{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md);margin-bottom:10px;padding:10px 12px;position:relative}.ledger-table tr:hover td{background:transparent}.ledger-table td{border-bottom:none!important;padding:5px 0;display:flex;justify-content:space-between;align-items:center;gap:10px;text-align:right}.ledger-table td::before{content:attr(data-label);font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);text-align:left}.ledger-table td[data-label=Select]{position:absolute;top:8px;right:10px;padding:0}.ledger-table td[data-label=Select]::before{display:none}.ledger-table td[data-label=Date]{font-weight:700;font-size:.95rem;padding-right:34px}}
+/* Mobile card transform (docs/mobile_ux_guideline.md §5): a row card keeps only
+   date / merchant / final amount / receipt / status / action — the OCR amounts
+   and Card/Usage editors stay reachable in the detail panel, which owns deep
+   edits on mobile. Bulk selbar docks to the bottom thumb zone while active. */
+@media(max-width:768px){.detail-panel{width:100vw}.stat-grid{grid-template-columns:1fr 1fr}.filter-bar{gap:8px;padding:9px 12px}.filter-bar .fb-field{flex-wrap:wrap}.preset-btn{padding:7px 12px}.row-check,.del-check input{width:20px;height:20px}.usage-sel,.card-sel{padding:6px 8px;max-width:none}.ledger-table,.ledger-table tbody,.ledger-table tr,.ledger-table td{display:block;width:100%}.ledger-table thead{display:none}.ledger-table tr{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md);margin-bottom:10px;padding:10px 12px;position:relative}.ledger-table tr:hover td{background:transparent}.ledger-table td{border-bottom:none!important;padding:5px 0;display:flex;justify-content:space-between;align-items:center;gap:10px;text-align:right}.ledger-table td::before{content:attr(data-label);font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);text-align:left}.ledger-table td[data-label=Select]{position:absolute;top:8px;right:10px;left:auto;width:auto;padding:6px}.ledger-table td[data-label=Select]::before{display:none}.ledger-table td[data-label=Date]{font-weight:700;font-size:.95rem;padding-right:34px}
+.ledger-table td[data-label=Printed],.ledger-table td[data-label=Handwritten],.ledger-table td[data-label=Card],.ledger-table td[data-label=Usage]{display:none}
+.fb-selbar.show{position:fixed;left:0;right:0;bottom:0;z-index:130;margin:0;border-radius:14px 14px 0 0;background:var(--surface-3);border-color:var(--border-bright);box-shadow:0 -8px 24px rgba(0,0,0,.45);padding-bottom:calc(10px + env(safe-area-inset-bottom))}
+.fb-selbar .sb-edit-group{flex-wrap:wrap;border-left:none;padding-left:0}
+body:has(.fb-selbar.show) .container{padding-bottom:200px}
+body:has(.fb-selbar.show) .wf-back,body:has(.fb-selbar.show) #wfThemeBtn{display:none}}
 </style>
 </head><body>
 <nav>
