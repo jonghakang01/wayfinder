@@ -2336,83 +2336,15 @@ def purge_user_data(username: str) -> None:
     shutil.rmtree(_uploads_dir(username), ignore_errors=True)
 
 
-def _get_completed_folder_id(service, username: str) -> str:
-    """Drive folder ID for Wayfinder/Receipts/Completed/, created on demand."""
-    receipts_id = _get_receipts_folder_id(service, username)
-    return _get_or_create_folder(service, 'Completed', receipts_id)
-
-
-def _archive_to_completed(username: str, file_ids: set) -> int:
-    """Best-effort move of Drive originals into the Completed folder.
-
-    Returns the set of file_ids actually moved — drive.file scope gets a 403
-    on files the user dropped into the folder directly, and only genuinely
-    moved files may have their archived_drive flag set (2026-07-22: the flag
-    was set for all attempts, so 8/9 'archived' files were still in Receipts).
-    """
-    if not file_ids:
-        return set()
-    service = _get_drive_service(username)
-    if not service:
-        return set()
-    try:
-        completed_id = _get_completed_folder_id(service, username)
-        receipts_id = _get_receipts_folder_id(service, username)
-    except Exception:
-        return set()
-    moved = set()
-    for fid in file_ids:
-        if not fid:
-            continue
-        try:
-            # Drop the source parent; addParents is idempotent.
-            cur = service.files().get(fileId=fid, fields='parents').execute()
-            parents = set(cur.get('parents', []))
-            remove = ",".join(parents & {receipts_id}) or None
-            service.files().update(
-                fileId=fid, addParents=completed_id,
-                removeParents=remove, fields='id,parents'
-            ).execute()
-            moved.add(fid)
-        except Exception:
-            pass  # best-effort; ledger flag already reflects completion
-    return moved
-
-
-def _restore_from_completed(username: str, file_ids: set) -> int:
-    """Best-effort move back from Completed to Receipts; returns moved fids."""
-    if not file_ids:
-        return set()
-    service = _get_drive_service(username)
-    if not service:
-        return set()
-    try:
-        completed_id = _get_completed_folder_id(service, username)
-        receipts_id = _get_receipts_folder_id(service, username)
-    except Exception:
-        return set()
-    moved = set()
-    for fid in file_ids:
-        if not fid:
-            continue
-        try:
-            service.files().update(
-                fileId=fid, addParents=receipts_id,
-                removeParents=completed_id, fields='id,parents'
-            ).execute()
-            moved.add(fid)
-        except Exception:
-            pass
-    return moved
-
-
 def _apply_receipt_completion(username: str, ids: set, completed: bool) -> dict:
-    """Set the receipt-level completed flag on `ids` (+ best-effort Drive moves).
+    """Set the receipt-level completed flag on `ids`.
 
     Shared by every path that changes settlement state (Complete button, Ledger
-    status action, Review mirror) so the flag and the Drive folder location can
-    never drift apart. Multiple ledger entries can share one Drive file
-    (multi-receipt page) — that file is only moved when ALL its entries agree.
+    status action, Review mirror). Settlement state lives entirely in app data —
+    the app never creates folders or moves files on Drive (policy 2026-07-22;
+    the old Completed-folder archiving only ever worked for app-uploaded files
+    anyway). `moved`/`attempted` stay in the response for the UI contract but
+    are always zero now.
     """
     ledger = _load_ledger(username)
     now = datetime.now().isoformat()
@@ -2422,47 +2354,8 @@ def _apply_receipt_completion(username: str, ids: set, completed: bool) -> dict:
             e["completed"] = completed
             e["completed_at"] = now if completed else None
             touched.append(e)
-
-    # A Drive file's correct location is derived purely from its siblings: it
-    # belongs in Completed iff EVERY entry sharing that file is completed,
-    # otherwise in Receipts. Computing this per affected file (rather than per
-    # touched entry) keeps a multi-receipt page consistent — partially-completed
-    # pages stay in Receipts, and the archived_drive flag is synced across all
-    # siblings so it never goes stale on an un-touched sibling.
-    by_file = {}
-    for e in ledger["entries"]:
-        fid = e.get("file_id")
-        if fid:
-            by_file.setdefault(fid, []).append(e)
-    affected = {e.get("file_id") for e in touched if e.get("file_id")}
-    to_archive, to_restore = set(), set()
-    for fid in affected:
-        sibs = by_file.get(fid, [])
-        want_archived = bool(sibs) and all(s.get("completed") for s in sibs)
-        # Skip files already in the right place (all sibling flags agree) —
-        # status changes that don't cross the completed boundary shouldn't
-        # trigger Drive calls or "move failed" warnings.
-        if all(bool(s.get("archived_drive")) == want_archived for s in sibs):
-            continue
-        (to_archive if want_archived else to_restore).add(fid)
-
-    ok_archive = _archive_to_completed(username, to_archive) if to_archive else set()
-    ok_restore = _restore_from_completed(username, to_restore) if to_restore else set()
-    # Sync archived_drive only for files whose Drive move actually succeeded —
-    # a 403 (user-dropped file, no write access) must not fake an archive.
-    for e in ledger["entries"]:
-        fid = e.get("file_id")
-        if fid in ok_archive:
-            e["archived_drive"] = True
-        elif fid in ok_restore:
-            e["archived_drive"] = False
     _save_ledger(username, ledger)
-    # `attempted` = Drive moves we tried; the UI warns when moved < attempted
-    # (Drive offline, or files the app has no write access to) while the ledger
-    # flag — the source of truth — is still set.
-    return {"count": len(touched),
-            "moved": len(ok_archive) + len(ok_restore),
-            "attempted": len(to_archive) + len(to_restore)}
+    return {"count": len(touched), "moved": 0, "attempted": 0}
 
 
 def _set_linked_tx_status(username: str, receipt_ids: set, status: str) -> int:

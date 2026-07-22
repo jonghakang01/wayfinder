@@ -19,8 +19,6 @@ def _isolate(monkeypatch, ledger_entries, pool_entries):
     monkeypatch.setattr(core, "_save_ledger", lambda u, l: state.update(ledger=l))
     monkeypatch.setattr(core, "_load_tx_pool", lambda u: state["pool"])
     monkeypatch.setattr(core, "_save_tx_pool", lambda u, p: state.update(pool=p))
-    monkeypatch.setattr(core, "_archive_to_completed", lambda u, fids: set(fids))
-    monkeypatch.setattr(core, "_restore_from_completed", lambda u, fids: set(fids))
     return state
 
 
@@ -92,29 +90,6 @@ def test_review_complete_mirrors_receipt(monkeypatch):
     assert st["pool"]["entries"][0]["status"] == "open"
 
 
-def test_drive_move_skipped_when_flags_already_agree(monkeypatch):
-    """Status changes that don't cross the completed boundary must not
-    trigger Drive move attempts (no false 'move failed' warnings)."""
-    calls = []
-    st = _isolate(monkeypatch,
-                  [{"id": "r1", "completed": False, "file_id": "f1",
-                    "archived_drive": False}],
-                  [_tx("t1", "r1")])
-    monkeypatch.setattr(core, "_archive_to_completed",
-                        lambda u, fids: calls.append(("archive", set(fids))) or set(fids))
-    monkeypatch.setattr(core, "_restore_from_completed",
-                        lambda u, fids: calls.append(("restore", set(fids))) or set(fids))
-    # open → in_progress: file already in Receipts, nothing to move
-    core._handle_ledger_bulk("u", {"ids": ["r1"], "action": "settle",
-                                   "value": "in_progress"})
-    assert calls == []
-    # → completed: crosses the boundary, archive attempted once
-    core._handle_ledger_bulk("u", {"ids": ["r1"], "action": "settle",
-                                   "value": "completed"})
-    assert calls == [("archive", {"f1"})]
-    assert st["ledger"]["entries"][0]["archived_drive"] is True
-
-
 def test_review_unmatched_tx_touches_no_receipt(monkeypatch):
     st = _isolate(monkeypatch, [_receipt("r1")], [_tx("t1")])  # tx has no receipt
     core._handle_review_set_status("u", {"ids": ["t1"], "status": "completed"})
@@ -144,16 +119,18 @@ def test_reconcile_heals_pre_sync_mismatches(monkeypatch):
     assert core._reconcile_settle_status("u") == 0
 
 
-def test_failed_drive_move_does_not_fake_archived_flag(monkeypatch):
-    """A 403 on user-dropped files must leave archived_drive False — the flag
-    said 'archived' while 8/9 files were still sitting in Receipts (2026-07-22)."""
+def test_completion_never_touches_drive(monkeypatch):
+    """Settlement state is app-data only (2026-07-22): completing/reopening must
+    make zero Drive calls — no folder creation, no moves."""
     st = _isolate(monkeypatch,
-                  [{"id": "r1", "completed": False, "file_id": "f1",
-                    "archived_drive": False}],
+                  [{"id": "r1", "completed": False, "file_id": "f1"}],
                   [_tx("t1", "r1")])
-    monkeypatch.setattr(core, "_archive_to_completed", lambda u, fids: set())
-    monkeypatch.setattr(core, "_restore_from_completed", lambda u, fids: set())
+
+    def _boom(u):
+        raise AssertionError("Drive must not be touched by completion")
+    monkeypatch.setattr(core, "_get_drive_service", _boom)
     res = core._apply_receipt_completion("u", {"r1"}, True)
     assert st["ledger"]["entries"][0]["completed"] is True
-    assert st["ledger"]["entries"][0]["archived_drive"] is False
-    assert res["moved"] == 0 and res["attempted"] == 1
+    assert res == {"count": 1, "moved": 0, "attempted": 0}
+    core._apply_receipt_completion("u", {"r1"}, False)
+    assert st["ledger"]["entries"][0]["completed"] is False
