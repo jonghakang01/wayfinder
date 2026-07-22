@@ -394,20 +394,59 @@ def _load_discarded_fids(username: str) -> dict:
             pass
     return {}
 
-def _mark_discarded_fid(username: str, fid: str):
+def _mark_discarded_fid(username: str, fid: str, filename: str = None):
     if not fid:
         return
     _ensure_dirs()
     d = _load_discarded_fids(username)
-    d[fid] = datetime.now().isoformat()
+    d[fid] = {"at": datetime.now().isoformat(), "filename": filename or ""}
     if len(d) > _DISCARDED_CAP:
-        for k in sorted(d, key=d.get)[:len(d) - _DISCARDED_CAP]:
+        def _ts(v):
+            return v.get("at", "") if isinstance(v, dict) else str(v)
+        for k in sorted(d, key=lambda k: _ts(d[k]))[:len(d) - _DISCARDED_CAP]:
             d.pop(k, None)
     _ocr_discarded_file(username).write_text(json.dumps(d, ensure_ascii=False, indent=2))
 
+
+def _unmark_discarded_fid(username: str, fid: str) -> bool:
+    d = _load_discarded_fids(username)
+    if fid not in d:
+        return False
+    d.pop(fid)
+    _ensure_dirs()
+    _ocr_discarded_file(username).write_text(json.dumps(d, ensure_ascii=False, indent=2))
+    return True
+
+
+def _discarded_items(username: str) -> list:
+    """Tombstones as UI rows, newest first (legacy values were bare timestamps)."""
+    out = []
+    for fid, v in _load_discarded_fids(username).items():
+        if isinstance(v, dict):
+            out.append({"file_id": fid, "at": v.get("at", ""), "filename": v.get("filename", "")})
+        else:
+            out.append({"file_id": fid, "at": str(v), "filename": ""})
+    return sorted(out, key=lambda x: x["at"], reverse=True)
+
+
+def _handle_discarded_restore(username: str, body: dict):
+    """POST /cardconv/receipts/review/restore — drop a tombstone so the file
+    re-enters the OCR queue on the next Drive sync."""
+    fid = body.get("file_id")
+    if isinstance(fid, list):
+        fid = fid[0] if fid else ""
+    fid = (fid or "").strip()
+    if not fid:
+        return ("json", {"error": "file_id required"}, 400)
+    if not _unmark_discarded_fid(username, fid):
+        return ("json", {"error": "not found"}, 404)
+    return ("json", {"ok": True})
+
 def _handle_ocr_staging_discard_file(username: str, body: dict):
     """POST /cardconv/receipts/review/discard-file — drop every staged sub-entry
-    of one photo and trash its Drive file so the next sync doesn't re-stage it.
+    of one photo and tombstone the file so the next sync doesn't re-stage it.
+    Drive is never touched (uniform policy 2026-07-22 — drive.file couldn't
+    modify user-dropped files anyway; restore via the Ledger Discarded list).
     Used by the 3+-receipts-per-photo warning flow (user re-uploads better shots)."""
     fid = body.get("file_id")
     if isinstance(fid, list):
@@ -419,25 +458,20 @@ def _handle_ocr_staging_discard_file(username: str, body: dict):
     entries = staging.get("entries", [])
     keep    = [e for e in entries if e.get("file_id") != fid]
     removed = len(entries) - len(keep)
+    fname = next((e.get("filename") for e in entries if e.get("file_id") == fid), "")
     staging["entries"] = keep
     _save_ocr_staging(username, staging)
-    _mark_discarded_fid(username, fid)
-    trashed = False
-    try:
-        service = _get_drive_service(username)
-        if service:
-            service.files().update(fileId=fid, body={"trashed": True}).execute()
-            trashed = True
-    except Exception:
-        pass
-    return ("json", {"ok": True, "removed": removed, "trashed": trashed})
+    _mark_discarded_fid(username, fid, fname)
+    return ("json", {"ok": True, "removed": removed})
 
 
 def _handle_ocr_staging_discard_entry(username: str, body: dict):
     """POST /cardconv/receipts/review/discard-entry — reject one staged receipt
-    before it reaches the Ledger. The Drive file is trashed only when nothing
-    else references it (other sub-entries of a multi-receipt photo, or a ledger
-    entry from an earlier confirm, keep the shared file alive)."""
+    before it reaches the Ledger. Drive is never touched; the file is
+    tombstoned (skipped by future syncs) once nothing else references it —
+    other sub-entries of a multi-receipt photo, or a ledger entry from an
+    earlier confirm, keep the shared file un-tombstoned. Restorable from the
+    Ledger's Discarded list."""
     eid = body.get("id")
     if isinstance(eid, list):
         eid = eid[0] if eid else ""
@@ -452,24 +486,13 @@ def _handle_ocr_staging_discard_entry(username: str, body: dict):
     staging["entries"] = [e for e in entries if e.get("id") != eid]
     _save_ocr_staging(username, staging)
     fid = target.get("file_id")
-    trashed = False
     if fid:
         still_staged = any(e.get("file_id") == fid for e in staging["entries"])
         in_ledger = any(le.get("file_id") == fid
                         for le in _load_ledger(username).get("entries", []))
         if not still_staged and not in_ledger:
-            # Tombstone first — even if the Drive trash below fails, the file
-            # must never be re-staged by a later sync.
-            _mark_discarded_fid(username, fid)
-            try:
-                service = _get_drive_service(username)
-                if service:
-                    service.files().update(fileId=fid, body={"trashed": True}).execute()
-                    trashed = True
-            except Exception:
-                pass
-    return ("json", {"ok": True, "trashed": trashed,
-                     "remaining": len(staging["entries"])})
+            _mark_discarded_fid(username, fid, target.get("filename"))
+    return ("json", {"ok": True, "remaining": len(staging["entries"])})
 
 
 def _flag_staged_dups(username: str, entries: list) -> list:
@@ -2240,6 +2263,16 @@ def _handle_ledger_delete(username: str, body: dict):
     removed_entries = [e for e in ledger["entries"] if e.get("id") in ids]
     ledger["entries"] = [e for e in ledger["entries"] if e.get("id") not in ids]
     _save_ledger(username, ledger)
+
+    # Tombstone files that no longer have any ledger/staging reference —
+    # otherwise Drive syncs resurrect deleted receipts (drive.file cannot
+    # trash user-dropped files, so the file typically stays in the folder).
+    live_fids = {e.get("file_id") for e in ledger["entries"] if e.get("file_id")}
+    staged_fids = {e.get("file_id") for e in _load_ocr_staging(username).get("entries", [])}
+    for e in removed_entries:
+        fid = e.get("file_id")
+        if fid and fid not in live_fids and fid not in staged_fids:
+            _mark_discarded_fid(username, fid, e.get("filename"))
 
     trashed = 0
     if also_drive and removed_entries:

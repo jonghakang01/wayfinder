@@ -166,6 +166,10 @@ def handle(method, path, body, ctx=None):
         return _handle_ocr_staging_discard_file(user, body)
     if method == "POST" and path == "/cardconv/receipts/review/discard-entry":
         return _handle_ocr_staging_discard_entry(user, body)
+    if method == "POST" and path == "/cardconv/receipts/review/restore":
+        return _handle_discarded_restore(user, body)
+    if method == "GET" and path == "/cardconv/receipts/discarded/api":
+        return ("json", {"items": _discarded_items(user)})
 
     # File download
     if method == "GET" and path.startswith("/cardconv/download/"):

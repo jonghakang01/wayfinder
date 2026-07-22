@@ -306,6 +306,48 @@ _UPLOAD_CSS = (
 
 # ── Ledger register section (Drive + receipt upload) ───────────────────────────
 
+def _discarded_section(user: str) -> str:
+    """Collapsed '🪦 Discarded' list on the Ledger: what was rejected at the
+    OCR stage (or deleted from the Ledger), with one-tap Restore — dropping
+    the tombstone lets the next Drive sync re-queue the file. Hidden when
+    empty. Drive files themselves are never touched."""
+    items = _discarded_items(user)
+    if not items:
+        return ""
+    rows = []
+    for it in items:
+        fname = _esc(it.get("filename") or it["file_id"])
+        at = _esc((it.get("at") or "")[:16].replace("T", " "))
+        rows.append(
+            '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;'
+            'padding:7px 0;border-bottom:1px solid var(--border);font-size:.82rem">'
+            f'<span style="font-weight:600;overflow:hidden;text-overflow:ellipsis;'
+            f'white-space:nowrap;max-width:340px" title="{fname}">{fname}</span>'
+            f'<span style="color:var(--text-muted);font-size:.72rem">{at}</span>'
+            f'<button type="button" class="btn btn-ghost btn-sm" style="margin-left:auto" '
+            f'onclick="discardedRestore(\'{_esc(it["file_id"])}\')">↩ Restore</button>'
+            '</div>')
+    return f'''
+<details class="cc-collapse">
+  <summary>🪦 Discarded <span style="color:var(--text-muted);font-weight:500">— {len(items)} rejected receipt(s), never re-queued</span></summary>
+  <div class="cc-collapse-body">
+    <div style="font-size:.74rem;color:var(--text-muted);margin-bottom:6px">
+      Rejected at the OCR stage or deleted from the Ledger. The Drive photo is untouched —
+      Restore re-queues it on the next Drive sync.</div>
+    {''.join(rows)}
+  </div>
+</details>
+<script>
+function discardedRestore(fid) {{
+  if (!confirm('Restore this receipt?\\nIt will re-enter the OCR queue on the next Drive sync.')) return;
+  fetch('/cardconv/receipts/review/restore', {{
+    method: 'POST', headers: {{'Content-Type': 'application/x-www-form-urlencoded'}},
+    body: 'file_id=' + encodeURIComponent(fid)
+  }}).then(function(r) {{ return r.json(); }}).then(function() {{ location.reload(); }});
+}}
+</script>'''
+
+
 def _register_section(user: str) -> str:
     """Drive status + receipt upload — moved onto the Ledger page."""
     connected = _is_drive_connected(user)
@@ -2099,7 +2141,7 @@ function toggleAll(on) {{
 }}
 function stgDiscardFile(fid, n) {{
   if (!confirm('Remove this photo and its ' + n + ' receipts from the queue?\\n' +
-               'The Drive file is moved to trash — re-upload as separate photos.')) return;
+               'It will not be re-queued (the Drive file is untouched) — re-upload as separate photos.')) return;
   fetch('/cardconv/receipts/review/discard-file', {{
     method: 'POST', headers: {{'Content-Type': 'application/x-www-form-urlencoded'}},
     body: 'file_id=' + encodeURIComponent(fid)
@@ -2108,7 +2150,7 @@ function stgDiscardFile(fid, n) {{
 function stgDiscardEntry(id, dupHint) {{
   var msg = dupHint === 'ledger'
     ? 'This scan already exists in the Ledger.\\nDiscard removes only this queued copy — the Ledger row stays as-is (delete it from the Ledger list if you want it gone entirely).'
-    : 'Reject this receipt?\\nIt is removed from the queue; its photo is trashed on Drive unless another receipt still uses it.';
+    : 'Reject this receipt?\\nIt leaves the queue and will not be re-queued by future syncs. The Drive photo is untouched — restore anytime from Ledger → 🪦 Discarded.';
   if (!confirm(msg)) return;
   fetch('/cardconv/receipts/review/discard-entry', {{
     method: 'POST', headers: {{'Content-Type': 'application/x-www-form-urlencoded'}},
@@ -2127,6 +2169,7 @@ def _render_ledger(user: str) -> str:
             .replace("__USER__", user)
             .replace("__TABS__", _tab_bar("ledger", user))
             .replace("__REGISTER__", _register_section(user))
+            .replace("__DISCARDED__", _discarded_section(user))
             .replace("__TABCSS__", _CC_TAB_CSS + _UPLOAD_CSS)
             .replace("__RCPTJS__", _RCPT_JS)
             .replace("__VAPID_PUB__", vapid_pub))
@@ -2329,6 +2372,8 @@ body:has(.fb-selbar.show) .wf-back,body:has(.fb-selbar.show) #wfThemeBtn{display
   __TABS__
 
   __REGISTER__
+
+  __DISCARDED__
 
   <div class="stat-grid">
     <div class="stat-card stat-click" data-statview="total" title="Show all active receipts"><div class="stat-value" id="statTotal">–</div><div class="stat-label">Total</div></div>
@@ -3827,7 +3872,7 @@ function _imgLbKey(e){ if(e.key==='Escape') closeImgLb(); }
 
   window.ocrDiscardFile = function(fid, n) {
     if (!confirm('Remove this photo and its ' + n + ' receipts from the queue?\n' +
-                 'The Drive file is moved to trash — re-upload as separate photos.')) return;
+                 'It will not be re-queued (the Drive file is untouched) — re-upload as separate photos.')) return;
     fetch('/cardconv/receipts/review/discard-file', {
       method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'},
       body: 'file_id=' + encodeURIComponent(fid)
@@ -3838,7 +3883,7 @@ function _imgLbKey(e){ if(e.key==='Escape') closeImgLb(); }
     var ent = (_entries || []).find(function(e) { return e.id === id; }) || {};
     var msg = ent.dup_hint === 'ledger'
       ? 'This scan already exists in the Ledger.\nDiscard removes only this queued copy — the Ledger row stays as-is (delete it from the Ledger list if you want it gone entirely).'
-      : 'Reject this receipt?\nIt is removed from the queue; its photo is trashed on Drive unless another receipt still uses it.';
+      : 'Reject this receipt?\nIt leaves the queue and will not be re-queued by future syncs. The Drive photo is untouched — restore anytime from Ledger → 🪦 Discarded.';
     if (!confirm(msg)) return;
     fetch('/cardconv/receipts/review/discard-entry', {
       method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'},

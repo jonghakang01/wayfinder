@@ -76,7 +76,7 @@ def test_discard_tombstones_fid_so_sync_skips_it(monkeypatch):
     st["discarded"] = {}
     monkeypatch.setattr(core, "_load_discarded_fids", lambda u: dict(st["discarded"]))
     monkeypatch.setattr(core, "_mark_discarded_fid",
-                        lambda u, f: st["discarded"].__setitem__(f, "t"))
+                        lambda u, f, name=None: st["discarded"].__setitem__(f, "t"))
     core._handle_ocr_staging_discard_entry("u", {"id": "e1"})
     assert "fX" in st["discarded"]
 
@@ -107,6 +107,6 @@ def test_discard_keeps_file_referenced_by_ledger_untombstoned(monkeypatch):
                   [{"file_id": "fShared", "ocr_amount": 1.0, "multi_ocr": True}])
     st["discarded"] = {}
     monkeypatch.setattr(core, "_mark_discarded_fid",
-                        lambda u, f: st["discarded"].__setitem__(f, "t"))
+                        lambda u, f, name=None: st["discarded"].__setitem__(f, "t"))
     core._handle_ocr_staging_discard_entry("u", {"id": "e1"})
     assert st["discarded"] == {}
