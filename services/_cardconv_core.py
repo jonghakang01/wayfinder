@@ -399,6 +399,83 @@ def _handle_ocr_staging_discard_file(username: str, body: dict):
     return ("json", {"ok": True, "removed": removed, "trashed": trashed})
 
 
+def _handle_ocr_staging_discard_entry(username: str, body: dict):
+    """POST /cardconv/receipts/review/discard-entry — reject one staged receipt
+    before it reaches the Ledger. The Drive file is trashed only when nothing
+    else references it (other sub-entries of a multi-receipt photo, or a ledger
+    entry from an earlier confirm, keep the shared file alive)."""
+    eid = body.get("id")
+    if isinstance(eid, list):
+        eid = eid[0] if eid else ""
+    eid = (eid or "").strip()
+    if not eid:
+        return ("json", {"error": "id required"}, 400)
+    staging = _load_ocr_staging(username)
+    entries = staging.get("entries", [])
+    target = next((e for e in entries if e.get("id") == eid), None)
+    if not target:
+        return ("json", {"error": "entry not found"}, 404)
+    staging["entries"] = [e for e in entries if e.get("id") != eid]
+    _save_ocr_staging(username, staging)
+    fid = target.get("file_id")
+    trashed = False
+    if fid:
+        still_staged = any(e.get("file_id") == fid for e in staging["entries"])
+        in_ledger = any(le.get("file_id") == fid
+                        for le in _load_ledger(username).get("entries", []))
+        if not still_staged and not in_ledger:
+            try:
+                service = _get_drive_service(username)
+                if service:
+                    service.files().update(fileId=fid, body={"trashed": True}).execute()
+                    trashed = True
+            except Exception:
+                pass
+    return ("json", {"ok": True, "trashed": trashed,
+                     "remaining": len(staging["entries"])})
+
+
+def _flag_staged_dups(username: str, entries: list) -> list:
+    """Annotate staged entries in place with dup_hint:
+    'ledger' — an active ledger receipt already carries the same amount +
+    merchant on a compatible date/time (this upload is likely a re-scan);
+    'staged' — an earlier entry in this same queue does (double upload).
+    Mirrors the Ledger dup-group rule: (amount, merchant) bucket, dates equal
+    or one side missing, printed times within tolerance (_times_close)."""
+    def key(e):
+        amt = e.get("ocr_amount")
+        if amt is None:
+            return None
+        try:
+            return (round(float(amt), 2), (e.get("ocr_merchant") or "").strip().lower())
+        except (TypeError, ValueError):
+            return None
+
+    def compatible(a, b):
+        da, db = a.get("ocr_date"), b.get("ocr_date")
+        return ((da is None or db is None or da == db)
+                and _times_close(a.get("ocr_time"), b.get("ocr_time")))
+
+    ledger_by_key = {}
+    for le in _load_ledger(username).get("entries", []):
+        k = key(le)
+        if k and not le.get("completed"):
+            ledger_by_key.setdefault(k, []).append(le)
+
+    seen = {}
+    for e in entries:
+        e["dup_hint"] = None
+        k = key(e)
+        if not k:
+            continue
+        if any(compatible(e, le) for le in ledger_by_key.get(k, [])):
+            e["dup_hint"] = "ledger"
+        elif any(compatible(e, se) for se in seen.get(k, [])):
+            e["dup_hint"] = "staged"
+        seen.setdefault(k, []).append(e)
+    return entries
+
+
 def _handle_ocr_staging_confirm(username: str, body: dict):
     """POST /cardconv/receipts/review/confirm (JSON) — apply manual edits and add to ledger.
 

@@ -155,7 +155,8 @@ def handle(method, path, body, ctx=None):
         return ("html", _render_ocr_staging_review(user))
     if method == "GET" and path == "/cardconv/receipts/review/api":
         staging = _load_ocr_staging(user)
-        return ("json", {"entries": staging.get("entries", [])})
+        entries = _flag_staged_dups(user, staging.get("entries", []))
+        return ("json", {"entries": entries})
     if method == "POST" and path == "/cardconv/receipts/review/confirm":
         return _handle_ocr_staging_confirm(user, body)
     if method == "POST" and path == "/cardconv/receipts/review/discard":
@@ -163,6 +164,8 @@ def handle(method, path, body, ctx=None):
         return ("redirect", "/cardconv/ledger")
     if method == "POST" and path == "/cardconv/receipts/review/discard-file":
         return _handle_ocr_staging_discard_file(user, body)
+    if method == "POST" and path == "/cardconv/receipts/review/discard-entry":
+        return _handle_ocr_staging_discard_entry(user, body)
 
     # File download
     if method == "GET" and path.startswith("/cardconv/download/"):

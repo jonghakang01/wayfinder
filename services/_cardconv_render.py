@@ -1906,7 +1906,7 @@ document.addEventListener('click', function(e) {{
 def _render_ocr_staging_review(user: str) -> str:
     from server import CSS_VER
     staging  = _load_ocr_staging(user)
-    entries  = staging.get("entries", [])
+    entries  = _flag_staged_dups(user, staging.get("entries", []))
 
     # Photos carrying 3+ receipts: OCR reliability drops sharply — warn and
     # offer a confirmed remove-and-reupload path (entry + Drive file).
@@ -1981,16 +1981,28 @@ def _render_ocr_staging_review(user: str) -> str:
         ocr_ok = e.get("ocr_status") == "done" and e.get("ocr_merchant")
         badge  = ('<span class="stg-badge ok">OCR OK</span>' if ocr_ok
                   else '<span class="stg-badge warn">OCR partial</span>')
+        # Duplicate suspects arrive unchecked with a red badge — one tap to
+        # discard instead of silently ingesting a second copy.
+        dup_hint = e.get("dup_hint")
+        dup_badge = ""
+        if dup_hint == "ledger":
+            dup_badge = ('<span class="stg-badge" style="background:rgba(239,68,68,.15);'
+                         'color:#ef4444">⚠ Already in Ledger?</span>')
+        elif dup_hint == "staged":
+            dup_badge = ('<span class="stg-badge" style="background:rgba(239,68,68,.15);'
+                         'color:#ef4444">⚠ Duplicate in this batch</span>')
 
         cards.append(f'''
 <div class="stg-card" id="card-{eid}">
   <label class="stg-check-wrap">
-    <input type="checkbox" name="confirmed" value="{eid}" {"checked" if ocr_ok else ""}>
+    <input type="checkbox" name="confirmed" value="{eid}" {"checked" if (ocr_ok and not dup_hint) else ""}>
     <span class="stg-check-lbl">Include</span>
+    <button type="button" class="btn btn-danger btn-sm" style="margin-left:auto"
+      onclick="stgDiscardEntry('{eid}')" title="Reject this receipt (removes it from the queue)">🗑 Discard</button>
   </label>
   <div class="stg-img-wrap">{img_html}</div>
   <div class="stg-info">
-    <div class="stg-filename">{fn} {badge} {fx_badge}</div>
+    <div class="stg-filename">{fn} {badge} {fx_badge} {dup_badge}</div>
     <div class="stg-row"><span class="stg-lbl">Date</span><span class="stg-val">{date_v}</span></div>
     <div class="stg-row"><span class="stg-lbl">Merchant</span><span class="stg-val">{merch_v}</span></div>
     <div class="stg-row"><span class="stg-lbl">Printed</span><span class="stg-val">{amt_v}</span></div>
@@ -2091,6 +2103,13 @@ function stgDiscardFile(fid, n) {{
   fetch('/cardconv/receipts/review/discard-file', {{
     method: 'POST', headers: {{'Content-Type': 'application/x-www-form-urlencoded'}},
     body: 'file_id=' + encodeURIComponent(fid)
+  }}).then(function(r) {{ return r.json(); }}).then(function() {{ location.reload(); }});
+}}
+function stgDiscardEntry(id) {{
+  if (!confirm('Reject this receipt?\\nIt is removed from the queue; its photo is trashed on Drive unless another receipt still uses it.')) return;
+  fetch('/cardconv/receipts/review/discard-entry', {{
+    method: 'POST', headers: {{'Content-Type': 'application/x-www-form-urlencoded'}},
+    body: 'id=' + encodeURIComponent(id)
   }}).then(function(r) {{ return r.json(); }}).then(function() {{ location.reload(); }});
 }}
 </script>
@@ -3715,6 +3734,11 @@ function _imgLbKey(e){ if(e.key==='Escape') closeImgLb(); }
       var badge = ocrOk
         ? '<span style="font-size:.62rem;font-weight:700;padding:2px 6px;border-radius:8px;background:rgba(34,197,94,.15);color:#22c55e">OCR OK</span>'
         : '<span style="font-size:.62rem;font-weight:700;padding:2px 6px;border-radius:8px;background:rgba(245,158,11,.15);color:#f59e0b">Partial</span>';
+      var dupBadge = '';
+      if (e.dup_hint === 'ledger')
+        dupBadge = '<span style="font-size:.62rem;font-weight:700;padding:2px 6px;border-radius:8px;background:rgba(239,68,68,.15);color:#ef4444">⚠ Already in Ledger?</span>';
+      else if (e.dup_hint === 'staged')
+        dupBadge = '<span style="font-size:.62rem;font-weight:700;padding:2px 6px;border-radius:8px;background:rgba(239,68,68,.15);color:#ef4444">⚠ Duplicate in batch</span>';
       var eid = e.id;
       var amtVal = (e.ocr_amount != null) ? e.ocr_amount : '';
       var hwVal  = (e.ocr_handwritten_amount != null) ? e.ocr_handwritten_amount : '';
@@ -3735,8 +3759,10 @@ function _imgLbKey(e){ if(e.key==='Escape') closeImgLb(); }
       }
       return '<div class="ocr-card" data-id="' + eid + '" style="border:1px solid var(--border);border-radius:var(--radius-md);overflow:hidden;background:var(--surface-2)">'
         + '<label style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--border);cursor:pointer;background:var(--surface)">'
-        + '<input type="checkbox" class="ocr-cb" data-id="' + eid + '" ' + (ocrOk ? 'checked' : '') + ' style="width:15px;height:15px;accent-color:var(--accent);cursor:pointer">'
-        + '<span style="font-size:.8rem;font-weight:600">Include</span>' + badge + curChip
+        + '<input type="checkbox" class="ocr-cb" data-id="' + eid + '" ' + (ocrOk && !e.dup_hint ? 'checked' : '') + ' style="width:15px;height:15px;accent-color:var(--accent);cursor:pointer">'
+        + '<span style="font-size:.8rem;font-weight:600">Include</span>' + badge + curChip + dupBadge
+        + '<button type="button" class="btn btn-danger btn-sm" style="margin-left:auto" title="Reject this receipt" '
+        +   'onclick="event.preventDefault();event.stopPropagation();ocrDiscardEntry(\'' + eid + '\')">🗑</button>'
         + '</label>'
         + '<div style="background:#000;display:flex;align-items:center;justify-content:center;min-height:120px">' + imgHtml + '</div>'
         + '<div style="padding:10px;display:flex;flex-direction:column;gap:7px">'
@@ -3803,6 +3829,17 @@ function _imgLbKey(e){ if(e.key==='Escape') closeImgLb(); }
       method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'},
       body: 'file_id=' + encodeURIComponent(fid)
     }).then(function(r) { return r.json(); }).then(function() { location.reload(); });
+  };
+
+  window.ocrDiscardEntry = function(id) {
+    if (!confirm('Reject this receipt?\nIt is removed from the queue; its photo is trashed on Drive unless another receipt still uses it.')) return;
+    fetch('/cardconv/receipts/review/discard-entry', {
+      method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+      body: 'id=' + encodeURIComponent(id)
+    }).then(function(r) { return r.json(); }).then(function(d) {
+      if (d && d.remaining === 0) { closeOcrModal(); clearOcrBadge(); location.reload(); }
+      else openOcrModal();
+    });
   };
 
   function clearOcrBadge() {
