@@ -56,6 +56,121 @@ TYPES = {
 
 _ASSETS = os.path.join(os.path.dirname(__file__), "sow_assets")
 
+# Executed examples shown beside each template while drafting (curated from the
+# real signed documents in the sample set).
+EXAMPLES = {
+    "sea_role": {
+        "src": "Samsung_ Data Engineer.docx (executed)",
+        "title": "Data Engineer # 1", "project": "SEA eCom Data",
+        "date": "Dec 7, 2025", "by": "Jongha Kang", "for": "Nanda Kumar",
+        "summary": ("This Statement of Work outlines the provision of Data Engineering "
+                    "support focused on building and maintaining the data infrastructure "
+                    "that enables analytics, and reporting initiatives across organizations. "
+                    "The role is centered on developing reliable, scalable, and high-quality "
+                    "data pipelines and systems, while contributing to data platform "
+                    "evolution and cross-functional data enablement."),
+        "deliverables": [
+            "Design, build, and maintain scalable data pipelines to ingest, transform, and process data from multiple sources",
+            "Develop and manage ETL/ELT workflows to ensure timely, accurate, and efficient data availability for analytics and personalization use cases.",
+            "Model and structure data for consumption by downstream systems, including BI tools, experimentation platforms, and marketing systems.",
+            "Ensure data quality, integrity, and reliability through validation checks, monitoring frameworks, and automated alerting mechanisms.",
+            "Partner with Data Product Managers, analysts, and business stakeholders to understand data requirements and translate them into scalable engineering solutions.",
+            "Optimize data pipelines and queries for performance, cost efficiency, and scalability across growing data volumes.",
+            "Support real-time and near-real-time data processing needs where required for personalization and campaign activation.",
+            "Maintain clear documentation of data pipelines, schemas, transformations, and dependencies to support transparency and maintainability.",
+        ],
+        "stakeholders": ("Samsung Manager: Durga R · durga.r@samsung.com · Chennai, India  |  "
+                         "Cheil Owner: Jongha Kang · jongha.kang@cheil.com · Mountain View, USA"),
+        "period": "March 23, 2026 → December 31, 2026",
+        "res_head": ["Profile", "Location", "Qty", "Months", "Hourly", "Hrs/Mo", "Cost"],
+        "res_rows": [["Data Engineer", "India", "1", "9.3", "$25", "168", "$39,060"]],
+        "fee": "$39,060 — invoiced monthly, first month prorated $1,260 (Mar 23 start), 1st of following month",
+    },
+    "sea_team": {
+        "src": "Cheil SOW eCom-FSOmni Apr_Oct 2026 v1.docx (executed)",
+        "title": "SEA eCommerce – Omni Projects (Apr ~ Oct 2026 initiatives)",
+        "project": "SEA eCommerce – Omni Projects", "date": "Jul 1, 2026",
+        "by": "Jamshed Palsetia", "for": "Jamshed Palsetia",
+        "summary": ("A skilled team of developers, engineers to engage and carry out Omni "
+                    "Channel integrations (TikTok and Amazon MCF) and Fulfillment Service "
+                    "project tasks for Samsung's systems."),
+        "deliverables": [
+            "Fast-Follow Enhancements and Go-Live Support: implementation of fast-follow enhancement requests on integration specs for Amazon MCF and TikTok, including returns, cancellations, automation of manual processes (syncs).",
+            "Develop the Blue Ribbon project initiative — provide Blue Ribbon service on the cart/checkout pages and allow downstream integration with NERP, WMS and third-party partners.",
+            "Operational Support and Live-services Monitoring of all Fulfillment systems and Omni production systems and related integrations.",
+        ],
+        "stakeholders": ("Samsung Manager & Budget Owner: Jamshed Palsetia · j.palsetia@samsung.com · Mountain View, CA  |  "
+                         "Cheil POC: Woosuk Jang · woosuk.j@cheil.com · Bellevue, WA"),
+        "period": "April 1, 2026 → September 30, 2026",
+        "res_head": ["No.", "Name", "Role", "Level", "Region", "Rate/Month"],
+        "res_rows": [["1", "Rajiv Mampuzha", "Technical Development Lead", "Principal", "US", "$30,168"]],
+        "fee": "$211,176 — invoiced monthly at month end",
+    },
+    "agy_role": {
+        "src": "eComm Sr. Data Analyst — Cheil-Invictus SOW (executed)",
+        "title": "Sr. Data Analyst (Corp Marketing Dashboard Support)",
+        "project": "Corp Marketing Dashboard Support", "date": "Jan 17, 2025",
+        "vendor": "Invictus Data Inc (MSA dated Sep 28, 2023)",
+        "summary": ("A skilled Sr. Data Analyst for Bigdata platform to work as a part of a "
+                    "growing team to provide business insights, analyze trends, build "
+                    "dashboards, data mining using SQL, and other similar technologies."),
+        "deliverables": [
+            "Analyze business performance, pinpoint key challenges, and present insights using clear and concise visualizations.",
+            "Collaborate with Category/Product Managers to guide product and business decisions through data-driven insights.",
+            "Provide data analysis and support for Ecommerce Operations and Trade-in strategies.",
+            "Extract actionable insights from data using SQL, Spark, Hive, and Tableau, summarizing findings for leadership teams.",
+            "Design and maintain Tableau dashboards; regularly audit dashboards and business metrics.",
+            "Provide ad-hoc analytics and reporting support for executive presentations and decision-making.",
+        ],
+        "stakeholders": None,
+        "period": "December 1, 2024 → December 31, 2025",
+        "res_head": ["Resource Name", "Service Description", "Qty", "Unit Price/Hour", "Cost Total"],
+        "res_rows": [["Pranav Vishwanathan", "Sr. Data Analyst", "1", "$32", "$69,888"]],
+        "fee": "$69,888 — contractor invoices Cheil monthly at month end ($5,824/mo)",
+    },
+    "agy_team": {
+        "src": "IOT Marketplace Cheil_AIE SOW_20251117.docx (executed)",
+        "title": "IOT Marketplace platform integration",
+        "project": "IOT Marketplace", "date": "Oct 1, 2025",
+        "vendor": "AIENTERPRISE Inc (MSA dated May 30, 2024)",
+        "summary": ("A skilled team of developers, engineers, QA engineers, project manager "
+                    "to engage and carry out platform integration project tasks for Samsung "
+                    "USA's newly establishing IOT Marketplace with other internal systems."),
+        "deliverables": [
+            "Integration with Partners: alignment between partner and Samsung on integration specs for catalog, pricing, inventory, order creation, order status and return processing; dev complete for Samsung GPV2 interface development.",
+            "Platform Development: fulfiller integration, changes in fulfillment/order/cart/checkout backend and front-end services, search and recommendation, promotions, payment-integration impact preparation.",
+        ],
+        "stakeholders": None,
+        "period": "November 1, 2025 → December 31, 2025",
+        "res_head": ["No.", "Name", "Role", "Level", "Region", "Rate/Month"],
+        "res_rows": [
+            ["1", "Rajiv Mampuzha", "Technical Development Lead", "Principal", "US", "$29,295"],
+            ["2", "Raghuraman Krishnan", "Project Manager", "NA", "India", "–"],
+            ["3", "Kevin Niasso", "Business Analyst", "NA", "India", "–"],
+            ["4", "Kamal Kanniyappan", "Backend Sr. Developer", "NA", "India", "$7,560"],
+            ["5", "Sukraj Mahalingam", "Backend Sr. Developer", "NA", "India", "$7,560"],
+            ["6", "Harsh Dilip Pawar", "Backend Sr. Developer", "NA", "India", "$7,560"],
+            ["7", "Smitha H E", "Backend Sr. Developer", "NA", "India", "$7,560"],
+            ["8", "Girish Biradar", "Quality Engineer", "NA", "India", "$7,560"],
+            ["9", "Mary Katari", "Quality Engineer", "NA", "India", "$7,560"],
+        ],
+        "fee": "$70,200/month, $140,400 for the two-month duration — invoiced 1st of following month",
+    },
+    "agy_msa": {
+        "src": "MSA Cheil-AIEnterprise (executed May 31, 2024)",
+        "note": ("Executed fill-in: Effective Date = May 31, 2024 · Contractor = AIEnterprise Inc. "
+                 "Everything else was the standard template text you see on the left — the only "
+                 "vendor-specific edits ever made were these two fields (plus a Non-Solicit clause "
+                 "Legal added for AIE)."),
+    },
+    "agy_nda": {
+        "src": "Cheil NY Vendor One-Way NDA (executed May 29, 2024)",
+        "note": ("Executed fill-in: Effective Date = 05/29/2024 · Vendor = AIENTERPRISE INC. "
+                 "(signed by Sudhanshu Mohan, CEO). The body text is identical to the template "
+                 "on the left — only the date and vendor name vary."),
+    },
+}
+
 # One-way NDA text lifted from the executed "Cheil NY Vendor One-Way NDA" (slots
 # for effective date and vendor name). Kept verbatim, including original quirks.
 NDA_TITLE = "CONFIDENTIALITY AND NONDISCLOSURE AGREEMENT"
@@ -647,6 +762,21 @@ select.slot{cursor:pointer}
 .row-del{background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:.9rem;padding:4px 8px}
 .row-del:hover{color:var(--danger)}
 .add-row-btn{margin-top:6px}
+/* ── side-by-side executed example ── */
+.ed-wrap{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px;align-items:start;max-width:1760px;margin:0 auto}
+.ed-wrap>.paper{margin:0 0 60px;max-width:none}
+.ed-wrap.ex-hidden{grid-template-columns:minmax(0,1fr);max-width:900px}
+.ed-wrap.ex-hidden .ex-col{display:none}
+.ex-col{position:sticky;top:118px;max-height:calc(100vh - 140px);overflow-y:auto;border-radius:var(--radius-lg)}
+.ex-paper{background:var(--surface);border:1px dashed var(--border-bright);border-radius:var(--radius-lg);padding:26px 30px;font-size:.8rem;line-height:1.55;color:var(--text-muted)}
+.ex-paper h3{font-size:.85rem;font-weight:800;color:var(--text);margin:16px 0 4px}
+.ex-badge{display:inline-flex;align-items:center;gap:6px;background:rgba(52,211,153,.1);border:1px solid rgba(52,211,153,.3);color:var(--success);border-radius:99px;padding:3px 12px;font-size:.7rem;font-weight:700;margin-bottom:14px}
+.ex-paper table{width:100%;border-collapse:collapse;margin:6px 0;font-size:.72rem}
+.ex-paper th{border:1px solid var(--border);padding:4px 6px;font-size:.62rem;text-transform:uppercase;color:var(--text-muted);text-align:left;background:var(--surface-2)}
+.ex-paper td{border:1px solid var(--border);padding:4px 6px}
+.ex-paper ul{padding-left:18px;margin:4px 0}
+.ex-paper li{margin-bottom:4px}
+@media(max-width:1100px){.ed-wrap{grid-template-columns:1fr}.ex-col{position:static;max-height:none;order:2}}
 @media(max-width:768px){
   .sow-hero,.type-grid{grid-template-columns:1fr}
   .paper{padding:22px 16px}
@@ -658,14 +788,68 @@ select.slot{cursor:pointer}
 """
 
 
-def _shell(user, title, body):
+def _shell(user, title, body, wide=False):
     return f"""<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>📝 {_esc(title)} · Wayfinder</title><link rel="stylesheet" href="/static/style.css">
 <style>{_CSS}</style></head><body>
 <nav><span class="nav-brand">📝 SOW Assistant</span>
 <span class="nav-user">👤 {_esc(user)} &nbsp;·&nbsp; <a href="/logout">Logout</a></span></nav>
-<div class="container" style="max-width:1000px">{body}</div></body></html>"""
+<div class="container" style="max-width:{'1800px' if wide else '1000px'}">{body}</div></body></html>"""
+
+
+def _render_example(type_key):
+    ex = EXAMPLES.get(type_key)
+    if not ex:
+        return ""
+    parts = [f'<div class="ex-badge">📖 Executed example · {_esc(ex["src"])}</div>']
+    if ex.get("note"):
+        parts.append(f'<p>{_esc(ex["note"])}</p>')
+    else:
+        parts.append(f'<h3 style="margin-top:0;font-size:.95rem">{_esc(ex.get("title"))}</h3>')
+        meta = []
+        if ex.get("project"):
+            meta.append(f"PROJECT: {ex['project']}")
+        if ex.get("date"):
+            meta.append(f"DATE: {ex['date']}")
+        if ex.get("by"):
+            meta.append(f"PREPARED BY: {ex['by']} · FOR: {ex['for']}")
+        if ex.get("vendor"):
+            meta.append(f"VENDOR: {ex['vendor']}")
+        parts.append("<p>" + "<br>".join(_esc(m) for m in meta) + "</p>")
+        parts.append(f'<h3>Executive Summary</h3><p>{_esc(ex.get("summary"))}</p>')
+        parts.append("<h3>Deliverables / Scope</h3><ul>" +
+                     "".join(f"<li>{_esc(d)}</li>" for d in ex.get("deliverables", [])) + "</ul>")
+        if ex.get("stakeholders"):
+            parts.append(f'<h3>Stakeholders</h3><p>{_esc(ex["stakeholders"])}</p>')
+        parts.append(f'<h3>Service Period</h3><p>{_esc(ex.get("period"))}</p>')
+        if ex.get("res_rows"):
+            head = "".join(f"<th>{_esc(h)}</th>" for h in ex["res_head"])
+            rows = "".join("<tr>" + "".join(f"<td>{_esc(c)}</td>" for c in r) + "</tr>"
+                           for r in ex["res_rows"])
+            parts.append(f'<h3>Resources</h3><div style="overflow-x:auto"><table><tr>{head}</tr>{rows}</table></div>')
+        parts.append(f'<h3>Fee</h3><p>{_esc(ex.get("fee"))}</p>')
+    return '<div class="ex-col"><div class="ex-paper">' + "".join(parts) + "</div></div>"
+
+
+_EX_TOGGLE_JS = """<script>
+(function(){
+  var w = document.getElementById('edWrap'), b = document.getElementById('exToggle');
+  if(!w || !b) return;
+  function apply(off){
+    w.classList.toggle('ex-hidden', off);
+    b.classList.toggle('btn-ghost', off);
+    b.classList.toggle('btn-secondary', !off);
+  }
+  var off = localStorage.getItem('sowExampleOff') === '1';
+  apply(off);
+  b.addEventListener('click', function(){
+    off = !off;
+    localStorage.setItem('sowExampleOff', off ? '1' : '0');
+    apply(off);
+  });
+})();
+</script>"""
 
 
 def _sow_rows(user, data):
@@ -955,10 +1139,12 @@ def _render_doc_editor(user, sow, type_key, saved=False):
   {vendor_bar}
   <span class="spacer"></span>
   {saved_note}
+  <button type="button" class="btn btn-secondary btn-sm" id="exToggle" title="Show/hide the executed example">📖 Example</button>
   {f'<a class="btn btn-secondary btn-sm" href="/sow/docx?id={sow["id"]}">⬇ docx</a>' if sow.get('id') else ''}
   <button type="submit" class="btn btn-primary btn-sm">💾 Save</button>
 </div>
 
+<div class="ed-wrap" id="edWrap">
 <div class="paper">
   {'<img src="/sow/asset/logo" alt="Cheil × Samsung" style="max-width:300px;margin-bottom:22px;background:#fff;padding:10px 14px;border-radius:8px">' if not is_agency else ''}
   <div class="doc-title">{_slot('title', sow.get('title'), 'SOW title — e.g. Data Engineer # 1', 'style="width:100%;font-weight:800;font-size:1.15rem"')}</div>
@@ -1026,10 +1212,12 @@ def _render_doc_editor(user, sow, type_key, saved=False):
   </table></div>
   <div class="ro-note">Highlighted fields are editable · everything else exports as-is to .docx</div>
 </div>
+{_render_example(type_key)}
+</div>
 </form>
 """ + _EDITOR_JS.replace("__RES__", json.dumps(sow.get("resources", [])).replace("</", "<\\/")) \
-                .replace("__CFG__", json.dumps(cfg).replace("</", "<\\/"))
-    return _shell(user, "SOW Editor", body)
+                .replace("__CFG__", json.dumps(cfg).replace("</", "<\\/")) + _EX_TOGGLE_JS
+    return _shell(user, "SOW Editor", body, wide=True)
 
 
 _MSA_PARS = None
@@ -1159,18 +1347,22 @@ def _render_agreement_editor(user, sow, type_key, saved=False):
   </details>
   <span class="spacer"></span>
   {saved_note}
+  <button type="button" class="btn btn-secondary btn-sm" id="exToggle" title="Show/hide the executed example">📖 Example</button>
   {f'<a class="btn btn-secondary btn-sm" href="/sow/docx?id={sow["id"]}">⬇ docx</a>' if sow.get('id') else ''}
   <button type="submit" class="btn btn-primary btn-sm">💾 Save</button>
 </div>
+<div class="ed-wrap" id="edWrap">
 <div class="paper">
   <div style="text-align:center;font-weight:800;font-size:1.05rem;margin-bottom:20px">{doc_title}</div>
   <div class="meta-line" style="margin-bottom:14px"><b>EFFECTIVE DATE:</b> {date_slot}</div>
   {body_doc}
   <div class="ro-note">Highlighted fields are editable · everything else exports as-is to .docx</div>
 </div>
+{_render_example(type_key)}
+</div>
 </form>
-""" + _AGREEMENT_JS.replace("__CFG__", json.dumps(cfg).replace("</", "<\\/"))
-    return _shell(user, t["label"], body)
+""" + _AGREEMENT_JS.replace("__CFG__", json.dumps(cfg).replace("</", "<\\/")) + _EX_TOGGLE_JS
+    return _shell(user, t["label"], body, wide=True)
 
 
 # ── routing ──────────────────────────────────────────────────────────────────
