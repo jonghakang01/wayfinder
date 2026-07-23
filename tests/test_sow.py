@@ -170,3 +170,22 @@ def test_estimate_xlsx_builds_with_totals():
     assert vals[1][1] == "Resource" and vals[1][9] == "From Aug til Dec (Total)"
     assert vals[2][1] == "Anuj Patel" and vals[2][6] == 6720 and vals[2][9] == 33600
     assert vals[3][8] == 6720 and vals[3][9] == 33600  # totals row
+
+
+def test_person_migration_and_ebita():
+    m = _mod()
+    legacy = {"id": "p1", "name": "A", "rate": "122", "vendor_cost": "90",
+              "function": "Dev", "email": "a@samsung.com", "salary": ""}
+    p = m._migrate_person(legacy)
+    assert p["sell_hr"] == "122" and p["cost_hr"] == "90"
+    assert p["role_title"] == "Dev" and p["email_samsung"] == "a@samsung.com"
+    # EBITA: manual wins; else budget - partner cost; else None
+    p["client_budget"] = "102,480"
+    p["partner_cost"] = "80000"
+    v, auto = m._person_ebita(p)
+    assert v == 22480 and auto is True
+    p["ebita"] = "25000"
+    v, auto = m._person_ebita(p)
+    assert v == 25000 and auto is False
+    v, auto = m._person_ebita({"client_budget": "100"})
+    assert v is None

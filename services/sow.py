@@ -336,9 +336,53 @@ def _load(user):
             d.setdefault("sows", [])
             d.setdefault("vendors", [])
             d.setdefault("people", [])
+            for p in d["people"]:
+                _migrate_person(p)
             return d
     except Exception:
         return {"sows": [], "vendors": [], "people": []}
+
+
+def _migrate_person(p):
+    """v1 roster fields → the 3-axis schema (Client↔Cheil / Cheil↔Partner /
+    Cheil employee) requested 2026-07-22."""
+    if "sell_hr" not in p:
+        p["sell_hr"] = p.pop("rate", "") or ""
+        p["cost_hr"] = p.pop("vendor_cost", "") or ""
+        p["role_title"] = p.pop("function", "") or ""
+        p["salary_mo"] = p.pop("salary", "") or ""
+        # Seeded emails were @samsung.com working addresses.
+        em = p.pop("email", "") or ""
+        p["email_samsung"] = em if "samsung" in em else ""
+        p["email_cheil"] = em if "cheil" in em else ""
+    for k in ("project", "sell_mo", "client_duration", "client_budget", "client_po",
+              "cost_mo", "partner_duration", "partner_cost", "partner_po",
+              "cheil_since", "salary_oh", "pc", "svpn", "ebita", "location"):
+        p.setdefault(k, "")
+    p.setdefault("linked_sows", [])
+    return p
+
+
+def _num_or_none(v):
+    try:
+        s = str(v).replace(",", "").replace("$", "").strip()
+        return float(s) if s else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _person_ebita(p):
+    """EBITA by Cheil — manual value wins; else Client budget − Partner cost
+    (vendor personnel). Cheil-employee EBITA needs salary+OH × duration and
+    stays manual until durations are numeric."""
+    manual = _num_or_none(p.get("ebita"))
+    if manual is not None:
+        return manual, False
+    budget = _num_or_none(p.get("client_budget"))
+    cost = _num_or_none(p.get("partner_cost"))
+    if budget is not None and cost is not None:
+        return budget - cost, True
+    return None, True
 
 
 def _save(user, data):
@@ -969,93 +1013,248 @@ def _render_landing(user):
     return _shell(user, "SOW Assistant", body)
 
 
-def _person_doc_count(data, person):
-    """Documents referencing this person — estimate rows by id, SOW resource
-    rows by (free-text) name."""
-    n = 0
+def _person_docs(data, person):
+    """Documents tied to this person: explicit links + auto-detected
+    (estimate rows by person_id, SOW resource rows by name)."""
+    linked = set(person.get("linked_sows") or [])
+    auto = set()
     pname = (person.get("name") or "").strip().lower()
     for s in data["sows"]:
-        if s.get("kind") == "est" or TYPES.get(_sow_type(s), {}).get("kind") == "est":
+        kind = TYPES.get(_sow_type(s), {}).get("kind")
+        if kind == "est":
             if any(r.get("person_id") == person["id"] for r in s.get("rows", [])):
-                n += 1
-        else:
+                auto.add(s["id"])
+        elif kind == "sow":
             for r in s.get("resources", []):
                 nm = (r.get("profile") or r.get("name") or "").strip().lower()
                 if pname and nm == pname:
-                    n += 1
+                    auto.add(s["id"])
                     break
-    return n
+    ids = linked | auto
+    return [s for s in data["sows"] if s["id"] in ids], auto
+
+
+def _person_doc_count(data, person):
+    docs, _ = _person_docs(data, person)
+    return len(docs)
+
+
+def _fmt_money_cell(v):
+    n = _num_or_none(v)
+    return _money(n) if n is not None else (_esc(v) if v else "–")
 
 
 def _render_people(user, saved=False):
     data = _load(user)
-    vend_names = [v["name"] for v in data["vendors"]]
-    aff_opts = ["Cheil"] + vend_names + ["TBD"]
-
-    def aff_select(cur):
-        opts = "".join(f'<option value="{_esc(a)}"{" selected" if a == cur else ""}>{_esc(a)}</option>'
-                       for a in aff_opts)
-        extra = ""
-        if cur and cur not in aff_opts:
-            extra = f'<option value="{_esc(cur)}" selected>{_esc(cur)}</option>'
-        return f'<select class="slot" name="affiliation">{opts}{extra}</select>'
-
-    grid = "grid-template-columns:1.2fr 0.8fr 1.4fr 0.9fr 0.7fr 0.7fr 0.7fr auto auto"
-    head = f"""
-<div class="sow-card" style="display:grid;{grid};gap:10px;padding:8px 18px;font-size:.66rem;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);border:none;background:none;margin:0">
-  <span>Name</span><span>Function</span><span>Email</span><span>Affiliation</span>
-  <span>SEA rate/h</span><span>Vendor cost/h</span><span>Salary/mo</span><span></span><span></span>
-</div>"""
-    rows = []
+    cards = []
     for p in data["people"]:
-        n = _person_doc_count(data, p)
-        del_btn = (f'<button type="button" class="btn btn-danger btn-sm" onclick="delPerson(\'{p["id"]}\')">🗑</button>'
-                   if n == 0 else
-                   f'<span style="font-size:.7rem;color:var(--text-muted)" title="Referenced by {n} document(s)">{n} doc(s)</span>')
-        rows.append(f"""
-<form method="post" action="/sow/person/save" class="sow-card" style="display:grid;{grid};gap:10px;align-items:center;padding:10px 18px;margin-bottom:8px">
-  <input type="hidden" name="id" value="{p['id']}">
-  <input class="slot" name="name" value="{_esc(p.get('name'))}" title="{_esc(p.get('location') or '')}">
-  <input class="slot" name="function" value="{_esc(p.get('function'))}" placeholder="Dev / QA / Lead">
-  <input class="slot" name="email" value="{_esc(p.get('email'))}">
-  {aff_select(p.get('affiliation') or 'Cheil')}
-  <input class="slot" name="rate" value="{_esc(p.get('rate'))}" placeholder="$/h" inputmode="decimal">
-  <input class="slot" name="vendor_cost" value="{_esc(p.get('vendor_cost'))}" placeholder="—" inputmode="decimal">
-  <input class="slot" name="salary" value="{_esc(p.get('salary'))}" placeholder="—" inputmode="decimal">
-  <input type="hidden" name="location" value="{_esc(p.get('location'))}">
-  <button type="submit" class="btn btn-secondary btn-sm">💾</button>
-  {del_btn}
-</form>""")
+        docs, _ = _person_docs(data, p)
+        ebita, ebita_auto = _person_ebita(p)
+        aff = p.get("affiliation") or "Cheil"
+        aff_chip = (f'<span class="dir-chip dir-samsung">{_esc(aff)}</span>' if aff == "Cheil"
+                    else f'<span class="dir-chip dir-agency">{_esc(aff)}</span>')
+        sell_mo = p.get("sell_mo") or (
+            f"{_num_or_none(p.get('sell_hr')) * 168:,.0f}" if _num_or_none(p.get("sell_hr")) else "")
+        cost_mo = p.get("cost_mo") or (
+            f"{_num_or_none(p.get('cost_hr')) * 168:,.0f}" if _num_or_none(p.get("cost_hr")) else "")
+
+        def block(title, cells):
+            tds = "".join(f'<div><div style="font-size:.6rem;text-transform:uppercase;letter-spacing:.05em;'
+                          f'color:var(--text-muted)">{h}</div>'
+                          f'<div style="font-size:.82rem;font-variant-numeric:tabular-nums">{v}</div></div>'
+                          for h, v in cells)
+            return (f'<div style="display:flex;gap:18px;flex-wrap:wrap;align-items:baseline;'
+                    f'padding:7px 0;border-top:1px dashed var(--border)">'
+                    f'<span style="flex:0 0 110px;font-size:.68rem;font-weight:800;color:var(--text-muted)">{title}</span>'
+                    f'{tds}</div>')
+
+        rows_html = block("Client → Cheil", [
+            ("Selling/hr", _fmt_money_cell(p.get("sell_hr"))),
+            ("Selling/mo", _fmt_money_cell(sell_mo)),
+            ("Duration", _esc(p.get("client_duration") or "–")),
+            ("Contracted Budget", _fmt_money_cell(p.get("client_budget"))),
+            ("PO", _esc(p.get("client_po") or "–")),
+        ])
+        if aff != "Cheil" or any(p.get(k) for k in ("cost_hr", "partner_cost", "partner_po")):
+            rows_html += block("Cheil → Partner", [
+                ("Contract/hr", _fmt_money_cell(p.get("cost_hr"))),
+                ("Contract/mo", _fmt_money_cell(cost_mo)),
+                ("Duration", _esc(p.get("partner_duration") or "–")),
+                ("Contracted Cost", _fmt_money_cell(p.get("partner_cost"))),
+                ("PO", _esc(p.get("partner_po") or "–")),
+            ])
+        if aff == "Cheil" or any(p.get(k) for k in ("salary_mo", "salary_oh", "cheil_since")):
+            rows_html += block("Cheil employee", [
+                ("Salary/mo", _fmt_money_cell(p.get("salary_mo"))),
+                ("Cheil since", _esc(p.get("cheil_since") or "–")),
+                ("Salary + OH", _fmt_money_cell(p.get("salary_oh"))),
+            ])
+        ebita_html = (f'<span style="color:{"var(--success)" if ebita >= 0 else "var(--danger)"};font-weight:800">'
+                      f'{_money(ebita)}</span>'
+                      + ('<span style="font-size:.64rem;color:var(--text-muted)"> auto</span>' if ebita_auto else '')
+                      ) if ebita is not None else '<span style="color:var(--text-muted)">–</span>'
+        rows_html += block("EBITA by Cheil", [("", ebita_html)])
+
+        doc_links = " ".join(
+            f'<a href="/sow/edit?id={d["id"]}" style="color:var(--accent);text-decoration:none;font-size:.74rem">'
+            f'{TYPES[_sow_type(d)]["icon"]} {_esc(d.get("title") or "(untitled)")}</a>'
+            for d in docs[:4])
+        more = f' <span style="font-size:.7rem;color:var(--text-muted)">+{len(docs)-4}</span>' if len(docs) > 4 else ""
+        cards.append(f"""
+<div class="sow-card" style="padding:16px 22px;margin-bottom:12px">
+  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:4px">
+    <a href="/sow/person?id={p['id']}" style="font-weight:800;font-size:.98rem;color:var(--text);text-decoration:none">{_esc(p.get('name'))}</a>
+    {aff_chip}
+    <span style="font-size:.8rem;color:var(--text-muted)">{_esc(p.get('role_title') or '')}</span>
+    <span style="font-size:.76rem;color:var(--text-muted)">{_esc(p.get('project') or '')}</span>
+    <span style="margin-left:auto;display:flex;gap:8px;align-items:center">{doc_links}{more}
+      <a class="btn btn-ghost btn-sm" href="/sow/person?id={p['id']}">✎</a></span>
+  </div>
+  {rows_html}
+</div>""")
     saved_banner = ('<div style="color:var(--success);font-size:.85rem;margin-bottom:12px">✓ Saved</div>'
                     if saved else "")
     body = f"""
 <div style="display:flex;align-items:center;gap:12px;margin:8px 0 4px">
   <a class="btn btn-ghost btn-sm" href="/sow">←</a>
   <h1 style="margin:0">👥 People</h1>
+  <span class="spacer" style="flex:1"></span>
+  <a class="btn btn-primary btn-sm" href="/sow/person">+ Add person</a>
 </div>
-<p style="color:var(--text-muted);font-size:.86rem">The roster behind SOWs and estimates — one row per person: affiliation (Cheil or a vendor), the <b>SEA rate</b> billed to Samsung, and optionally the <b>vendor cost</b> paid out (the gap is the margin) or a salary. Estimates pick from this list; SOW resource rows auto-fill from it.</p>
+<p style="color:var(--text-muted);font-size:.86rem">Selling side (Client → Cheil), cost side (Cheil → Partner or salary), and the EBITA between them — click a name for the full profile (emails · PC · SVPN) and linked SOWs.</p>
 {saved_banner}
-<form method="post" action="/sow/person/save" class="sow-card" style="display:grid;{grid};gap:10px;align-items:center;padding:10px 18px;border-style:dashed">
-  <input class="slot" name="name" placeholder="+ New person" required>
-  <input class="slot" name="function" placeholder="Function">
-  <input class="slot" name="email" placeholder="email">
-  {aff_select('Cheil')}
-  <input class="slot" name="rate" placeholder="$/h" inputmode="decimal">
-  <input class="slot" name="vendor_cost" placeholder="—" inputmode="decimal">
-  <input class="slot" name="salary" placeholder="—" inputmode="decimal">
-  <input class="slot" name="location" placeholder="US / India" style="display:none">
-  <button type="submit" class="btn btn-primary btn-sm">+ Add</button><span></span>
+<div>{''.join(cards) or '<div class="sow-meta" style="padding:30px;text-align:center">No people yet.</div>'}</div>"""
+    return _shell(user, "People", body, wide=True)
+
+
+def _render_person_detail(user, person, saved=False):
+    data = _load(user)
+    p = person or {}
+    docs, auto_ids = _person_docs(data, p) if p.get("id") else ([], set())
+    vend_names = [v["name"] for v in data["vendors"]]
+    aff_opts = ["Cheil"] + vend_names + ["TBD"]
+    cur_aff = p.get("affiliation") or "Cheil"
+    if cur_aff not in aff_opts:
+        aff_opts.append(cur_aff)
+    aff_sel = "".join(f'<option{" selected" if a == cur_aff else ""}>{_esc(a)}</option>' for a in aff_opts)
+
+    def fld(label, name, ph="", typ="text", wide=False):
+        return (f'<div class="f-cell{" f-wide" if wide else ""}">'
+                f'<div style="font-size:.64rem;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:3px">{label}</div>'
+                f'<input class="slot" style="width:100%" type="{typ}" name="{name}" value="{_esc(p.get(name))}" placeholder="{_esc(ph)}"></div>')
+
+    ebita, ebita_auto = _person_ebita(p)
+    ebita_hint = (f'auto = Client budget − Partner cost = {_money(ebita)}'
+                  if (ebita is not None and ebita_auto) else 'auto needs Client budget + Partner cost — or type a value')
+
+    # linked docs: explicit links are checkboxes over every SOW/estimate doc;
+    # auto-detected ones are pre-noted.
+    doc_opts = []
+    linked = set(p.get("linked_sows") or [])
+    for s in sorted(data["sows"], key=lambda x: x.get("updated", ""), reverse=True):
+        k = TYPES.get(_sow_type(s), {})
+        if k.get("kind") not in ("sow", "est"):
+            continue
+        checked = " checked" if s["id"] in linked else ""
+        auto = ' <span style="font-size:.64rem;color:var(--success)">auto-linked</span>' if s["id"] in auto_ids else ""
+        doc_opts.append(
+            f'<label style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:.82rem;cursor:pointer">'
+            f'<input type="checkbox" name="linked_sows" value="{s["id"]}"{checked}>'
+            f'{k.get("icon","")} {_esc(s.get("title") or "(untitled)")}'
+            f'<span style="color:var(--text-muted);font-size:.72rem">{_esc(s.get("start") or "")}{(" ~ " + _esc(s.get("end"))) if s.get("end") else ""}</span>'
+            f'{auto}'
+            f'<a href="/sow/edit?id={s["id"]}" style="margin-left:auto;color:var(--accent);font-size:.74rem;text-decoration:none">open →</a></label>')
+
+    saved_banner = ('<div style="color:var(--success);font-size:.85rem;margin-bottom:12px">✓ Saved</div>'
+                    if saved else "")
+    body = f"""
+<div style="display:flex;align-items:center;gap:12px;margin:8px 0 16px">
+  <a class="btn btn-ghost btn-sm" href="/sow/people">←</a>
+  <h1 style="margin:0">{_esc(p.get('name') or 'New person')}</h1>
+</div>
+{saved_banner}
+<form method="post" action="/sow/person/save">
+<input type="hidden" name="id" value="{_esc(p.get('id') or '')}">
+<style>.f-grid3{{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}}.f-wide{{grid-column:1/-1}}</style>
+
+<div class="sow-card">
+  <div class="sec-title" style="font-size:.8rem;font-weight:800;margin-bottom:12px">Basics</div>
+  <div class="f-grid3">
+    {fld('Name', 'name', 'required')}
+    <div class="f-cell"><div style="font-size:.64rem;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:3px">소속</div>
+      <select class="slot" style="width:100%" name="affiliation">{aff_sel}</select></div>
+    {fld('Role / Title', 'role_title', 'e.g. Sr. Developer')}
+    {fld('투입 프로젝트 / SOW', 'project', 'e.g. AEM Bridge 2', wide=True)}
+    {fld('Location', 'location', 'US / India')}
+  </div>
+</div>
+
+<div class="sow-card">
+  <div class="sec-title" style="font-size:.8rem;font-weight:800;margin-bottom:12px">Client → Cheil <span style="font-weight:500;color:var(--text-muted)">(selling side)</span></div>
+  <div class="f-grid3">
+    {fld('Selling Rate (hr)', 'sell_hr', '$/h')}
+    {fld('Selling Rate (Mo)', 'sell_mo', 'auto: hr × 168')}
+    {fld('Client–Cheil Duration', 'client_duration', 'e.g. Apr – Oct 2026')}
+    {fld('Contracted Budget', 'client_budget', '$')}
+    {fld('Client–Cheil PO', 'client_po', 'PO #')}
+  </div>
+</div>
+
+<div class="sow-card">
+  <div class="sec-title" style="font-size:.8rem;font-weight:800;margin-bottom:12px">Cheil → Partner <span style="font-weight:500;color:var(--text-muted)">(cost side, vendor personnel)</span></div>
+  <div class="f-grid3">
+    {fld('Contract Rate (hr)', 'cost_hr', '$/h')}
+    {fld('Contract Rate (Mo)', 'cost_mo', 'auto: hr × 168')}
+    {fld('Cheil–Partner Duration', 'partner_duration')}
+    {fld('Contracted Cost', 'partner_cost', '$')}
+    {fld('Cheil–Partner PO (if any)', 'partner_po')}
+  </div>
+</div>
+
+<div class="sow-card">
+  <div class="sec-title" style="font-size:.8rem;font-weight:800;margin-bottom:12px">Cheil employee</div>
+  <div class="f-grid3">
+    {fld('Salary (Mo)', 'salary_mo', '$')}
+    {fld('Cheil Since', 'cheil_since', 'e.g. 2024-03')}
+    {fld('Cheil Salary + OH', 'salary_oh', '$')}
+  </div>
+</div>
+
+<div class="sow-card">
+  <div class="sec-title" style="font-size:.8rem;font-weight:800;margin-bottom:12px">EBITA by Cheil</div>
+  <div class="f-grid3">
+    {fld('EBITA (manual override)', 'ebita', ebita_hint)}
+  </div>
+</div>
+
+<div class="sow-card">
+  <div class="sec-title" style="font-size:.8rem;font-weight:800;margin-bottom:12px">Accounts &amp; equipment</div>
+  <div class="f-grid3">
+    {fld('Cheil.com Email', 'email_cheil')}
+    {fld('Samsung.com Email', 'email_samsung')}
+    {fld('PC', 'pc', 'asset / model')}
+    {fld('SVPN', 'svpn', 'account / status')}
+  </div>
+</div>
+
+<div class="sow-card">
+  <div class="sec-title" style="font-size:.8rem;font-weight:800;margin-bottom:12px">Linked SOWs &amp; estimates</div>
+  {''.join(doc_opts) or '<div style="font-size:.8rem;color:var(--text-muted)">No documents yet.</div>'}
+</div>
+
+<div style="display:flex;gap:10px;margin:16px 0 40px">
+  <button type="submit" class="btn btn-primary btn-lg">💾 Save</button>
+  {f'<button type="button" class="btn btn-danger" onclick="delPerson()">🗑 Delete</button>' if p.get('id') and not docs else ''}
+</div>
 </form>
-{head}
-<div>{''.join(rows) or '<div class="sow-meta" style="padding:30px;text-align:center">No people yet.</div>'}</div>
 <script>
-function delPerson(id){{
+function delPerson(){{
   if(!confirm('Delete this person from the roster?')) return;
-  fetch('/sow/person/delete', {{method:'POST', headers:{{'Content-Type':'application/x-www-form-urlencoded'}}, body:'id='+encodeURIComponent(id)}})
-    .then(function(){{ location.reload(); }});
+  fetch('/sow/person/delete', {{method:'POST', headers:{{'Content-Type':'application/x-www-form-urlencoded'}}, body:'id={_esc(p.get("id") or "")}'}})
+    .then(function(){{ location.href = '/sow/people'; }});
 }}
 </script>"""
-    return _shell(user, "People", body, wide=True)
+    return _shell(user, p.get("name") or "New person", body)
 
 
 def _est_rows_computed(sow):
@@ -1206,9 +1405,10 @@ def _render_est_editor(user, sow, type_key, saved=False):
     t = TYPES[type_key]
     saved_note = ('<span style="color:var(--success);font-size:.8rem;font-weight:700">✓ Saved</span>'
                   if saved else "")
-    people = [{"id": p["id"], "name": p.get("name") or "", "function": p.get("function") or "",
-               "email": p.get("email") or "", "location": p.get("location") or "",
-               "rate": p.get("rate") or "", "vendor_cost": p.get("vendor_cost") or ""}
+    people = [{"id": p["id"], "name": p.get("name") or "", "function": p.get("role_title") or "",
+               "email": p.get("email_samsung") or p.get("email_cheil") or "",
+               "location": p.get("location") or "",
+               "rate": p.get("sell_hr") or "", "vendor_cost": p.get("cost_hr") or ""}
               for p in data["people"]]
     cfg = {"people": people}
     body = f"""
@@ -1586,8 +1786,8 @@ def _render_doc_editor(user, sow, type_key, saved=False):
     sig_right = (f'<span class="vendorName">{_esc(cur_vendor.get("name") or "Contractor")}</span>'
                  if is_agency else CHEIL_ENTITY)
 
-    people_cfg = [{"name": pp.get("name") or "", "function": pp.get("function") or "",
-                   "location": pp.get("location") or "", "rate": pp.get("rate") or ""}
+    people_cfg = [{"name": pp.get("name") or "", "function": pp.get("role_title") or "",
+                   "location": pp.get("location") or "", "rate": pp.get("sell_hr") or ""}
                   for pp in data["people"]]
     cfg = {"vendors": vendors, "people": people_cfg}
     body = f"""
@@ -1792,8 +1992,8 @@ def _render_agreement_editor(user, sow, type_key, saved=False):
   </table></div>"""
         doc_title = NDA_TITLE
 
-    people_cfg = [{"name": pp.get("name") or "", "function": pp.get("function") or "",
-                   "location": pp.get("location") or "", "rate": pp.get("rate") or ""}
+    people_cfg = [{"name": pp.get("name") or "", "function": pp.get("role_title") or "",
+                   "location": pp.get("location") or "", "rate": pp.get("sell_hr") or ""}
                   for pp in data["people"]]
     cfg = {"vendors": vendors, "people": people_cfg}
     body = f"""
@@ -1862,6 +2062,13 @@ def handle(method, path, body, ctx):
     if method == "GET" and path == "/sow/people":
         return ("html", _render_people(user, saved=_f(body, "saved") == "1"))
 
+    if method == "GET" and path == "/sow/person":
+        pid = _f(body, "id")
+        data = _load(user)
+        person = next((p for p in data["people"] if p["id"] == pid), None)
+        return ("html", _render_person_detail(user, person or {},
+                                              saved=_f(body, "saved") == "1"))
+
     if method == "POST" and path == "/sow/person/save":
         data = _load(user)
         pid = _f(body, "id")
@@ -1869,18 +2076,25 @@ def handle(method, path, body, ctx):
         if not name:
             return ("redirect", "/sow/people")
         cur = next((p for p in data["people"] if p["id"] == pid), None)
-        rec = {"id": pid or uuid.uuid4().hex[:8], "name": name,
-               "function": _f(body, "function"), "email": _f(body, "email"),
-               "affiliation": _f(body, "affiliation") or "Cheil",
-               "location": _f(body, "location") or (cur or {}).get("location", ""),
-               "rate": _f(body, "rate"), "vendor_cost": _f(body, "vendor_cost"),
-               "salary": _f(body, "salary")}
+        linked = body.get("linked_sows") or []
+        if not isinstance(linked, list):
+            linked = [linked]
+        rec = _migrate_person({"id": pid or uuid.uuid4().hex[:8], "name": name,
+                               "sell_hr": ""})
+        for k in ("affiliation", "role_title", "project", "location",
+                  "sell_hr", "sell_mo", "client_duration", "client_budget", "client_po",
+                  "cost_hr", "cost_mo", "partner_duration", "partner_cost", "partner_po",
+                  "salary_mo", "cheil_since", "salary_oh", "ebita",
+                  "email_cheil", "email_samsung", "pc", "svpn"):
+            rec[k] = _f(body, k)
+        rec["affiliation"] = rec["affiliation"] or "Cheil"
+        rec["linked_sows"] = [str(x) for x in linked if x]
         if cur:
             data["people"][data["people"].index(cur)] = rec
         else:
             data["people"].append(rec)
         _save(user, data)
-        return ("redirect", "/sow/people?saved=1")
+        return ("redirect", f"/sow/person?id={rec['id']}&saved=1")
 
     if method == "POST" and path == "/sow/person/delete":
         data = _load(user)
