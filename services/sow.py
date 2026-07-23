@@ -1045,85 +1045,99 @@ def _fmt_money_cell(v):
 
 
 def _render_people(user, saved=False):
+    """Excel-style summary grid (강프로 2026-07-22): one row per person, the
+    3 money axes as banded column groups, first column pinned, horizontal
+    scroll inside the wrapper per the design-system reference-table rule."""
     data = _load(user)
-    cards = []
+
+    def mo_auto(hr_v, mo_v):
+        if mo_v:
+            return _fmt_money_cell(mo_v)
+        n = _num_or_none(hr_v)
+        return f"${n * 168:,.0f}" if n is not None else "–"
+
+    rows = []
     for p in data["people"]:
         docs, _ = _person_docs(data, p)
         ebita, ebita_auto = _person_ebita(p)
         aff = p.get("affiliation") or "Cheil"
         aff_chip = (f'<span class="dir-chip dir-samsung">{_esc(aff)}</span>' if aff == "Cheil"
                     else f'<span class="dir-chip dir-agency">{_esc(aff)}</span>')
-        sell_mo = p.get("sell_mo") or (
-            f"{_num_or_none(p.get('sell_hr')) * 168:,.0f}" if _num_or_none(p.get("sell_hr")) else "")
-        cost_mo = p.get("cost_mo") or (
-            f"{_num_or_none(p.get('cost_hr')) * 168:,.0f}" if _num_or_none(p.get("cost_hr")) else "")
+        if ebita is not None:
+            col = "var(--success)" if ebita >= 0 else "var(--danger)"
+            ebita_html = (f'<span style="color:{col};font-weight:700">{_money(ebita)}</span>'
+                          + ('<span style="font-size:.6rem;color:var(--text-muted)"> a</span>' if ebita_auto else ''))
+        else:
+            ebita_html = "–"
+        doc_html = (f'<a href="/sow/person?id={p["id"]}" style="color:var(--accent);text-decoration:none">'
+                    f'{len(docs)} 📄</a>' if docs else "–")
+        rows.append(
+            '<tr>'
+            f'<td class="pp-pin"><a href="/sow/person?id={p["id"]}" style="font-weight:700;color:var(--text);text-decoration:none">{_esc(p.get("name"))}</a><br>{aff_chip}</td>'
+            f'<td>{_esc(p.get("project") or "–")}</td>'
+            f'<td>{_esc(p.get("role_title") or "–")}</td>'
+            f'<td class="num">{_fmt_money_cell(p.get("sell_hr"))}</td>'
+            f'<td class="num">{mo_auto(p.get("sell_hr"), p.get("sell_mo"))}</td>'
+            f'<td>{_esc(p.get("client_duration") or "–")}</td>'
+            f'<td class="num">{_fmt_money_cell(p.get("client_budget"))}</td>'
+            f'<td>{_esc(p.get("client_po") or "–")}</td>'
+            f'<td class="num">{_fmt_money_cell(p.get("cost_hr"))}</td>'
+            f'<td class="num">{mo_auto(p.get("cost_hr"), p.get("cost_mo"))}</td>'
+            f'<td>{_esc(p.get("partner_duration") or "–")}</td>'
+            f'<td class="num">{_fmt_money_cell(p.get("partner_cost"))}</td>'
+            f'<td>{_esc(p.get("partner_po") or "–")}</td>'
+            f'<td class="num">{_fmt_money_cell(p.get("salary_mo"))}</td>'
+            f'<td>{_esc(p.get("cheil_since") or "–")}</td>'
+            f'<td class="num">{_fmt_money_cell(p.get("salary_oh"))}</td>'
+            f'<td class="num">{ebita_html}</td>'
+            f'<td style="text-align:center">{doc_html}</td>'
+            '</tr>')
 
-        def block(title, cells):
-            tds = "".join(f'<div><div style="font-size:.6rem;text-transform:uppercase;letter-spacing:.05em;'
-                          f'color:var(--text-muted)">{h}</div>'
-                          f'<div style="font-size:.82rem;font-variant-numeric:tabular-nums">{v}</div></div>'
-                          for h, v in cells)
-            return (f'<div style="display:flex;gap:18px;flex-wrap:wrap;align-items:baseline;'
-                    f'padding:7px 0;border-top:1px dashed var(--border)">'
-                    f'<span style="flex:0 0 110px;font-size:.68rem;font-weight:800;color:var(--text-muted)">{title}</span>'
-                    f'{tds}</div>')
-
-        rows_html = block("Client → Cheil", [
-            ("Selling/hr", _fmt_money_cell(p.get("sell_hr"))),
-            ("Selling/mo", _fmt_money_cell(sell_mo)),
-            ("Duration", _esc(p.get("client_duration") or "–")),
-            ("Contracted Budget", _fmt_money_cell(p.get("client_budget"))),
-            ("PO", _esc(p.get("client_po") or "–")),
-        ])
-        if aff != "Cheil" or any(p.get(k) for k in ("cost_hr", "partner_cost", "partner_po")):
-            rows_html += block("Cheil → Partner", [
-                ("Contract/hr", _fmt_money_cell(p.get("cost_hr"))),
-                ("Contract/mo", _fmt_money_cell(cost_mo)),
-                ("Duration", _esc(p.get("partner_duration") or "–")),
-                ("Contracted Cost", _fmt_money_cell(p.get("partner_cost"))),
-                ("PO", _esc(p.get("partner_po") or "–")),
-            ])
-        if aff == "Cheil" or any(p.get(k) for k in ("salary_mo", "salary_oh", "cheil_since")):
-            rows_html += block("Cheil employee", [
-                ("Salary/mo", _fmt_money_cell(p.get("salary_mo"))),
-                ("Cheil since", _esc(p.get("cheil_since") or "–")),
-                ("Salary + OH", _fmt_money_cell(p.get("salary_oh"))),
-            ])
-        ebita_html = (f'<span style="color:{"var(--success)" if ebita >= 0 else "var(--danger)"};font-weight:800">'
-                      f'{_money(ebita)}</span>'
-                      + ('<span style="font-size:.64rem;color:var(--text-muted)"> auto</span>' if ebita_auto else '')
-                      ) if ebita is not None else '<span style="color:var(--text-muted)">–</span>'
-        rows_html += block("EBITA by Cheil", [("", ebita_html)])
-
-        doc_links = " ".join(
-            f'<a href="/sow/edit?id={d["id"]}" style="color:var(--accent);text-decoration:none;font-size:.74rem">'
-            f'{TYPES[_sow_type(d)]["icon"]} {_esc(d.get("title") or "(untitled)")}</a>'
-            for d in docs[:4])
-        more = f' <span style="font-size:.7rem;color:var(--text-muted)">+{len(docs)-4}</span>' if len(docs) > 4 else ""
-        cards.append(f"""
-<div class="sow-card" style="padding:16px 22px;margin-bottom:12px">
-  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:4px">
-    <a href="/sow/person?id={p['id']}" style="font-weight:800;font-size:.98rem;color:var(--text);text-decoration:none">{_esc(p.get('name'))}</a>
-    {aff_chip}
-    <span style="font-size:.8rem;color:var(--text-muted)">{_esc(p.get('role_title') or '')}</span>
-    <span style="font-size:.76rem;color:var(--text-muted)">{_esc(p.get('project') or '')}</span>
-    <span style="margin-left:auto;display:flex;gap:8px;align-items:center">{doc_links}{more}
-      <a class="btn btn-ghost btn-sm" href="/sow/person?id={p['id']}">✎</a></span>
-  </div>
-  {rows_html}
-</div>""")
     saved_banner = ('<div style="color:var(--success);font-size:.85rem;margin-bottom:12px">✓ Saved</div>'
                     if saved else "")
     body = f"""
+<style>
+.pp-wrap{{overflow-x:auto;overscroll-behavior-x:contain;border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--surface)}}
+.pp-table{{border-collapse:collapse;font-size:.8rem;min-width:1750px;width:100%}}
+.pp-table th{{border:1px solid var(--border);padding:6px 9px;font-size:.62rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);background:var(--surface-2);text-align:left;white-space:nowrap}}
+.pp-table th.grp{{text-align:center;font-weight:800;color:var(--text)}}
+.pp-table th.g-sell{{background:rgba(56,189,248,.10)}}
+.pp-table th.g-cost{{background:rgba(251,146,60,.10)}}
+.pp-table th.g-emp{{background:rgba(52,211,153,.10)}}
+.pp-table th.g-ebita{{background:rgba(129,140,248,.12)}}
+.pp-table td{{border:1px solid var(--border);padding:7px 9px;white-space:nowrap}}
+.pp-table td.num{{text-align:right;font-variant-numeric:tabular-nums}}
+.pp-table .pp-pin,.pp-table th:first-child{{position:sticky;left:0;background:var(--surface);z-index:2;min-width:150px;box-shadow:2px 0 6px rgba(0,0,0,.25)}}
+.pp-table thead th:first-child{{background:var(--surface-2);z-index:3}}
+.pp-table tbody tr:hover td{{background:var(--surface-2)}}
+.pp-table tbody tr:hover td.pp-pin{{background:var(--surface-2)}}
+</style>
 <div style="display:flex;align-items:center;gap:12px;margin:8px 0 4px">
   <a class="btn btn-ghost btn-sm" href="/sow">←</a>
   <h1 style="margin:0">👥 People</h1>
-  <span class="spacer" style="flex:1"></span>
+  <span style="flex:1"></span>
   <a class="btn btn-primary btn-sm" href="/sow/person">+ Add person</a>
 </div>
-<p style="color:var(--text-muted);font-size:.86rem">Selling side (Client → Cheil), cost side (Cheil → Partner or salary), and the EBITA between them — click a name for the full profile (emails · PC · SVPN) and linked SOWs.</p>
+<p style="color:var(--text-muted);font-size:.86rem">One row per person — selling side, cost side, employee comp and EBITA in one sweep (scroll sideways; the name column stays pinned). Click a name for the full profile and linked SOWs.</p>
 {saved_banner}
-<div>{''.join(cards) or '<div class="sow-meta" style="padding:30px;text-align:center">No people yet.</div>'}</div>"""
+<div class="pp-wrap"><table class="pp-table">
+  <thead>
+    <tr>
+      <th rowspan="2">Name / 소속</th><th rowspan="2">Project / SOW</th><th rowspan="2">Role · Title</th>
+      <th class="grp g-sell" colspan="5">Client → Cheil</th>
+      <th class="grp g-cost" colspan="5">Cheil → Partner</th>
+      <th class="grp g-emp" colspan="3">Cheil employee</th>
+      <th class="grp g-ebita" rowspan="2">EBITA<br>by Cheil</th>
+      <th rowspan="2">Docs</th>
+    </tr>
+    <tr>
+      <th class="g-sell">Selling/hr</th><th class="g-sell">Selling/mo</th><th class="g-sell">Duration</th><th class="g-sell">Budget</th><th class="g-sell">PO</th>
+      <th class="g-cost">Contract/hr</th><th class="g-cost">Contract/mo</th><th class="g-cost">Duration</th><th class="g-cost">Cost</th><th class="g-cost">PO</th>
+      <th class="g-emp">Salary/mo</th><th class="g-emp">Since</th><th class="g-emp">Salary+OH</th>
+    </tr>
+  </thead>
+  <tbody>{''.join(rows) or '<tr><td colspan="19" style="text-align:center;padding:30px;color:var(--text-muted)">No people yet.</td></tr>'}</tbody>
+</table></div>"""
     return _shell(user, "People", body, wide=True)
 
 
