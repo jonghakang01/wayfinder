@@ -976,6 +976,11 @@ def _render_review(user: str) -> str:
     no_rcpt_n   = sum(1 for e in open_rows if not e.get("matched") and e.get("no_receipt"))
     unmatched   = total - matched - no_rcpt_n
     inprog_n    = sum(1 for e in rows if e.get("status") == "in_progress")
+    # No-receipt transactions inside In progress: shown small on the stat card
+    # so the number reconciles with the Ledger's receipt-based In progress
+    # count (Review counts transactions; the delta is exactly these).
+    inprog_nr_n = sum(1 for e in rows
+                      if e.get("status") == "in_progress" and e.get("no_receipt"))
     completed_n = sum(1 for e in rows if e.get("status") == "completed")
     li          = pool.get("last_ingest") or {}
     dup_skipped = li.get("dup_skipped", 0)
@@ -1350,7 +1355,7 @@ body:has(.fb-menu.open) .wf-back,body:has(.fb-menu.open) #wfThemeBtn{{display:no
     <div class="stat-card stat-click" data-rvview="matched" title="Open + receipt matched"><div class="stat-value" id="rvMatched" style="color:#22c55e">{matched}</div><div class="stat-label">Matched</div></div>
     <div class="stat-card stat-click" data-rvview="unmatched" title="Open, still waiting for a receipt"><div class="stat-value" id="rvUnmatched" style="color:#ef4444">{unmatched}</div><div class="stat-label">Unmatched</div></div>
     <div class="stat-card stat-click" data-rvview="noreceipt" title="Filed as receipt-less — no receipt exists for these"><div class="stat-value" style="color:#94a3b8">{no_rcpt_n}</div><div class="stat-label">📄 No Receipt</div></div>
-    <div class="stat-card stat-click" data-rvview="in_progress" title="Submitted to SAP, awaiting approval"><div class="stat-value" style="color:#f59e0b">{inprog_n}</div><div class="stat-label">⏳ In progress</div></div>
+    <div class="stat-card stat-click" data-rvview="in_progress" title="Submitted to SAP, awaiting approval. Ledger's In progress counts receipts only — the difference is the no-receipt transactions shown below."><div class="stat-value" style="color:#f59e0b">{inprog_n}</div><div class="stat-label">⏳ In progress</div>{f'<div style="font-size:.66rem;color:var(--text-muted);margin-top:3px">📄 no receipt: {inprog_nr_n}</div>' if inprog_nr_n else ''}</div>
     <div class="stat-card stat-click" data-rvview="completed" title="Settlement completed"><div class="stat-value" style="color:#818cf8">{completed_n}</div><div class="stat-label">✔ Completed</div></div>
   </div>
 
