@@ -945,6 +945,11 @@ def _build_receipt_index(receipts: list, username: str):
     for r in receipts:
         if r.get("completed"):
             continue
+        # Cash never appears on the AMEX statement — a cash receipt matching a
+        # statement line by date+amount coincidence silently flipped it to AMEX
+        # (2026-07-21 mirroring incident). Rule: cash can't match; matched ⇒ AMEX.
+        if (r.get("card_brand") or "") == "other":
+            continue
         rdate = r.get("ocr_date")
         if rdate == "YYYY-MM-DD":
             rdate = None
@@ -2558,9 +2563,9 @@ def _handle_status_change(username: str, entry_id: str, body: dict):
             e["matched"] = (status == "matched")
             if status == "matched":
                 e["matched_at"] = datetime.now().isoformat()
-                # Matched ⇒ AMEX transaction; fill brand only when unknown.
-                if not e.get("card_brand"):
-                    e["card_brand"] = "amex"
+                # Matched ⇒ AMEX unconditionally: the statement being matched
+                # against IS the AMEX statement (cash can never match).
+                e["card_brand"] = "amex"
             else:
                 e["usd_settled"] = None  # settled figure came from the link
             _save_ledger(username, ledger)
@@ -3490,10 +3495,16 @@ def _handle_ledger_update(username: str, entry_id: str, body: dict):
                         _save_tx_pool(username, pool)
                         break
         # Card brand: normalize to amex/visa/other, or clear when blank.
+        # Matched ⇒ AMEX by definition (the statement is AMEX), so a matched
+        # receipt cannot be flipped to Cash — unmatch first.
         raw = body.get("card_brand")
+        cash_blocked = False
         if raw is not None:
             val = (raw[0] if isinstance(raw, list) else str(raw)).strip().lower()
-            e["card_brand"] = val if val in ("amex", "visa", "other") else None
+            if val == "other" and e.get("matched"):
+                cash_blocked = True
+            else:
+                e["card_brand"] = val if val in ("amex", "visa", "other") else None
         # Reason for Cash: receipt is the source of truth; _sync_cash_pool
         # mirrors it onto the cash pool row for Review + the SAP column S.
         raw = body.get("cash_reason")
@@ -3532,7 +3543,7 @@ def _handle_ledger_update(username: str, entry_id: str, body: dict):
     if not updated:
         return ("json", {"error": "not found"}, 404)
     _save_ledger(username, ledger)
-    return ("json", {"ok": True})
+    return ("json", {"ok": True, "cash_blocked": cash_blocked})
 
 
 def _handle_ledger_bulk(username: str, body: dict):
@@ -3565,11 +3576,15 @@ def _handle_ledger_bulk(username: str, body: dict):
     comp = _coerce_companions(str(value).strip()) if (action == "companions" and value) else None
     ledger = _load_ledger(username)
     updated = 0
+    cash_blocked = 0
     for e in ledger["entries"]:
         if e.get("id") not in ids:
             continue
         if action == "card":
             v = str(value or "").strip().lower()
+            if v == "other" and e.get("matched"):
+                cash_blocked += 1  # matched ⇒ AMEX by definition
+                continue
             e["card_brand"] = v if v in ("amex", "visa", "other") else None
         elif action == "usage":
             e["usage"] = str(value or "").strip() or "Regular"
@@ -3588,7 +3603,7 @@ def _handle_ledger_bulk(username: str, body: dict):
                     dirty = True
             if dirty:
                 _save_tx_pool(username, pool)
-    return ("json", {"ok": True, "updated": updated})
+    return ("json", {"ok": True, "updated": updated, "cash_blocked": cash_blocked})
 
 
 def _handle_review_manual_match(username: str, body: dict):

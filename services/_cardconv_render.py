@@ -2746,6 +2746,10 @@ async function changeCard(sel){
     {method:'POST', body: new URLSearchParams({card_brand: val})});
   const d = await r.json().catch(function(){ return {}; });
   if(!d.ok){ alert('Card type update failed: ' + (d.error || r.status)); load(); return; }
+  if(d.cash_blocked){
+    toast('Matched receipts are AMEX by definition — unmatch first to mark as Cash.', true);
+    load(); return;
+  }
   const e = ENTRIES.find(function(x){ return x.id===id; }); if(e) e.card_brand = (val==='none' ? null : val);
 }
 
@@ -3167,6 +3171,8 @@ async function savePanelEdit(){
   var r = await fetch('/cardconv/ledger/' + CUR_ID + '/update', {method:'POST', body});
   var d = await r.json();
   if(!d.ok){ alert('Save failed: '+(d.error||r.status)); return; }
+  if(d.cash_blocked)
+    toast('Card type kept AMEX — matched receipts are AMEX by definition (unmatch first to mark as Cash). Other edits saved.', true);
   exitPanelEdit();
   load();
   closePanel();
@@ -3439,6 +3445,7 @@ async function bulkApply(action, value){
     if(d.attempted && d.moved < d.attempted)
       toast('Some Drive file moves did not apply. Settlement data was saved correctly.', true);
   }
+  else if(d.cash_blocked) toast('Updated ' + d.updated + ' — ' + d.cash_blocked + ' matched receipt(s) kept AMEX (matched ⇒ AMEX; unmatch first to mark as Cash)', true);
   else toast('Updated ' + d.updated + ' receipts');
   load();
 }
