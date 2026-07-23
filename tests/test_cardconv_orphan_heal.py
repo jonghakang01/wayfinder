@@ -67,10 +67,48 @@ def test_consistent_links_are_untouched(monkeypatch):
     assert st["saves"]["receipts"] == 0 and st["saves"]["pool"] == 0
 
 
-def test_no_matched_receipts_short_circuits(monkeypatch):
+def test_consistent_state_triggers_no_rematch(monkeypatch):
+    """No orphans on either side → the check stays a cheap no-op (the old
+    skip-pool-load shortcut hid ghost tx links when no receipt was matched,
+    so the pool is now always inspected — but rematch must not run)."""
     st = _isolate(monkeypatch, [{"id": "r1", "matched": False}], [])
-    # _load_tx_pool must not even be called — replace it with a tripwire.
-    monkeypatch.setattr(core, "_load_tx_pool",
-                        lambda u: (_ for _ in ()).throw(AssertionError("pool loaded")))
+    monkeypatch.setattr(core, "_rematch_pool",
+                        lambda u: (_ for _ in ()).throw(AssertionError("rematch ran")))
     core._heal_orphan_matches("u")
     assert st["saves"]["receipts"] == 0
+
+
+def test_ghost_tx_link_heals_and_repairs_to_survivor(monkeypatch):
+    """Deleting the matched copy of a duplicate leaves the transaction pointing
+    at a ghost receipt id (2026-07-22 STARBUCKS case): the matcher skipped the
+    'matched' tx forever and the surviving copy could never pair. The rematch
+    heal must unlink the ghost and immediately re-match the survivor."""
+    survivor = {"id": "rB", "matched": False, "match_status": "pending_match",
+                "ocr_date": "2026-07-13", "ocr_amount": 26.65,
+                "ocr_printed_amount": 26.65, "ocr_handwritten_amount": None,
+                "ocr_currency": "USD", "completed": False,
+                "matched_transaction": {"date": "2026-07-13", "amount": 26.65,
+                                        "vendor": "STARBUCKS DIGITAL"}}
+    ghost_tx = {"id": "t1", "date": "2026-07-13", "amount": 26.65,
+                "merchant": "STARBUCKS DIGITAL OPEN LO", "matched": True,
+                "receipt": {"id": "rA_deleted"}, "status": "open"}
+    st = _isolate(monkeypatch, [survivor], [ghost_tx])
+    core._rematch_pool("u")
+    tx = st["pool"]["entries"][0]
+    r = st["receipts"][0]
+    assert tx["matched"] is True
+    assert (tx.get("receipt") or {}).get("id") == "rB"
+    assert r["matched"] is True and r["match_status"] == "matched"
+
+
+def test_receipt_demote_clears_stale_snapshot(monkeypatch):
+    """A receipt demoted to pending by the orphan heal must drop its old
+    matched_transaction snapshot — a pending row with a ↳ matched line reads
+    as a stuck half-match."""
+    orphan = _orphan_receipt()
+    st = _isolate(monkeypatch, [orphan], [])   # no tx at all
+    core._rematch_pool("u")
+    r = st["receipts"][0]
+    assert r["matched"] is False
+    assert r["match_status"] == "pending_match"
+    assert r.get("matched_transaction") is None

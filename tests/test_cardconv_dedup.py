@@ -74,7 +74,12 @@ def test_migration_keeps_everything_open(tmp_path, monkeypatch):
         "date": "2026-06-01", "amount": 45.50, "merchant": "NEWSHOP",
         "matched": True, "receipt": {"id": "r1"}, "loss_reason": "",
     }]}
-    _isolate(tmp_path, monkeypatch, uploads=uploads, review=legacy_review)
+    # r1 must exist in the ledger — inherited links to deleted receipts are
+    # ghost links and the rematch heal correctly severs those now.
+    _isolate(tmp_path, monkeypatch, uploads=uploads, review=legacy_review,
+             receipts=[{"id": "r1", "matched": True, "match_status": "matched",
+                        "ocr_date": "2026-06-01", "ocr_amount": 45.50,
+                        "completed": False}])
 
     pool = core._load_tx_pool("u")
     assert len(pool["entries"]) == 2  # duplicate row ingested once

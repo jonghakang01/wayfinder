@@ -868,10 +868,12 @@ def _rematch_pool(username: str, only_receipt_ids=None) -> dict:
     """
     pool = _load_tx_pool(username)
     receipts = _load_receipts(username)
-    # Heal orphaned links first: a receipt can carry matched flags whose
-    # transaction-side link no longer exists (e.g. dropped by migration).
-    # Left as-is the matcher skips it forever. Runs even with no open
-    # transactions so a stale "Matched" badge never outlives its link.
+    # Heal orphaned links first, in both directions. Receipt side: matched
+    # flags whose transaction link no longer exists (dropped by migration) —
+    # left as-is the matcher skips the receipt forever. Transaction side: a
+    # link to a receipt that was deleted (e.g. removing the matched copy of a
+    # duplicate, 2026-07-22 STARBUCKS case) — left as-is the matcher skips the
+    # transaction forever and the surviving duplicate can never pair with it.
     linked = {(e.get("receipt") or {}).get("id")
               for e in pool.get("entries", []) if e.get("matched")}
     dirty_heal = False
@@ -880,12 +882,23 @@ def _rematch_pool(username: str, only_receipt_ids=None) -> dict:
             r["matched"] = False
             r["match_status"] = "pending_match"
             r["usd_settled"] = None
+            r["matched_transaction"] = None  # stale ↳ snapshot confuses the row
             dirty_heal = True
+    receipt_ids = {r.get("id") for r in receipts}
+    dirty_pool_heal = False
+    for e in pool.get("entries", []):
+        rid = (e.get("receipt") or {}).get("id")
+        if e.get("matched") and rid and rid not in receipt_ids:
+            e["matched"] = False
+            e["receipt"] = None
+            dirty_pool_heal = True
     todo = [e for e in pool.get("entries", [])
             if e.get("status") == "open" and not e.get("matched")]
     if not todo:
         if dirty_heal:
             _save_receipts(username, receipts)
+        if dirty_pool_heal:
+            _save_tx_pool(username, pool)
         return {"matched": 0}
     receipts_map, fx_receipts, dirty = _build_receipt_index(receipts, username)
     if only_receipt_ids:
@@ -900,7 +913,7 @@ def _rematch_pool(username: str, only_receipt_ids=None) -> dict:
             _apply_receipt_match(e, r, receipts)
             matched += 1
             dirty = True
-    if matched:
+    if matched or dirty_pool_heal:
         _save_tx_pool(username, pool)
     if dirty:
         _save_receipts(username, receipts)
@@ -915,12 +928,14 @@ def _heal_orphan_matches(username: str):
     set check on every load; the full heal+rematch runs only on an actual
     orphan, so this is a no-op when consistent."""
     receipts = _load_receipts(username)
-    if not any(r.get("matched") for r in receipts):
-        return
     pool = _load_tx_pool(username)
     linked = {(e.get("receipt") or {}).get("id")
               for e in pool.get("entries", []) if e.get("matched")}
-    if any(r.get("matched") and r.get("id") not in linked for r in receipts):
+    receipt_ids = {r.get("id") for r in receipts}
+    receipt_orphan = any(r.get("matched") and r.get("id") not in linked
+                         for r in receipts)
+    ghost_tx = any(rid and rid not in receipt_ids for rid in linked)
+    if receipt_orphan or ghost_tx:
         _rematch_pool(username)
 
 
@@ -2273,6 +2288,12 @@ def _handle_ledger_delete(username: str, body: dict):
         fid = e.get("file_id")
         if fid and fid not in live_fids and fid not in staged_fids:
             _mark_discarded_fid(username, fid, e.get("filename"))
+
+    # Deleting a matched receipt leaves its transaction pointing at a ghost —
+    # rematch immediately so the tx unlinks and can pair with a surviving copy
+    # (deleting the matched duplicate is the normal dup-cleanup flow).
+    if any(e.get("matched") for e in removed_entries):
+        _rematch_pool(username)
 
     trashed = 0
     if also_drive and removed_entries:
