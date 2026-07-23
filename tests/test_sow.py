@@ -138,3 +138,35 @@ def test_sample_renders_full_document():
         assert needle in html, needle
     html2 = m._render_example("agy_sow")
     assert "Master Services Agreement" in html2 and "Invictus" in html2
+
+
+def test_estimate_computation_matches_executed_file():
+    # AEM Bridge 2 numbers: $40/h dev → 6,720/mo, alloc 1, 5 months = 33,600;
+    # Woosuk $227 @ 10% → 3,813.6/mo, 19,068 total.
+    m = _mod()
+    sow = {"months": 5, "rows": [
+        {"name": "Woosuk", "rate": 227, "alloc": 0.1},
+        {"name": "Anuj", "rate": 40, "alloc": 1},
+    ]}
+    rows, tot_monthly, tot_total, _ = m._est_rows_computed(sow)
+    assert rows[0]["monthly"] == 227 * 168
+    assert round(rows[0]["monthly_cost"], 1) == 3813.6
+    assert round(rows[0]["total"], 0) == 19068
+    assert rows[1]["total"] == 33600
+    assert round(tot_total, 0) == 19068 + 33600
+
+
+def test_estimate_xlsx_builds_with_totals():
+    m = _mod()
+    sow = {"id": "e1", "title": "AEM Bridge 2", "months": 5,
+           "period_label": "From Aug til Dec (Total)",
+           "rows": [{"name": "Anuj Patel", "function": "Dev", "email": "a@x.com",
+                     "location": "India", "rate": 40, "alloc": 1}]}
+    blob = m._build_est_xlsx(sow)
+    assert blob[:2] == b"PK"
+    import openpyxl, io
+    ws = openpyxl.load_workbook(io.BytesIO(blob)).active
+    vals = [[c.value for c in r] for r in ws.iter_rows()]
+    assert vals[1][1] == "Resource" and vals[1][9] == "From Aug til Dec (Total)"
+    assert vals[2][1] == "Anuj Patel" and vals[2][6] == 6720 and vals[2][9] == 33600
+    assert vals[3][8] == 6720 and vals[3][9] == 33600  # totals row

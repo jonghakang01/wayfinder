@@ -34,6 +34,11 @@ TYPES = {
         "label": "Statement of Work",
         "desc": "Vendor SOW under the vendor's MSA — resources billed hourly or at monthly rates (pick inside).",
     },
+    "sea_est": {
+        "dir": "samsung", "kind": "est", "mode": None, "icon": "🧮",
+        "label": "Cost Estimation",
+        "desc": "Pick people from the roster, set allocation and months — billing (and internal cost) computes itself. Exports the estimation xlsx.",
+    },
     "agy_msa": {
         "dir": "agency", "kind": "msa", "mode": None, "icon": "📜",
         "label": "Master Services Agreement",
@@ -324,15 +329,16 @@ def _data_path(user):
 def _load(user):
     f = _data_path(user)
     if not os.path.exists(f):
-        return {"sows": [], "vendors": []}
+        return {"sows": [], "vendors": [], "people": []}
     try:
         with open(f) as fp:
             d = json.load(fp)
             d.setdefault("sows", [])
             d.setdefault("vendors", [])
+            d.setdefault("people", [])
             return d
     except Exception:
-        return {"sows": [], "vendors": []}
+        return {"sows": [], "vendors": [], "people": []}
 
 
 def _save(user, data):
@@ -903,6 +909,9 @@ def _sow_rows(user, data):
         if t["kind"] == "sow":
             _, fee, _ = _build_schedule(s)
             fee = _money(fee)
+        elif t["kind"] == "est":
+            _, _, tot, _ = _est_rows_computed(s)
+            fee = _money(tot)
         else:
             fee = "—"
         d = s.get("direction", "samsung")
@@ -950,11 +959,294 @@ def _render_landing(user):
 </div>
 <div style="display:flex;align-items:center;justify-content:space-between;margin:0 0 12px">
   <h2 style="font-size:1rem;font-weight:800;margin:0">My Documents</h2>
-  <a class="btn btn-secondary btn-sm" href="/sow/vendors">🏢 Vendors</a>
+  <span style="display:flex;gap:8px">
+    <a class="btn btn-secondary btn-sm" href="/sow/people">👥 People</a>
+    <a class="btn btn-secondary btn-sm" href="/sow/vendors">🏢 Vendors</a>
+  </span>
 </div>
 <div class="sow-list">{rows or '<div class="sow-meta" style="padding:36px;text-align:center">No SOWs yet — pick a counterpart above to start.</div>'}</div>
 {_DEL_JS}"""
     return _shell(user, "SOW Assistant", body)
+
+
+def _person_doc_count(data, person):
+    """Documents referencing this person — estimate rows by id, SOW resource
+    rows by (free-text) name."""
+    n = 0
+    pname = (person.get("name") or "").strip().lower()
+    for s in data["sows"]:
+        if s.get("kind") == "est" or TYPES.get(_sow_type(s), {}).get("kind") == "est":
+            if any(r.get("person_id") == person["id"] for r in s.get("rows", [])):
+                n += 1
+        else:
+            for r in s.get("resources", []):
+                nm = (r.get("profile") or r.get("name") or "").strip().lower()
+                if pname and nm == pname:
+                    n += 1
+                    break
+    return n
+
+
+def _render_people(user, saved=False):
+    data = _load(user)
+    vend_names = [v["name"] for v in data["vendors"]]
+    aff_opts = ["Cheil"] + vend_names + ["TBD"]
+
+    def aff_select(cur):
+        opts = "".join(f'<option value="{_esc(a)}"{" selected" if a == cur else ""}>{_esc(a)}</option>'
+                       for a in aff_opts)
+        extra = ""
+        if cur and cur not in aff_opts:
+            extra = f'<option value="{_esc(cur)}" selected>{_esc(cur)}</option>'
+        return f'<select class="slot" name="affiliation">{opts}{extra}</select>'
+
+    grid = "grid-template-columns:1.2fr 0.8fr 1.4fr 0.9fr 0.7fr 0.7fr 0.7fr auto auto"
+    head = f"""
+<div class="sow-card" style="display:grid;{grid};gap:10px;padding:8px 18px;font-size:.66rem;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);border:none;background:none;margin:0">
+  <span>Name</span><span>Function</span><span>Email</span><span>Affiliation</span>
+  <span>SEA rate/h</span><span>Vendor cost/h</span><span>Salary/mo</span><span></span><span></span>
+</div>"""
+    rows = []
+    for p in data["people"]:
+        n = _person_doc_count(data, p)
+        del_btn = (f'<button type="button" class="btn btn-danger btn-sm" onclick="delPerson(\'{p["id"]}\')">🗑</button>'
+                   if n == 0 else
+                   f'<span style="font-size:.7rem;color:var(--text-muted)" title="Referenced by {n} document(s)">{n} doc(s)</span>')
+        rows.append(f"""
+<form method="post" action="/sow/person/save" class="sow-card" style="display:grid;{grid};gap:10px;align-items:center;padding:10px 18px;margin-bottom:8px">
+  <input type="hidden" name="id" value="{p['id']}">
+  <input class="slot" name="name" value="{_esc(p.get('name'))}" title="{_esc(p.get('location') or '')}">
+  <input class="slot" name="function" value="{_esc(p.get('function'))}" placeholder="Dev / QA / Lead">
+  <input class="slot" name="email" value="{_esc(p.get('email'))}">
+  {aff_select(p.get('affiliation') or 'Cheil')}
+  <input class="slot" name="rate" value="{_esc(p.get('rate'))}" placeholder="$/h" inputmode="decimal">
+  <input class="slot" name="vendor_cost" value="{_esc(p.get('vendor_cost'))}" placeholder="—" inputmode="decimal">
+  <input class="slot" name="salary" value="{_esc(p.get('salary'))}" placeholder="—" inputmode="decimal">
+  <input type="hidden" name="location" value="{_esc(p.get('location'))}">
+  <button type="submit" class="btn btn-secondary btn-sm">💾</button>
+  {del_btn}
+</form>""")
+    saved_banner = ('<div style="color:var(--success);font-size:.85rem;margin-bottom:12px">✓ Saved</div>'
+                    if saved else "")
+    body = f"""
+<div style="display:flex;align-items:center;gap:12px;margin:8px 0 4px">
+  <a class="btn btn-ghost btn-sm" href="/sow">←</a>
+  <h1 style="margin:0">👥 People</h1>
+</div>
+<p style="color:var(--text-muted);font-size:.86rem">The roster behind SOWs and estimates — one row per person: affiliation (Cheil or a vendor), the <b>SEA rate</b> billed to Samsung, and optionally the <b>vendor cost</b> paid out (the gap is the margin) or a salary. Estimates pick from this list; SOW resource rows auto-fill from it.</p>
+{saved_banner}
+<form method="post" action="/sow/person/save" class="sow-card" style="display:grid;{grid};gap:10px;align-items:center;padding:10px 18px;border-style:dashed">
+  <input class="slot" name="name" placeholder="+ New person" required>
+  <input class="slot" name="function" placeholder="Function">
+  <input class="slot" name="email" placeholder="email">
+  {aff_select('Cheil')}
+  <input class="slot" name="rate" placeholder="$/h" inputmode="decimal">
+  <input class="slot" name="vendor_cost" placeholder="—" inputmode="decimal">
+  <input class="slot" name="salary" placeholder="—" inputmode="decimal">
+  <input class="slot" name="location" placeholder="US / India" style="display:none">
+  <button type="submit" class="btn btn-primary btn-sm">+ Add</button><span></span>
+</form>
+{head}
+<div>{''.join(rows) or '<div class="sow-meta" style="padding:30px;text-align:center">No people yet.</div>'}</div>
+<script>
+function delPerson(id){{
+  if(!confirm('Delete this person from the roster?')) return;
+  fetch('/sow/person/delete', {{method:'POST', headers:{{'Content-Type':'application/x-www-form-urlencoded'}}, body:'id='+encodeURIComponent(id)}})
+    .then(function(){{ location.reload(); }});
+}}
+</script>"""
+    return _shell(user, "People", body, wide=True)
+
+
+def _est_rows_computed(sow):
+    """Per-row computed figures + totals for an estimate document."""
+    months = float(sow.get("months") or 0)
+    out, tot_monthly, tot_total, tot_cost = [], 0.0, 0.0, 0.0
+    for r in sow.get("rows", []):
+        rate = float(r.get("rate") or 0)
+        alloc = float(r.get("alloc") or 1)
+        monthly = rate * 168
+        mcost = monthly * alloc
+        total = mcost * months
+        vc = float(r.get("vendor_cost") or 0)
+        out.append({**r, "monthly": monthly, "monthly_cost": mcost, "total": total})
+        tot_monthly += mcost
+        tot_total += total
+        tot_cost += vc * 168 * alloc * months
+    return out, round(tot_monthly, 2), round(tot_total, 2), round(tot_cost, 2)
+
+
+def _build_est_xlsx(sow):
+    """Estimation workbook in the executed 'Cost Estimation' layout:
+    Resource | Function | Email ID | Location | Rate | Monthly | Allocation |
+    Monthly Cost | <period total> — with the totals row at the bottom."""
+    import openpyxl
+    from openpyxl.styles import Font, Alignment, Border, Side
+
+    rows, tot_monthly, tot_total, _ = _est_rows_computed(sow)
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Cost Estimation"
+    period = sow.get("period_label") or f"{sow.get('months') or 0} months (Total)"
+    headers = ["", "Resource", "Function", "Email ID", "Location", "Rate",
+               "Monthly", "Allocation", "Monthly Cost", period]
+    thin = Border(bottom=Side(style="thin", color="CCCCCC"))
+    ws.append([])
+    ws.append(headers)
+    for c in ws[2]:
+        c.font = Font(bold=True)
+        c.border = thin
+    for r in rows:
+        ws.append(["", r.get("name") or "", r.get("function") or "",
+                   r.get("email") or "", r.get("location") or "",
+                   float(r.get("rate") or 0), r["monthly"],
+                   float(r.get("alloc") or 1), r["monthly_cost"], r["total"]])
+    ws.append(["", "", "", "", "", "", "", "", tot_monthly, tot_total])
+    for c in ws[ws.max_row]:
+        c.font = Font(bold=True)
+    widths = [3, 22, 10, 26, 10, 8, 10, 11, 13, 16]
+    for i, w in enumerate(widths, 1):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
+    for col in ("F", "G", "I", "J"):
+        for cell in ws[col]:
+            cell.number_format = "#,##0"
+            cell.alignment = Alignment(horizontal="right")
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+_EST_JS = """<script>
+var EROWS = __ROWS__;
+var CFG = __CFG__;
+function $id(x){ return document.getElementById(x); }
+function money(x){
+  if(isNaN(x)) return '$0';
+  var r = Math.round(x*100)/100;
+  return '$' + (Math.abs(r-Math.round(r))<0.005 ? Math.round(r).toLocaleString('en-US')
+              : r.toLocaleString('en-US', {minimumFractionDigits:2}));
+}
+function months(){ return parseFloat($id('fMonths').value) || 0; }
+function renderRows(){
+  var tb = $id('estBody'); tb.innerHTML = '';
+  EROWS.forEach(function(r, i){
+    var tr = document.createElement('tr');
+    var opts = '<option value="">— pick —</option>' + CFG.people.map(function(p){
+      return '<option value="' + p.id + '"' + (r.person_id === p.id ? ' selected' : '') + '>' + p.name + '</option>';
+    }).join('');
+    tr.innerHTML =
+      '<td><select class="slot" data-k="person_id" data-i="' + i + '">' + opts + '</select></td>'
+      + cell(r,'function',i) + cell(r,'location',i) + cell(r,'rate',i)
+      + '<td class="num c-monthly"></td>' + cell(r,'alloc',i)
+      + '<td class="num c-mcost"></td><td class="num c-total"></td>'
+      + '<td style="border:none"><button type="button" class="row-del" onclick="rmRow('+i+')">✕</button></td>';
+    tb.appendChild(tr);
+  });
+  paint();
+}
+function cell(r, k, i){
+  var v = r[k] != null ? String(r[k]).replace(/"/g,'&quot;') : '';
+  return '<td><input class="slot" data-k="'+k+'" data-i="'+i+'" value="'+v+'"></td>';
+}
+function paint(){
+  var m = months(), totM = 0, totT = 0, totC = 0, anyVc = false;
+  document.querySelectorAll('#estBody tr').forEach(function(tr, i){
+    var r = EROWS[i] || {};
+    var monthly = (parseFloat(r.rate)||0)*168;
+    var mcost = monthly*(parseFloat(r.alloc)||1);
+    var total = mcost*m;
+    totM += mcost; totT += total;
+    var vc = parseFloat(r.vendor_cost)||0;
+    if(vc){ anyVc = true; totC += vc*168*(parseFloat(r.alloc)||1)*m; }
+    tr.querySelector('.c-monthly').textContent = money(monthly);
+    tr.querySelector('.c-mcost').textContent = money(mcost);
+    tr.querySelector('.c-total').textContent = money(total);
+  });
+  $id('totMonthly').textContent = money(totM);
+  $id('totTotal').textContent = money(totT);
+  var mg = $id('marginLine');
+  if(anyVc && totT){
+    mg.style.display = '';
+    mg.textContent = 'internal cost ' + money(totC) + ' \\u00b7 margin ' + money(totT - totC)
+      + ' (' + Math.round((totT - totC)/totT*100) + '%)';
+  } else mg.style.display = 'none';
+}
+function addRow(){ EROWS.push({alloc: 1}); renderRows(); }
+function rmRow(i){ EROWS.splice(i,1); renderRows(); }
+document.addEventListener('input', function(e){
+  var k = e.target.dataset && e.target.dataset.k;
+  if(!k) { if(e.target.id === 'fMonths') paint(); return; }
+  EROWS[parseInt(e.target.dataset.i)][k] = e.target.value;
+  paint();
+});
+document.addEventListener('change', function(e){
+  if(e.target.dataset && e.target.dataset.k === 'person_id'){
+    var i = parseInt(e.target.dataset.i);
+    var p = CFG.people.find(function(x){ return x.id === e.target.value; });
+    if(p){
+      EROWS[i] = {person_id: p.id, name: p.name, function: p.function, email: p.email,
+                  location: p.location, rate: p.rate, vendor_cost: p.vendor_cost,
+                  alloc: EROWS[i].alloc || 1};
+      renderRows();
+    }
+  }
+});
+document.getElementById('sowForm').addEventListener('submit', function(){
+  $id('rowsJson').value = JSON.stringify(EROWS.filter(function(r){
+    return r.person_id || String(r.rate||'').trim();
+  }));
+});
+if(!EROWS.length) EROWS.push({alloc: 1});
+renderRows();
+</script>"""
+
+
+def _render_est_editor(user, sow, type_key, saved=False):
+    data = _load(user)
+    t = TYPES[type_key]
+    saved_note = ('<span style="color:var(--success);font-size:.8rem;font-weight:700">✓ Saved</span>'
+                  if saved else "")
+    people = [{"id": p["id"], "name": p.get("name") or "", "function": p.get("function") or "",
+               "email": p.get("email") or "", "location": p.get("location") or "",
+               "rate": p.get("rate") or "", "vendor_cost": p.get("vendor_cost") or ""}
+              for p in data["people"]]
+    cfg = {"people": people}
+    body = f"""
+<form method="post" action="/sow/save" id="sowForm">
+<input type="hidden" name="id" value="{_esc(sow.get('id') or '')}">
+<input type="hidden" name="type" value="{type_key}">
+<input type="hidden" name="rows_json" id="rowsJson">
+<div class="doc-bar">
+  <a class="btn btn-ghost btn-sm" href="/sow" title="All documents">←</a>
+  <span class="dir-chip dir-samsung">SEA</span>
+  <span style="font-size:.82rem;font-weight:700">🧮 Cost Estimation</span>
+  <a class="btn btn-ghost btn-sm" href="/sow/people">👥 People</a>
+  <span class="spacer"></span>
+  {saved_note}
+  {f'<a class="btn btn-secondary btn-sm" href="/sow/xlsx?id={sow["id"]}">⬇ xlsx</a>' if sow.get('id') else ''}
+  <button type="submit" class="btn btn-primary btn-sm">💾 Save</button>
+</div>
+<div class="paper" style="max-width:1200px">
+  <div class="doc-title">{_slot('title', sow.get('title'), 'Estimation title — e.g. AEM Bridge 2', 'style="width:100%;font-weight:800;font-size:1.15rem"')}</div>
+  <div style="font-weight:800;margin:8px 0 18px">COST ESTIMATION</div>
+  <div class="meta-line"><b>PROJECT:</b> {_slot('project_name', sow.get('project_name'), 'project', 'style="flex:1"')}</div>
+  <div class="meta-line"><b>PERIOD:</b> {_slot('period_label', sow.get('period_label'), 'e.g. From Aug til Dec (Total)')}
+    <b style="margin-left:14px"># MONTHS:</b> <input class="slot" type="number" step="0.1" min="0" name="months" id="fMonths" value="{_esc(sow.get('months') or 5)}" style="width:80px"></div>
+
+  <h2>Resources <span style="font-size:.7rem;color:var(--text-muted);font-weight:500">Monthly = rate × 168h · Monthly Cost = Monthly × allocation · Total = Monthly Cost × months</span></h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Resource</th><th>Function</th><th>Location</th><th>Rate/h</th><th>Monthly</th><th>Allocation</th><th>Monthly Cost</th><th>Total</th><th style="border:none"></th></tr></thead>
+    <tbody id="estBody"></tbody>
+    <tfoot><tr><td colspan="6" style="text-align:right"><b>Totals</b></td><td class="num"><b id="totMonthly">$0</b></td><td class="num"><b id="totTotal">$0</b></td><td style="border:none"></td></tr></tfoot>
+  </table></div>
+  <button type="button" class="btn btn-ghost btn-sm add-row-btn" onclick="addRow()">+ Add resource</button>
+  <div id="marginLine" style="display:none;margin-top:10px;font-size:.76rem;color:var(--text-muted)"></div>
+  <div class="ro-note">Pick people from the roster — rate/function auto-fill (editable per row). Figures recompute live.</div>
+</div>
+</form>
+""" + _EST_JS.replace("__ROWS__", json.dumps(sow.get("rows", [])).replace("</", "<\\/")) \
+             .replace("__CFG__", json.dumps(cfg).replace("</", "<\\/")) + _EX_TOGGLE_JS
+    return _shell(user, "Cost Estimation", body, wide=True)
 
 
 def _render_vendors(user, saved=False):
@@ -1024,6 +1316,10 @@ def _render_types(user, dir_key):
     sections = f"""
 <h2 style="font-size:.92rem;font-weight:800;margin:22px 0 0">Statement of Work</h2>
 <div class="type-grid">{cards('sow')}</div>"""
+    if not is_agy:
+        sections += f"""
+<h2 style="font-size:.92rem;font-weight:800;margin:10px 0 0">Estimation</h2>
+<div class="type-grid">{cards('est')}</div>"""
     if is_agy:
         sections += f"""
 <h2 style="font-size:.92rem;font-weight:800;margin:10px 0 0">Agreements</h2>
@@ -1159,7 +1455,26 @@ function renderRes(){
 }
 function cell(r, k, i){
   var v = r[k] != null ? String(r[k]).replace(/"/g,'&quot;') : '';
-  return '<td><input class="slot" data-k="'+k+'" data-i="'+i+'" value="'+v+'"></td>';
+  var dl = (k === 'profile' || k === 'name') ? ' list="peopleList"' : '';
+  return '<td><input class="slot" data-k="'+k+'" data-i="'+i+'" value="'+v+'"'+dl+'></td>';
+}
+function rosterFill(i, name){
+  var p = (CFG.people || []).find(function(x){ return x.name === name; });
+  if(!p) return;
+  var r = RES[i];
+  if(mode() === 'hourly'){
+    if(!r.hourly && p.rate) r.hourly = p.rate;
+    if(!r.location && p.location) r.location = p.location;
+  } else {
+    if(!r.role && p.function) r.role = p.function;
+    if(!r.region && p.location) r.region = p.location;
+    if(!r.rate && p.rate) r.rate = String(Math.round(parseFloat(p.rate)*168));
+  }
+  var tr = document.querySelectorAll('#resBody tr')[i];
+  if(tr) tr.querySelectorAll('input[data-k]').forEach(function(inp){
+    if(inp.dataset.k !== 'profile' && inp.dataset.k !== 'name')
+      inp.value = r[inp.dataset.k] != null ? r[inp.dataset.k] : '';
+  });
 }
 function addRow(){ RES.push({}); renderRes(); renderSched(); updateResComputed(); }
 function rmRow(i){ RES.splice(i,1); renderRes(); renderSched(); updateResComputed(); }
@@ -1174,7 +1489,9 @@ document.addEventListener('input', function(e){
   }
   var k = e.target.dataset && e.target.dataset.k;
   if(k){
-    RES[parseInt(e.target.dataset.i)][k] = e.target.value;
+    var i = parseInt(e.target.dataset.i);
+    RES[i][k] = e.target.value;
+    if(k === 'profile' || k === 'name') rosterFill(i, e.target.value);
     renderSched(); updateResComputed();
   }
 });
@@ -1269,7 +1586,10 @@ def _render_doc_editor(user, sow, type_key, saved=False):
     sig_right = (f'<span class="vendorName">{_esc(cur_vendor.get("name") or "Contractor")}</span>'
                  if is_agency else CHEIL_ENTITY)
 
-    cfg = {"vendors": vendors}
+    people_cfg = [{"name": pp.get("name") or "", "function": pp.get("function") or "",
+                   "location": pp.get("location") or "", "rate": pp.get("rate") or ""}
+                  for pp in data["people"]]
+    cfg = {"vendors": vendors, "people": people_cfg}
     body = f"""
 <form method="post" action="/sow/save" id="sowForm">
 <input type="hidden" name="id" value="{_esc(sow.get('id') or '')}">
@@ -1361,6 +1681,7 @@ def _render_doc_editor(user, sow, type_key, saved=False):
 </div>
 {_render_example(type_key)}
 </div>
+<datalist id="peopleList">{"".join(f'<option value="{_esc(pp["name"])}">' for pp in people_cfg)}</datalist>
 </form>
 """ + _EDITOR_JS.replace("__RES__", json.dumps(sow.get("resources", [])).replace("</", "<\\/")) \
                 .replace("__OV__", json.dumps(sow.get("schedule_overrides") or {}).replace("</", "<\\/")) \
@@ -1471,7 +1792,10 @@ def _render_agreement_editor(user, sow, type_key, saved=False):
   </table></div>"""
         doc_title = NDA_TITLE
 
-    cfg = {"vendors": vendors}
+    people_cfg = [{"name": pp.get("name") or "", "function": pp.get("function") or "",
+                   "location": pp.get("location") or "", "rate": pp.get("rate") or ""}
+                  for pp in data["people"]]
+    cfg = {"vendors": vendors, "people": people_cfg}
     body = f"""
 <form method="post" action="/sow/save" id="sowForm">
 <input type="hidden" name="id" value="{_esc(sow.get('id') or '')}">
@@ -1535,6 +1859,50 @@ def handle(method, path, body, ctx):
     if method == "GET" and path == "/sow/vendors":
         return ("html", _render_vendors(user, saved=_f(body, "saved") == "1"))
 
+    if method == "GET" and path == "/sow/people":
+        return ("html", _render_people(user, saved=_f(body, "saved") == "1"))
+
+    if method == "POST" and path == "/sow/person/save":
+        data = _load(user)
+        pid = _f(body, "id")
+        name = _f(body, "name")
+        if not name:
+            return ("redirect", "/sow/people")
+        cur = next((p for p in data["people"] if p["id"] == pid), None)
+        rec = {"id": pid or uuid.uuid4().hex[:8], "name": name,
+               "function": _f(body, "function"), "email": _f(body, "email"),
+               "affiliation": _f(body, "affiliation") or "Cheil",
+               "location": _f(body, "location") or (cur or {}).get("location", ""),
+               "rate": _f(body, "rate"), "vendor_cost": _f(body, "vendor_cost"),
+               "salary": _f(body, "salary")}
+        if cur:
+            data["people"][data["people"].index(cur)] = rec
+        else:
+            data["people"].append(rec)
+        _save(user, data)
+        return ("redirect", "/sow/people?saved=1")
+
+    if method == "POST" and path == "/sow/person/delete":
+        data = _load(user)
+        pid = _f(body, "id")
+        person = next((p for p in data["people"] if p["id"] == pid), None)
+        if person and _person_doc_count(data, person) == 0:
+            data["people"] = [p for p in data["people"] if p["id"] != pid]
+            _save(user, data)
+        return ("redirect", "/sow/people")
+
+    if method == "GET" and path.startswith("/sow/xlsx"):
+        sid = _f(body, "id")
+        data = _load(user)
+        sow = next((s for s in data["sows"] if s["id"] == sid), None)
+        if not sow or TYPES.get(_sow_type(sow), {}).get("kind") != "est":
+            return ("redirect", "/sow")
+        blob = _build_est_xlsx(sow)
+        safe = "".join(c if c.isalnum() or c in " ._-" else "_" for c in (sow.get("title") or "Estimation"))[:60].strip()
+        return ("file_inline", blob,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                f"Cheil_Estimation_{safe}.xlsx")
+
     if method == "POST" and path == "/sow/vendor/save":
         data = _load(user)
         vid = _f(body, "id")
@@ -1566,12 +1934,14 @@ def handle(method, path, body, ctx):
             return ("binary", open(logo, "rb").read(), "image/png")
         return ("html", "", )
 
+    def _editor_for(kind):
+        return {"sow": _render_doc_editor, "est": _render_est_editor}.get(kind, _render_agreement_editor)
+
     if method == "GET" and path.startswith("/sow/new"):
         tkey = _f(body, "type")
         if tkey not in TYPES:
             return ("redirect", "/sow")
-        render = _render_doc_editor if TYPES[tkey]["kind"] == "sow" else _render_agreement_editor
-        return ("html", render(user, {}, tkey))
+        return ("html", _editor_for(TYPES[tkey]["kind"])(user, {}, tkey))
 
     if method == "GET" and path.startswith("/sow/edit"):
         # GET dispatch strips the query string; params arrive as the body dict.
@@ -1581,8 +1951,7 @@ def handle(method, path, body, ctx):
         if not sow:
             return ("redirect", "/sow")
         tkey = _sow_type(sow)
-        render = _render_doc_editor if TYPES[tkey]["kind"] == "sow" else _render_agreement_editor
-        return ("html", render(user, sow, tkey, saved=_f(body, "saved") == "1"))
+        return ("html", _editor_for(TYPES[tkey]["kind"])(user, sow, tkey, saved=_f(body, "saved") == "1"))
 
     if method == "POST" and path == "/sow/save":
         data = _load(user)
@@ -1611,6 +1980,27 @@ def handle(method, path, body, ctx):
                 "msa_date": _f(body, "v_msa"),
             })
         sow = next((s for s in data["sows"] if s["id"] == sid), None)
+        if t["kind"] == "est":
+            try:
+                est_rows = json.loads(_f(body, "rows_json") or "[]")
+                assert isinstance(est_rows, list)
+            except Exception:
+                est_rows = []
+            rec = {
+                "id": sid, "type": tkey, "direction": t["dir"], "kind": "est",
+                "title": _f(body, "title"), "project_name": _f(body, "project_name"),
+                "period_label": _f(body, "period_label"),
+                "months": _f(body, "months") or "0",
+                "rows": est_rows,
+                "created": (sow or {}).get("created") or datetime.now().isoformat(),
+                "updated": datetime.now().isoformat(),
+            }
+            if sow:
+                data["sows"][data["sows"].index(sow)] = rec
+            else:
+                data["sows"].append(rec)
+            _save(user, data)
+            return ("redirect", f"/sow/edit?id={sid}&saved=1")
         if t["kind"] != "sow":
             vend = next((v for v in data["vendors"] if v["id"] == vendor_id), None)
             label = "MSA" if t["kind"] == "msa" else "NDA"

@@ -223,10 +223,40 @@ def render(user):
     </ul>
   </div>
 
-  <div class="ds-sect"><h2>5 · Extending the system</h2>
+  <div class="ds-sect"><h2>5 · Mobile UX standard <span style="font-size:.7rem;color:var(--text-muted);font-weight:500">(2026-07-22 · full spec: docs/mobile_ux_guideline.md · reference impl: cardconv)</span></h2>
+    <ul class="ds-rules">
+      <li><b>Breakpoints</b> — mobile <code>@media(max-width:768px)</code> (standard for all new rules),
+          small <code>480px</code> density-only. Assume touch from 768 down; hover needs a visible non-hover twin.</li>
+      <li><b>Chrome budget ≤ 25% of viewport</b> — nav is one line (<code>.nav-brand</code> ellipsis, never wraps);
+          pill tabs never wrap: <code>flex-wrap:nowrap; overflow-x:auto</code>, scrollbar hidden, active tab auto-centered.
+          Workflow/filter/intake bars scroll away, they don't stick.</li>
+      <li><b>Touch targets</b> — primary controls ≥44px hit area (grow with padding, not glyph);
+          checkboxes: global <code>min-width/min-height:20px</code> guardrail beats any <code>width:Npx</code>.
+          All tappables get <code>touch-action:manipulation</code> + a visible <code>:active</code> state.</li>
+      <li><b>Inputs</b> — global guardrail: every input/select/textarea gets <code>font-size:16px!important</code>
+          at ≤768px (computed &lt;16px triggers iOS focus auto-zoom; never "fix" with maximum-scale).
+          Money: <code>type=text inputmode=decimal</code>, tabular-nums.</li>
+      <li><b>Tables</b> — transactional rows → card transform, ≤6 visible fields (deep edits live in the
+          detail panel, full-width on mobile); reference tables → own <code>overflow-x:auto</code> wrapper.
+          The page body never scrolls horizontally.</li>
+      <li><b>Bulk action bars</b> — hidden until selection &gt; 0, then fixed to the bottom thumb zone
+          (<code>env(safe-area-inset-bottom)</code> padding, container gets matching bottom padding,
+          floating pills hide via <code>body:has(...)</code>).</li>
+      <li><b>Filter bars</b> — strict 2-col grid: search leads full-width, each field stacks its label
+          over a full-width control; watch <code>.fb-field{{flex-wrap:wrap}}</code> unfolding row fields.</li>
+      <li><b>Popovers never render off-screen</b> — anchored menus (<code>.fb-menu</code>) and tooltips
+          (<code>.cc-tip</code>) become fixed bottom sheets at ≤768px.</li>
+      <li><b>Typing never rebuilds the input under the cursor</b> — input events update data + computed
+          cells in place; full re-renders only on structural changes (add/remove/mode switch).</li>
+    </ul>
+  </div>
+
+  <div class="ds-sect"><h2>6 · Extending the system</h2>
     <ul class="ds-rules">
       <li>Add/adjust tokens in <code>server.py STYLE</code> (dark + light theme both).</li>
       <li>Add the component demo to this page (<code>services/design.py</code>) with usage rules.</li>
+      <li><b>Every new shared pattern lands here in the same change</b> — this page is the living
+          contract, not an afterthought (강프로 standing rule, 2026-07-22).</li>
       <li>Check existing apps for retrofit — the goal is one Look&amp;Feel across Wayfinder.</li>
       <li>Component library (React, for claude.ai/design): <code>~/labs/wayfinder-ds</code>.</li>
     </ul>
