@@ -573,7 +573,7 @@ def _render_convert(user: str, empty_fn: str = "") -> str:
             'border:1px solid var(--warning,#f59e0b);border-radius:var(--radius-md,8px);'
             'padding:12px 16px;margin-bottom:16px;font-size:.84rem;color:var(--text);line-height:1.6">'
             f'⚠️ <b>No transactions were recognized in {_esc(empty_fn)}.</b> '
-            'Make sure it\'s an AMEX statement CSV (Posted_*.csv) or AMEX Master xlsx, and that the '
+            'Make sure it\'s an AMEX statement CSV (Posted_*.csv), AMEX Master xlsx, or Billing Support .xls, and that the '
             'Card Member Name column matches one of your registered names below.'
             '</div>')
     uploads = _load_uploads(user)
@@ -647,16 +647,16 @@ def _render_convert(user: str, empty_fn: str = "") -> str:
 
   <div class="notepad-card" style="margin-bottom:20px">
     <div class="notepad-header">
-      <span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--accent)">Upload Statement</span>{_info_icon('Upload the Posted_*.csv downloaded from your AMEX statement, or an AMEX Master xlsx (recon export). Either is matched with receipts and exported as an SAP-ready xlsx.', right=True)}
+      <span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--accent)">Upload Statement</span>{_info_icon('Upload the Posted_*.csv downloaded from your AMEX statement, an AMEX Master xlsx (recon export), or the monthly Billing Support File (.xls). Any of them is matched with receipts and exported as an SAP-ready xlsx.', right=True)}
     </div>
     <div class="notepad-body" style="padding:20px">
       <form id="upForm" method="POST" action="/cardconv/upload" enctype="multipart/form-data">
         <div class="upload-zone" id="dropZone" style="position:relative">
-          <input type="file" id="csvFile" name="file" accept=".csv,.xlsx"
+          <input type="file" id="csvFile" name="file" accept=".csv,.xlsx,.xls"
             onchange="handleCsvFile(this)"
             style="position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;z-index:2">
           <div style="font-size:2rem;margin-bottom:8px">📎</div>
-          <div style="font-weight:700;color:var(--text);margin-bottom:4px">Drop Posted_*.csv or AMEX Master xlsx here</div>
+          <div style="font-weight:700;color:var(--text);margin-bottom:4px">Drop Posted_*.csv, Master xlsx or Billing Support .xls here</div>
           <div style="font-size:.8rem;color:var(--text-muted)">or click to browse</div>
         </div>
         <div id="fileInfo" style="display:none;margin-top:12px;padding:12px 16px;background:var(--surface-2);border-radius:var(--radius-md);align-items:center;gap:12px">
@@ -774,7 +774,7 @@ function presentCsvFile(f) {{
     csvName.textContent = f.name;
     csvInfo.style.display = 'flex';
     csvZone.style.display = 'none';
-    if (/[.]xlsx$/i.test(f.name)) return;  // binary — no name suggest
+    if (/[.]xlsx?$/i.test(f.name)) return;  // binary — no name suggest
     const reader = new FileReader();
     reader.onload = e => parseCsvSuggest(e.target.result);
     reader.readAsText(f);

@@ -1269,29 +1269,57 @@ def _apply_receipt_match(entry: dict, receipt: dict, receipts: list):
 
 
 def _master_xlsx_to_csv_bytes(xlsx_bytes: bytes) -> bytes:
-    """Convert an 'AMEX Master' xlsx into Posted_*.csv-shaped bytes.
+    """Convert an 'AMEX Master' xlsx OR a 'Billing Support File' .xls into
+    Posted_*.csv-shaped bytes.
 
-    The Master sheet ('I. Jongha' style) is a corporate recon export whose
-    fields map onto the CSV the rest of the pipeline expects. Dates are
-    emitted ISO and account numbers digits-only so _tx_key stays comparable
-    with rows ingested from real Posted CSVs.
+    The Master sheet ('I. Jongha' style) is a corporate recon export; the
+    Billing Support File (Cardmember Monthly Account Detail, sent per control
+    account as legacy .xls) shares the same column vocabulary with a metadata
+    block above the header. Both map onto the CSV the rest of the pipeline
+    expects. Dates are emitted ISO and account numbers digits-only so _tx_key
+    stays comparable with rows ingested from real Posted CSVs.
     """
-    wb = openpyxl.load_workbook(io.BytesIO(xlsx_bytes), read_only=True, data_only=True)
+    # Sheet rows as plain tuples from either engine: openpyxl for xlsx, xlrd
+    # for legacy BIFF .xls (the AMEX Billing Support File comes as .xls).
+    if xlsx_bytes[:4] == b"\xd0\xcf\x11\xe0":
+        import xlrd
+        book = xlrd.open_workbook(file_contents=xlsx_bytes)
+        all_sheets = []
+        for sh in book.sheets():
+            rows = []
+            for r in range(sh.nrows):
+                vals = []
+                for c in range(sh.ncols):
+                    cell_o = sh.cell(r, c)
+                    v = cell_o.value
+                    if cell_o.ctype == 3:  # XL_CELL_DATE
+                        v = datetime(*xlrd.xldate_as_tuple(v, book.datemode))
+                    vals.append(v)
+                rows.append(tuple(vals))
+            all_sheets.append(rows)
+    else:
+        wb = openpyxl.load_workbook(io.BytesIO(xlsx_bytes), read_only=True, data_only=True)
+        all_sheets = [list(ws.iter_rows(values_only=True)) for ws in wb.worksheets]
 
     def norm(h):
         return re.sub(r"\s+", " ", str(h or "")).strip().lower()
 
-    sheet, cols = None, {}
-    for ws in wb.worksheets:
-        header = next(ws.iter_rows(max_row=1, values_only=True), None)
-        if not header:
-            continue
-        idx = {norm(h): i for i, h in enumerate(header) if h}
-        if "desc" in idx and ("t.date" in idx or "transaction date" in idx):
-            sheet, cols = ws, idx
+    # The header row is row 1 in the Master export but sits below a metadata
+    # block in the Billing Support File — scan the first rows of each sheet.
+    sheet_rows, cols, hdr_i = None, {}, -1
+    for rows in all_sheets:
+        for i, header in enumerate(rows[:30]):
+            idx = {norm(h): j for j, h in enumerate(header) if h}
+            if (("desc" in idx or "transaction description 1" in idx)
+                    and ("t.date" in idx or "transaction date" in idx)):
+                sheet_rows, cols, hdr_i = rows, idx, i
+                break
+        if sheet_rows is not None:
             break
-    if sheet is None:
-        raise ValueError("Master sheet not found (no 'Desc' + 'T.Date' header row)")
+    if sheet_rows is None:
+        raise ValueError(
+            "No statement table found (needs a 'Desc'/'Transaction Description 1' "
+            "+ 'T.Date'/'Transaction Date' header row)")
 
     def cell(row, *names):
         for n in names:
@@ -1305,8 +1333,7 @@ def _master_xlsx_to_csv_bytes(xlsx_bytes: bytes) -> bytes:
         "Date", "Card Member Name", "Account Number", "Amount",
         "Merchant Name", "Merchant Doing Business As", "_recon"])
     w.writeheader()
-    rows_iter = sheet.iter_rows(min_row=2, values_only=True)
-    for row in rows_iter:
+    for row in sheet_rows[hdr_i + 1:]:
         desc = re.sub(r"\s+", " ", str(cell(row, "desc", "transaction description 1"))).strip()
         raw_date = cell(row, "transaction date", "t.date")
         raw_amt = cell(row, "transaction amount usd", "amt")
@@ -3527,9 +3554,11 @@ def _handle_upload(body, user=None):
     if _is_nasca_drm(csv_bytes):
         return ("drm_blocked", csv_name, "convert")
     try:
-        # AMEX Master xlsx uploads are adapted to CSV shape, then flow through
-        # the same pipeline. Stored converted so Re-run works unchanged.
-        if csv_name.lower().endswith(".xlsx") or csv_bytes[:4] == b"PK\x03\x04":
+        # AMEX Master xlsx / Billing Support .xls uploads are adapted to CSV
+        # shape, then flow through the same pipeline. Stored converted so
+        # Re-run works unchanged.
+        if (csv_name.lower().endswith((".xlsx", ".xls"))
+                or csv_bytes[:4] in (b"PK\x03\x04", b"\xd0\xcf\x11\xe0")):
             csv_bytes = _master_xlsx_to_csv_bytes(csv_bytes)
         stats = _ingest_csv(user, csv_bytes, csv_name)
         if not stats["added"] and not stats["dup_skipped"]:
