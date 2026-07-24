@@ -564,8 +564,52 @@ def _render_drm_alert(user: str, filename: str, context: str = "convert") -> str
 </body></html>'''
 
 
-def _render_convert(user: str, empty_fn: str = "") -> str:
+def _render_convert(user: str, empty_fn: str = "", mismatch_uid: str = "") -> str:
     from server import CSS_VER
+
+    # 0-match cardmember picker — a modal over Convert (not a separate page),
+    # so the user stays in context (강프로 2026-07-24). Each found name is a
+    # one-click register-and-reingest button.
+    mm_modal = ""
+    if mismatch_uid:
+        mm_entry = next((u for u in _load_uploads(user)
+                         if u.get("id") == mismatch_uid and u.get("member_counts")), None)
+        if mm_entry:
+            reg = _get_card_member_names(user)
+            reg_html = (", ".join(f"<b>{_esc(n)}</b>" for n in reg)
+                        if reg else "<i>none registered yet</i>")
+            chip_style = ('display:inline-flex;align-items:center;gap:6px;margin:3px;'
+                          'padding:7px 14px;border:1px solid var(--accent);border-radius:99px;'
+                          'font-size:.8rem;background:var(--surface-2);color:var(--text);'
+                          'cursor:pointer;font-family:inherit')
+            counts = sorted(mm_entry["member_counts"].items(), key=lambda x: -x[1])
+            chips = "".join(
+                f'<form method="POST" action="/cardconv/upload/register-name" style="display:inline">'
+                f'<input type="hidden" name="uid" value="{_esc(mismatch_uid)}">'
+                f'<input type="hidden" name="name" value="{_esc(n)}">'
+                f'<button type="submit" style="{chip_style}" '
+                f'title="Register this cardmember and import their transactions">'
+                f'＋ {_esc(n)} <span style="color:var(--text-muted);font-size:.7rem">{c} tx</span></button>'
+                f'</form>' for n, c in counts)
+            mm_modal = f'''
+<div id="mmOverlay" style="position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:flex-start;justify-content:center;z-index:300;padding:60px 16px;overflow-y:auto" onclick="if(event.target===this)mmClose()">
+  <div style="background:var(--surface);border:1px solid var(--border-bright);border-radius:var(--radius-xl,14px);max-width:640px;width:100%;box-shadow:var(--shadow-lg);padding:24px 26px">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+      <h2 style="font-size:1rem;margin:0;flex:1">🪪 Whose card is this? — {_esc(mm_entry.get("filename") or "")}</h2>
+      <button onclick="mmClose()" style="background:none;border:none;color:var(--text-muted);font-size:1.1rem;cursor:pointer;padding:2px 6px">✕</button>
+    </div>
+    <p style="font-size:.84rem;color:var(--text-muted);line-height:1.65;margin-bottom:12px">
+      The file parsed fine, but none of its cardmembers match this profile's registered names.
+      <b>Click the cardmember you manage</b> — it will be registered and their transactions imported right away.</p>
+    <p style="font-size:.78rem;margin-bottom:6px">Registered in this profile: {reg_html}</p>
+    <p style="font-size:.78rem;font-weight:700;margin:12px 0 4px">Cardmembers found in this file:</p>
+    <div style="line-height:2.6">{chips}</div>
+  </div>
+</div>
+<script>
+function mmClose(){{document.getElementById('mmOverlay').remove();}}
+history.replaceState({{}}, '', '/cardconv/convert');
+</script>'''
     empty_banner = ""
     if empty_fn:
         empty_banner = (
@@ -631,6 +675,7 @@ def _render_convert(user: str, empty_fn: str = "") -> str:
 <div class="container" style="max-width:1100px">
   {_tab_bar("convert", user)}
   {empty_banner}
+  {mm_modal}
   <div class="notepad-card" style="margin-bottom:20px">
     <div class="notepad-header">
       <span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--accent)">My Card Names</span>{_info_icon('Only transactions whose Card Member Name matches one of these names will be converted. Enter your name exactly as it appears in the AMEX CSV.')}

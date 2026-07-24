@@ -26,7 +26,8 @@ def handle(method, path, body, ctx=None):
         return ("redirect", "/cardconv/ledger")
     if method == "GET" and path == "/cardconv/convert":
         empty_fn = (body.get("ingest_empty", [""]) or [""])[0] if isinstance(body, dict) else ""
-        return ("html", _render_convert(user, empty_fn=empty_fn))
+        mm_uid = (body.get("member_mismatch", [""]) or [""])[0] if isinstance(body, dict) else ""
+        return ("html", _render_convert(user, empty_fn=empty_fn, mismatch_uid=mm_uid))
     if method == "GET" and path == "/cardconv/review":
         return ("html", _render_review(user))
     if method == "GET" and path == "/cardconv/history":
