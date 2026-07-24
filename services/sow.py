@@ -769,6 +769,10 @@ _CSS = """
 .dd-stat .sub{font-size:.68rem;color:var(--text-muted)}
 .dd-stat .sub.pos{color:var(--success)}
 .dd-stat .sub.neg{color:var(--danger)}
+.dd-stat .cash-pos{color:var(--success)}
+.dd-stat .cash-pay{color:#fb923c}
+.dd-stat .cash-neg{color:var(--danger)}
+button.dd-tab{border:none;background:transparent;cursor:pointer;font-family:inherit}
 .sow-hero{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:20px 0 34px}
 .dir-card{display:flex;flex-direction:column;gap:10px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-xl);padding:30px 28px;text-decoration:none;color:var(--text);transition:.2s;position:relative;overflow:hidden}
 .dir-card::before{content:"";position:absolute;top:0;left:0;right:0;height:3px;background:var(--dir-color,var(--accent));opacity:.85}
@@ -1034,60 +1038,141 @@ function delSow(id){
 
 
 def _landing_stats(data):
-    """Clickable stat cards — the dashboard summary on the clean landing."""
-    groups, orphans = _contract_groups(data)
-    n_contracts = len(data.get("contracts", []))
-    margin = 0.0
-    have_margin = False
-    for sea, kids in groups:
-        sea_amt = _num_or_none(sea.get("amount"))
-        kid_amts = [a for a in (_num_or_none(k.get("amount")) for k in kids) if a is not None]
-        if sea_amt is not None and kid_amts:
-            margin += sea_amt - sum(kid_amts)
-            have_margin = True
-    mcls = "pos" if margin >= 0 else "neg"
-    msub = (f'<span class="sub {mcls}">Margin {_money(margin)}</span>'
-            if have_margin else '<span class="sub">SEA ↔ vendor alignment</span>')
+    """Clickable stat cards — the top status row of the Home dashboard."""
+    today = date.today()
+    contracts = data.get("contracts", [])
+    active = 0
+    for c in contracts:
+        s = _parse_any_date(c.get("period_start"))
+        e = _parse_any_date(c.get("period_end"))
+        if s and e and s <= today <= e:
+            active += 1
+    n_vendor_ppl = sum(1 for p in data.get("people", [])
+                       if (p.get("affiliation") or "Cheil").strip().lower() != "cheil")
+    n_ppl = len(data.get("people", []))
     cards = [
-        ("/sow/contracts", n_contracts, "📎 Contracts", msub),
-        ("/sow/docs", len(data.get("sows", [])), "📄 Documents",
-         '<span class="sub">SOW · MSA · NDA · Estimation</span>'),
-        ("/sow/people", len(data.get("people", [])), "👥 People",
-         '<span class="sub">Roster & profiles</span>'),
+        ("/sow/contracts", active, "📎 Active contracts",
+         f'<span class="sub">{len(contracts)} total on file</span>'),
+        ("/sow/people", n_ppl, "👥 People",
+         f'<span class="sub">{n_ppl - n_vendor_ppl} Cheil · {n_vendor_ppl} partner</span>'),
         ("/sow/vendors", len(data.get("vendors", [])), "🏢 Vendors",
          '<span class="sub">Contractor registry</span>'),
+        ("/sow/docs", len(data.get("sows", [])), "📄 Documents",
+         '<span class="sub">SOW · MSA · NDA · Estimation</span>'),
     ]
     return '<div class="dd-stats">' + "".join(
         f'<a class="dd-stat" href="{href}"><span class="lb">{lb}</span><b>{n}</b>{sub}</a>'
         for href, n, lb, sub in cards) + '</div>'
 
 
+def _dd_year_cashflow(data, year):
+    """12-slot arrays (bill to SEA, vendor payouts, salaries) for one year.
+    Contract totals spread with the days/30 convention; salaries are the
+    roster's monthly salary+OH (falling back to salary) held constant."""
+    bill, pay = [0.0] * 12, [0.0] * 12
+    for c in data.get("contracts", []):
+        m = _contract_month_amounts(c)
+        if not m:
+            continue
+        tgt = bill if c.get("side") == "sea" else pay
+        for (y, mo), v in m.items():
+            if y == year:
+                tgt[mo - 1] += v
+    sal_mo = 0.0
+    for p in data.get("people", []):
+        v = _num_or_none(p.get("salary_oh"))
+        if v is None:
+            v = _num_or_none(p.get("salary_mo"))
+        if v:
+            sal_mo += v
+    return bill, pay, [sal_mo] * 12
+
+
+def _dd_cashflow_section(data, year):
+    bill, pay, sal = _dd_year_cashflow(data, year)
+    if not any(bill) and not any(pay) and not any(sal):
+        return ('<div class="sow-meta" style="padding:26px;text-align:center">'
+                'No dated contracts yet — upload one in the Contracts tab to '
+                'light up the cashflow view.</div>')
+    net = [b - p - s for b, p, s in zip(bill, pay, sal)]
+
+    def tile(lb, v, cls=""):
+        return (f'<div class="dd-stat" style="cursor:default">'
+                f'<span class="lb">{lb}</span>'
+                f'<b class="{cls}" style="font-size:1.25rem">{_money(v)}</b>'
+                f'<span class="sub">{year} full year</span></div>')
+
+    tiles = ('<div class="dd-stats">'
+             + tile("🔵 Billed to SEA", sum(bill), "cash-pos")
+             + tile("🟠 Vendor payouts", sum(pay), "cash-pay")
+             + tile("💼 Salaries (roster)", sum(sal))
+             + tile("∑ Net after salaries", sum(net),
+                    "cash-pos" if sum(net) >= 0 else "cash-neg")
+             + '</div>')
+
+    def row(lb, vals, cls=""):
+        cells = "".join(f'<td class="num {cls}">{_money(v)}</td>' for v in vals)
+        tot_cls = cls or ("pos" if sum(vals) >= 0 else "neg")
+        return (f'<tr><td class="pin">{lb}</td>{cells}'
+                f'<td class="num tot {tot_cls}">{_money(sum(vals))}</td></tr>')
+
+    def net_row(vals):
+        cells = "".join(
+            f'<td class="num {"pos" if v >= 0 else "neg"}">{_money(v)}</td>' for v in vals)
+        return (f'<tr class="net"><td class="pin">Net after salaries</td>{cells}'
+                f'<td class="num tot {"pos" if sum(vals) >= 0 else "neg"}">{_money(sum(vals))}</td></tr>')
+
+    def table(headers, b, p, s):
+        n = [x - y - z for x, y, z in zip(b, p, s)]
+        head = ('<tr><th class="pin"></th>'
+                + "".join(f'<th>{h}</th>' for h in headers)
+                + f'<th>{year}</th></tr>')
+        return (f'<div class="cf-wrap"><table class="cf-table"><thead>{head}</thead><tbody>'
+                + row("🔵 Billed to SEA", b, "bill")
+                + row("🟠 Vendor payouts", p, "pay")
+                + row("💼 Salaries", s)
+                + net_row(n)
+                + '</tbody></table></div>')
+
+    q = lambda arr, i: sum(arr[i * 3:(i + 1) * 3])
+    q_table = table(["Q1", "Q2", "Q3", "Q4"],
+                    [q(bill, i) for i in range(4)],
+                    [q(pay, i) for i in range(4)],
+                    [q(sal, i) for i in range(4)])
+    m_table = table([date(year, m, 1).strftime("%b") for m in range(1, 13)],
+                    bill, pay, sal)
+    return f"""
+{tiles}
+<div style="display:flex;align-items:center;gap:10px;margin:18px 0 10px">
+  <h2 style="font-size:1rem;font-weight:800;margin:0">📅 {year} Billing vs payout</h2>
+  <span style="flex:1"></span>
+  <span class="dd-tabs" style="padding:2px">
+    <button class="dd-tab active" id="cfQBtn" onclick="cfView('q')">Quarterly</button>
+    <button class="dd-tab" id="cfMBtn" onclick="cfView('m')">Monthly</button>
+  </span>
+</div>
+<div id="cfQ">{q_table}</div>
+<div id="cfM" style="display:none">{m_table}</div>
+<div class="sow-meta" style="margin-top:8px">Contract totals spread evenly across each term (days/30 partial months) · salaries = roster monthly salary+OH held constant · documents without a parsed period or amount are omitted.</div>
+<script>
+function cfView(v){{
+  document.getElementById('cfQ').style.display = v==='q' ? '' : 'none';
+  document.getElementById('cfM').style.display = v==='m' ? '' : 'none';
+  document.getElementById('cfQBtn').classList.toggle('active', v==='q');
+  document.getElementById('cfMBtn').classList.toggle('active', v==='m');
+}}
+</script>"""
+
+
 def _render_landing(user):
     data = _load(user)
     _migrate_contract_texts(user, data)
+    year = date.today().year
     body = f"""
 <h1 style="margin:8px 0 4px">Deal Desk</h1>
-<p style="color:var(--text-muted);font-size:.86rem;margin-bottom:14px">Start a document, drop in a contract, or jump to a workspace below.</p>
+<p style="color:var(--text-muted);font-size:.86rem;margin-bottom:14px">Status at a glance — work happens in the tabs above.</p>
 {_landing_stats(data)}
-<h2 style="font-size:1rem;font-weight:800;margin:26px 0 4px">✍️ Draft a new SOW — who is it with?</h2>
-<div class="sow-hero" style="margin-top:12px">
-  <a class="dir-card" href="/sow/types?dir=sea" style="--dir-color:#38bdf8">
-    <span class="dir-icon">🔵</span>
-    <span class="dir-name">with Samsung (SEA)</span>
-    <span class="dir-desc">Cheil as Agency — inbound SOW under the Advertising Services Agreement (Sep 16, 2022). Samsung pays Cheil.</span>
-  </a>
-  <a class="dir-card" href="/sow/types?dir=agy" style="--dir-color:#fb923c">
-    <span class="dir-icon">🟠</span>
-    <span class="dir-name">with Agency (Vendor)</span>
-    <span class="dir-desc">Cheil as Client — outbound SOW under each vendor's MSA. Cheil pays the contractor.</span>
-  </a>
-</div>
-<h2 style="font-size:1rem;font-weight:800;margin:0 0 12px">📎 Register an executed contract</h2>
-<div class="ctr-dropzone" id="ctrDrop" data-filedrop tabindex="0">
-  <input type="file" id="ctrFile" accept=".pdf,.docx,.doc,.txt" hidden>
-  <b>⬆ Drop a contract here</b> or click to upload — PDF/Word. Parties, period, amount and people are read automatically; the vendor is registered for you.
-</div>
-{_CTR_JS}"""
+{_dd_cashflow_section(data, year)}"""
     return _shell(user, "Deal Desk", body, tab="home")
 
 
