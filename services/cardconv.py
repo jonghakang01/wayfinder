@@ -123,6 +123,28 @@ def handle(method, path, body, ctx=None):
             extra.append({"id": pid, "name": name})
             _save_profiles(user, extra, pid)
         return ("redirect", "/cardconv/ledger")
+    if method == "POST" and path == "/cardconv/profile/rename":
+        pid = body.get("pid", [""])[0]
+        name = body.get("name", [""])[0].strip()[:40]
+        profs, active = _load_profiles(user)
+        extra = [p for p in profs if p["id"]]
+        if name:
+            if pid == "":
+                _save_profiles(user, extra, active, default_name=name)
+            elif pid in {p["id"] for p in extra}:
+                for p in extra:
+                    if p["id"] == pid:
+                        p["name"] = name
+                _save_profiles(user, extra, active)
+        return ("redirect", "/cardconv/ledger")
+    if method == "POST" and path == "/cardconv/profile/delete":
+        pid = body.get("pid", [""])[0]
+        if pid:  # the default profile can never be deleted
+            profs, active = _load_profiles(user)
+            extra = [p for p in profs if p["id"] and p["id"] != pid]
+            _save_profiles(user, extra, "" if active == pid else active)
+            _delete_profile_data(user, pid)
+        return ("redirect", "/cardconv/ledger")
 
     # Drive OAuth
     if method == "GET" and path == "/cardconv/drive/connect":

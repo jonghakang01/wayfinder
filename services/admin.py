@@ -49,6 +49,20 @@ def handle(method, path, body, ctx=None):
             auth.save_users(users)
         return ("redirect", "/admin")
 
+    if method == "POST" and path == "/admin/reset_pw":
+        # issue a one-time-shown temporary password (SMTP unset → admin relays
+        # it to the user directly; user then changes it on the login page)
+        import secrets as _secrets
+        target = body.get("username", [""])[0].strip()
+        users = auth.load_users()
+        if target in users and target != user:
+            alphabet = "abcdefghjkmnpqrstuvwxyz23456789"  # no 0/O/1/l/i
+            temp = "".join(_secrets.choice(alphabet) for _ in range(10))
+            users[target]["pw"] = auth.hash_pw(temp)
+            auth.save_users(users)
+            return ("html", render_admin(user, reset_result=(target, temp)))
+        return ("redirect", "/admin")
+
     if method == "POST" and path == "/admin/block_user":
         target = body.get("username", [""])[0].strip()
         if target and target != user:
@@ -160,7 +174,7 @@ def _drive_token_exists(username):
     return os.path.exists(os.path.join(DATA_ROOT, "cardconv", "tokens", f"{username}.json"))
 
 
-def render_admin(current_user, notify_result=""):
+def render_admin(current_user, notify_result="", reset_result=None):
     users = auth.load_users()
     settings = auth.load_settings()
     available_svcs = settings.get("available_services", [])
@@ -269,7 +283,11 @@ def render_admin(current_user, notify_result=""):
               <input type="hidden" name="username" value="{username}">
               <button type="submit" class="action-btn delete-btn" onclick="return confirm('{username}님을 완전히 삭제할까요? 되돌릴 수 없습니다.')">🗑 Delete</button>
             </form>'''
-            action_col = f'<div class="action-stack">{block_btn}{delete_btn}</div>'
+            reset_btn = f'''<form method="POST" action="/admin/reset_pw" style="display:inline">
+              <input type="hidden" name="username" value="{username}">
+              <button type="submit" class="action-btn resetpw-btn" onclick="return confirm('{username}님에게 임시 비밀번호를 발급할까요? 기존 비밀번호는 무효화됩니다.')">🔑 PW 재설정</button>
+            </form>'''
+            action_col = f'<div class="action-stack">{reset_btn}{block_btn}{delete_btn}</div>'
 
         rows += f'''
         <tr class="{"row-self" if is_self else "row-blocked" if blocked else ""}">
@@ -337,6 +355,15 @@ def render_admin(current_user, notify_result=""):
         tester_section = ""
 
     notify_msg = f'<div class="notify-result">{notify_result}</div>' if notify_result else ""
+    reset_banner = ""
+    if reset_result:
+        r_user, r_temp = reset_result
+        reset_banner = f'''<div class="reset-banner">🔑 <b>{r_user}</b>님의 임시 비밀번호:
+      <code id="tempPw">{r_temp}</code>
+      <button type="button" class="notify-send-btn" style="padding:4px 12px;font-size:12px"
+        onclick="navigator.clipboard.writeText('{r_temp}').then(()=>{{this.textContent='✅ 복사됨'}})">📋 복사</button>
+      <div style="font-size:12px;color:#92400e;margin-top:6px">이 화면을 벗어나면 다시 볼 수 없습니다. 본인에게 전달하고, 로그인 페이지의 "비밀번호 변경"으로 새 비밀번호를 설정하게 하세요.</div>
+    </div>'''
 
     return f'''<!DOCTYPE html>
 <html lang="ko"><head>
@@ -403,6 +430,10 @@ tr.row-self{{background:#f0f9ff}}
 .unblock-btn:hover{{background:#a7f3d0}}
 .delete-btn{{background:#fee2e2;color:#991b1b;border:1px solid #fca5a5}}
 .delete-btn:hover{{background:#fca5a5}}
+.resetpw-btn{{background:#e0e7ff;color:#3730a3;border:1px solid #c7d2fe}}
+.resetpw-btn:hover{{background:#c7d2fe}}
+.reset-banner{{background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:14px 18px;margin-bottom:16px;font-size:14px;color:#1e293b}}
+.reset-banner code{{background:#1e293b;color:#fbbf24;padding:3px 10px;border-radius:6px;font-size:15px;letter-spacing:.06em;margin:0 6px}}
 .action-stack{{display:flex;flex-direction:column;gap:6px;width:92px}}
 .action-stack form{{display:block!important}}
 .action-stack .action-btn{{width:100%;text-align:center}}
@@ -424,6 +455,7 @@ tr.row-blocked td{{opacity:.65;background:#fff5f5}}
     <div class="sum-card"><span class="sum-val" style="color:#475569">{total - admin_count}</span><span class="sum-lbl">User</span></div>
   </div>
 
+  {reset_banner}
   <div class="tbl-wrap">
     <table>
       <thead>

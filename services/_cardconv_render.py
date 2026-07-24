@@ -209,14 +209,25 @@ def _tab_bar(active: str, user: str) -> str:
     popts = "".join(
         f'<option value="{p["id"]}"{" selected" if p["id"] == active_pid else ""}>'
         f'💳 {_esc_attr(p["name"])}</option>' for p in profs)
+    active_name = next((p["name"] for p in profs if p["id"] == active_pid), "My card")
     prof_sel = (
-        f'<select class="cc-profile-sel" data-cur="{active_pid}" '
+        f'<select class="cc-profile-sel" data-cur="{active_pid}" data-curname="{_esc_attr(active_name)}" '
         f'onchange="ccProfileChange(this)" title="Card profile — separate statements, ledger and Drive folder per card">'
-        f'{popts}<option value="__new__">＋ New card profile…</option></select>'
+        f'{popts}<option value="__new__">＋ New card profile…</option>'
+        f'<option value="__rename__">✏ Rename current…</option>'
+        f'<option value="__delete__">🗑 Delete current…</option></select>'
         '<script>function ccProfileChange(s){'
+        "var back=function(){s.value=s.getAttribute('data-cur');};"
         "if(s.value==='__new__'){var n=prompt('New card profile name — e.g. CEO card');"
-        "if(!n||!n.trim()){s.value=s.getAttribute('data-cur');return;}"
+        "if(!n||!n.trim()){back();return;}"
         "ccProfilePost('/cardconv/profile/create',{name:n.trim()});return;}"
+        "if(s.value==='__rename__'){var r=prompt('Rename this card profile',s.getAttribute('data-curname'));"
+        "if(!r||!r.trim()){back();return;}"
+        "ccProfilePost('/cardconv/profile/rename',{pid:s.getAttribute('data-cur'),name:r.trim()});return;}"
+        "if(s.value==='__delete__'){var cur=s.getAttribute('data-cur');"
+        "if(cur===''){alert('The default profile cannot be deleted.');back();return;}"
+        "if(!confirm('Delete this card profile and ALL its app data (statements, ledger, OCR queue, card names)? Files already in Google Drive stay in Drive.')){back();return;}"
+        "ccProfilePost('/cardconv/profile/delete',{pid:cur});return;}"
         "ccProfilePost('/cardconv/profile/switch',{pid:s.value});}"
         'function ccProfilePost(url,obj){var f=document.createElement("form");'
         'f.method="POST";f.action=url;'
@@ -789,7 +800,8 @@ csvZone.addEventListener('drop', e => {{
 
 def _render_history(user: str) -> str:
     from server import CSS_VER
-    hist = _load_hist()
+    # own rows only (legacy user-less entries belong to the admin's data_key)
+    hist = [h for h in _load_hist() if h.get("user", "jongha.kang") == user]
 
     rows_html = ""
     for h in hist:
@@ -836,7 +848,9 @@ def _render_history(user: str) -> str:
             f'<input type="checkbox" class="hist-cb" data-id="{hid}" style="width:14px;height:14px;accent-color:var(--accent);cursor:pointer;flex-shrink:0">'
             f'<span style="font-size:1rem;flex-shrink:0">{icon}</span>'
             f'<span style="font-size:.72rem;font-weight:600;padding:1px 7px;border-radius:8px;background:var(--surface-3);{type_color};flex-shrink:0">{type_label}</span>'
-            f'<span style="font-size:.78rem;color:var(--text-muted);min-width:120px;flex-shrink:0">{hdate}</span>'
+            + (f'<span style="font-size:.7rem;font-weight:600;padding:1px 7px;border-radius:8px;background:var(--surface-3);color:var(--text-muted);flex-shrink:0">💳 {_esc(h.get("profile"))}</span>'
+               if h.get("profile") else '')
+            + f'<span style="font-size:.78rem;color:var(--text-muted);min-width:120px;flex-shrink:0">{hdate}</span>'
             f'<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;flex:1;min-width:0">{detail}</div>'
             f'{dl}'
             f'</div>')

@@ -32,7 +32,9 @@ def _notify_admin_signup(email: str, services_list: list,
     skipped while its credentials are absent."""
     def _send():
         svcs = ", ".join(services_list) or "(none)"
-        when = datetime.now().strftime("%Y-%m-%d %H:%M")
+        # origin tag so a local-dev test signup can't be mistaken for prod
+        node = os.uname().nodename
+        when = f"{datetime.now().strftime('%Y-%m-%d %H:%M')} · {node}"
         extra_tg = (f"\n소속: {office or '(미선택)'}"
                     f"\nGoogle 계정: {google_account or '(미기입)'}")
         extra_mail = (f"<li><b>Office:</b> {office or '(not selected)'}</li>"
@@ -45,7 +47,7 @@ def _notify_admin_signup(email: str, services_list: list,
                 data = urllib.parse.urlencode({
                     "chat_id": chat,
                     "text": (f"👤 Wayfinder 신규 가입\n"
-                             f"이메일: {email}\n서비스: {svcs}{extra_tg}\n{when} (server)"),
+                             f"이메일: {email}\n서비스: {svcs}{extra_tg}\n{when}"),
                 }).encode()
                 urllib.request.urlopen(
                     f"https://api.telegram.org/bot{tok}/sendMessage",
@@ -60,7 +62,7 @@ def _notify_admin_signup(email: str, services_list: list,
                 f"<h3>New user signed up</h3>"
                 f"<ul><li><b>Email:</b> {email}</li>"
                 f"<li><b>Services:</b> {svcs}</li>{extra_mail}"
-                f"<li><b>At:</b> {when} (server time)</li></ul>"
+                f"<li><b>At:</b> {when}</li></ul>"
                 f"<p><a href='http://134.209.62.57:8080/admin'>Open admin</a></p>")
         except Exception:
             pass
@@ -355,6 +357,22 @@ def handle(method, path, body, ctx=None):
         users   = load_users()
         pw_hash = hash_pw(password)
 
+        if action == "change_pw":
+            # self-service password change from the login page — verified by
+            # the current password, so no session/email loop is needed
+            new_pw = body.get("new_password", [""])[0]
+            key = _resolve_login(email)
+            if not key or users[key]["pw"] != pw_hash:
+                return ("html", render_login(
+                    change_error="계정 또는 현재 비밀번호가 올바르지 않습니다.", app=app))
+            if len(new_pw) < 6:
+                return ("html", render_login(
+                    change_error="새 비밀번호는 6자 이상이어야 합니다.", app=app))
+            users[key]["pw"] = hash_pw(new_pw)
+            save_users(users)
+            return ("html", render_login(
+                change_ok="비밀번호가 변경되었습니다. 새 비밀번호로 로그인하세요.", app=app))
+
         if action == "register":
             if _resolve_login(email):
                 return ("html", render_login(
@@ -407,7 +425,7 @@ def handle(method, path, body, ctx=None):
     return ("html", render_login(app=app))
 
 
-def render_login(error="", register_error="", app=""):
+def render_login(error="", register_error="", app="", change_error="", change_ok=""):
     svc_labels = APP_LABELS
     app = app if app in CONTROLLED_SERVICES else ""
 
@@ -460,6 +478,32 @@ def render_login(error="", register_error="", app=""):
     err = f'<div class="error">{error}</div>' if error else ""
     reg_err = f'<div class="error">{register_error}</div>' if register_error else ""
 
+    if t["lang"] == "en":
+        c_title, c_cur, c_new, c_btn = ("Forgot or want to change your password?",
+                                        "Current (or temporary) password",
+                                        "New password (6+ chars)", "Change password")
+        c_hint = "Lost the current password too? Ask the admin to issue a temporary one."
+    else:
+        c_title, c_cur, c_new, c_btn = ("비밀번호 변경 (임시 비밀번호 받은 경우 포함)",
+                                        "현재(또는 임시) 비밀번호",
+                                        "새 비밀번호 (6자 이상)", "비밀번호 변경")
+        c_hint = "현재 비밀번호도 잊으셨다면 관리자에게 임시 비밀번호 발급을 요청하세요."
+    c_msg = (f'<div class="error">{change_error}</div>' if change_error else
+             f'<div class="chg-ok">{change_ok}</div>' if change_ok else "")
+    change_html = f'''<details class="box chg-box"{" open" if (change_error or change_ok) else ""}>
+    <summary>{c_title}</summary>
+    {c_msg}
+    <form method="POST" action="/login" style="margin-top:14px">
+      <input type="hidden" name="action" value="change_pw">
+      {app_hidden}
+      <div class="field"><label>{t["email"]}</label><input type="email" name="email" autocomplete="email" placeholder="you@example.com"></div>
+      <div class="field"><label>{c_cur}</label><input type="password" name="password" autocomplete="current-password" placeholder="••••••••"></div>
+      <div class="field"><label>{c_new}</label><input type="password" name="new_password" autocomplete="new-password" placeholder="••••••••"></div>
+      <button class="btn-register" type="submit">{c_btn}</button>
+      <div class="chg-hint">{c_hint}</div>
+    </form>
+  </details>'''
+
     return f'''<!DOCTYPE html>
 <html lang="{t['lang']}"><head>
 <meta charset="UTF-8">
@@ -488,6 +532,11 @@ select.office-sel:focus{{border-color:#58a6ff}}
 .svc-check input{{width:auto}}
 .app-scope{{font-size:13px;color:#c9d1d9;background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:10px 14px;margin-bottom:14px}}
 .app-scope b{{color:#58a6ff}}
+.chg-box{{padding:18px 24px}}
+.chg-box summary{{font-size:13px;color:#8b949e;cursor:pointer;font-weight:600}}
+.chg-box summary:hover{{color:#e6edf3}}
+.chg-hint{{font-size:12px;color:#6e7681;margin-top:10px}}
+.chg-ok{{background:rgba(63,185,80,.12);border:1px solid rgba(63,185,80,.4);color:#3fb950;border-radius:6px;padding:10px 14px;font-size:13px;margin-top:12px}}
 </style>
 </head><body>
 <!--wf-root-->
@@ -516,5 +565,6 @@ select.office-sel:focus{{border-color:#58a6ff}}
       <button class="btn-register" type="submit">{t["signup"]}</button>
     </form>
   </div>
+  {change_html}
 </div>
 </body></html>'''

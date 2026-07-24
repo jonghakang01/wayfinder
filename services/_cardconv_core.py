@@ -193,6 +193,16 @@ def _save_hist(hist):
 def _add_hist(entry: dict):
     if "id" not in entry:
         entry["id"] = uuid.uuid4().hex[:10]
+    # tag with the active card profile so multi-card users can tell rows apart
+    u = entry.get("user")
+    if u and "profile" not in entry:
+        try:
+            profs, pid = _load_profiles(u)
+            if pid:
+                entry["profile"] = next(
+                    (p["name"] for p in profs if p["id"] == pid), pid)
+        except Exception:
+            pass
     hist = _load_hist()
     hist.insert(0, entry)
     _save_hist(hist[:100])
@@ -228,11 +238,33 @@ def _load_profiles(username: str):
     return profs, active
 
 
-def _save_profiles(username: str, extra_profiles: list, active: str):
+def _save_profiles(username: str, extra_profiles: list, active: str,
+                   default_name: str = None):
     _ensure_dirs()
-    _profiles_file(username).write_text(json.dumps(
-        {"profiles": extra_profiles, "active": active},
-        ensure_ascii=False, indent=2))
+    if default_name is None:  # preserve a previously renamed default profile
+        try:
+            default_name = json.loads(
+                _profiles_file(username).read_text()).get("default_name", "")
+        except Exception:
+            default_name = ""
+    data = {"profiles": extra_profiles, "active": active}
+    if default_name:
+        data["default_name"] = default_name
+    _profiles_file(username).write_text(
+        json.dumps(data, ensure_ascii=False, indent=2))
+
+
+def _delete_profile_data(username: str, pid: str):
+    """Remove every app-side file of one extra profile (Drive files stay —
+    read-only policy). No-op for the default profile."""
+    import shutil
+    if not pid:
+        return
+    for f in DATA_DIR.glob(f"*_{username}@{pid}*"):
+        try:
+            shutil.rmtree(f, ignore_errors=True) if f.is_dir() else f.unlink()
+        except Exception:
+            pass
 
 
 def _active_pid(username: str) -> str:
@@ -247,6 +279,17 @@ def _pkey(username: str) -> str:
     default profile, `<user>@<pid>` for additional cards."""
     pid = _active_pid(username)
     return f"{username}@{pid}" if pid else username
+
+
+def _export_tag(username: str) -> str:
+    """user(+profile) tag for export filenames — e.g. 'jongha.kang' or
+    'jongha.kang_CEO_card' (강프로 2026-07-24)."""
+    tag = username
+    profs, pid = _load_profiles(username)
+    if pid:
+        pname = next((p["name"] for p in profs if p["id"] == pid), pid)
+        tag += "_" + pname
+    return re.sub(r"[^\w.@-]+", "_", tag).strip("_")
 
 
 def _receipts_file(username: str) -> Path:
@@ -1406,7 +1449,7 @@ def _xesc(s: str) -> str:
             .replace('"', "&quot;"))
 
 
-def _build_xlsx_from_entries(entries: list) -> tuple:
+def _build_xlsx_from_entries(entries: list, username: str = "") -> tuple:
     """(xlsx_bytes, out_filename) - surgical row replacement in the SAP-accepted
     workbook. Everything except sheet rows and sharedStrings stays byte-identical
     (styles.xml above all), because SAP's parser only understands files shaped
@@ -1415,7 +1458,8 @@ def _build_xlsx_from_entries(entries: list) -> tuple:
         raise FileNotFoundError("SAP template missing: services/cardconv_sap_template.xlsx")
 
     today  = date.today()
-    out_fn = f"for_upload_{today.strftime('%Y-%m-%d')}.xlsx"
+    who = f"{_export_tag(username)}_" if username else ""
+    out_fn = f"for_upload_{who}{today.strftime('%Y-%m-%d')}.xlsx"
     posting_serial = (today - _XLSX_EPOCH).days
 
     src = zipfile.ZipFile(SAP_TEMPLATE)
@@ -3042,7 +3086,7 @@ def _handle_ledger_pdf(username: str, query: dict):
         pdf.cell(0, 10, S("No receipts for the selected filter."))
         out = pdf.output()
         return ("binary", bytes(out), "application/pdf",
-                f"receipts_{username}_{date.today().isoformat()}.pdf")
+                f"receipts_{_export_tag(username)}_{date.today().isoformat()}.pdf")
 
     # ── Draw ──
     def draw_header(first: bool):
@@ -3122,7 +3166,7 @@ def _handle_ledger_pdf(username: str, query: dict):
         row_in_page = (row_in_page + 1) % N_ROWS
 
     out  = pdf.output()
-    fname = f"receipts_{username}_{date.today().isoformat()}.pdf"
+    fname = f"receipts_{_export_tag(username)}_{date.today().isoformat()}.pdf"
     _add_hist({
         "type":     "pdf_download",
         "date":     datetime.now().strftime("%Y-%m-%d %H:%M"),
@@ -3938,7 +3982,7 @@ def _handle_review_download(username: str, query: dict):
         if e.get("cash") and rc is not None:
             e["cash_reason"] = rc.get("cash_reason") or e.get("cash_reason")
     try:
-        xlsx_bytes, out_fn = _build_xlsx_from_entries(entries)
+        xlsx_bytes, out_fn = _build_xlsx_from_entries(entries, username)
     except FileNotFoundError as e:
         return ("html", f"<h2 style='padding:40px'>{e}</h2>", 404)
     return ("file_inline", xlsx_bytes,
@@ -3978,7 +4022,7 @@ def _handle_expense_report(username: str, query: dict):
         return ("html", "<h2 style='padding:40px'>No transactions to export.</h2>", 404)
     xlsx = _build_expense_report(username, entries)
     # Same naming convention as the receipt PDF this report replaces.
-    fn = f"receipts_{username}_{date.today().isoformat()}.xlsx"
+    fn = f"receipts_{_export_tag(username)}_{date.today().isoformat()}.xlsx"
     return ("file_inline", xlsx,
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fn)
 
@@ -4183,7 +4227,7 @@ def _handle_ledger_xlsx(username: str, query: dict):
 
     buf = io.BytesIO()
     wb.save(buf)
-    out_fn = f"ledger_export_{today.strftime('%Y-%m-%d')}.xlsx"
+    out_fn = f"ledger_export_{_export_tag(username)}_{today.strftime('%Y-%m-%d')}.xlsx"
     return ("file_inline", _inline_to_shared_strings(buf.getvalue()),
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", out_fn)
 
