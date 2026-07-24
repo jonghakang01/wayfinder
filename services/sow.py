@@ -2603,7 +2603,10 @@ def _render_contracts_section(user, data):
     groups, orphans = _contract_groups(data)
     gblocks = []
     for sea, kids in groups:
-        kid_cards = "".join(_contract_card(v, draggable=True) for v in kids)
+        # no title on grouped vendor cards — the group header already says
+        # which deal this is (강프로 2026-07-24); unlinked pool keeps titles
+        kid_cards = "".join(_contract_card(v, draggable=True, show_title=False)
+                            for v in kids)
         empty = ('<div class="ctr-drop-hint">Drag vendor contracts here</div>'
                  if not kids else "")
         gname = _esc(sea.get("project_name") or sea.get("filename") or "(untitled contract)")
