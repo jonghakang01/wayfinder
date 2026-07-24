@@ -1523,6 +1523,26 @@ def _render_person_detail(user, person, saved=False):
             f'<span style="color:var(--text-muted);font-size:.72rem">{_esc(c.get("vendor") or c.get("client") or "")}</span>'
             f'{act}</label>')
 
+    # 투입 프로젝트 = contract-driven dropdown (강프로 2026-07-24): options are
+    # the contracts' project names; picking one auto-links that contract (and
+    # its SEA parent for vendor deals) via the checkboxes below.
+    cur_proj = (p.get("project") or "").strip()
+    seen_proj, proj_items = set(), []
+    for c in data.get("contracts", []):
+        pn = (c.get("project_name") or "").strip()
+        if not pn or pn.lower() in seen_proj:
+            continue
+        seen_proj.add(pn.lower())
+        _, _, _, icon2 = _SIDE_META.get(c.get("side"), _SIDE_META["sea"])
+        proj_items.append(
+            f'<option value="{_esc(pn)}" data-cid="{c["id"]}" '
+            f'data-parent="{_esc(c.get("linked_id") or "")}"'
+            f'{" selected" if pn == cur_proj else ""}>{icon2} {_esc(pn)}</option>')
+    custom = ""
+    if cur_proj and cur_proj.lower() not in seen_proj:
+        custom = f'<option value="{_esc(cur_proj)}" selected>{_esc(cur_proj)}</option>'
+    proj_opts = '<option value="">— none —</option>' + custom + "".join(proj_items)
+
     saved_banner = ('<div style="color:var(--success);font-size:.85rem;margin-bottom:12px">✓ Saved</div>'
                     if saved else "")
     body = f"""
@@ -1542,7 +1562,9 @@ def _render_person_detail(user, person, saved=False):
     <div class="f-cell"><div style="font-size:.64rem;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:3px">소속</div>
       <select class="slot" style="width:100%" name="affiliation">{aff_sel}</select></div>
     {fld('Role / Title', 'role_title', 'e.g. Sr. Developer')}
-    {fld('투입 프로젝트 / SOW', 'project', 'e.g. AEM Bridge 2', wide=True)}
+    <div class="f-cell f-wide"><div style="font-size:.64rem;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:3px">투입 프로젝트 / SOW</div>
+      <select class="slot" style="width:100%" name="project" onchange="projPick(this)">{proj_opts}</select>
+      <div style="font-size:.68rem;color:var(--text-muted);margin-top:3px">Picking a contract project also ticks it under Linked contracts below (a vendor contract links its SEA deal too).</div></div>
     {fld('Location', 'location', 'US / India')}
   </div>
 </div>
@@ -1612,6 +1634,15 @@ def _render_person_detail(user, person, saved=False):
 </div>
 </form>
 <script>
+function projPick(sel){{
+  var o = sel.options[sel.selectedIndex];
+  if(!o) return;
+  [o.dataset.cid, o.dataset.parent].forEach(function(cid){{
+    if(!cid) return;
+    var cb = document.querySelector('input[name="linked_contracts"][value="'+cid+'"]');
+    if(cb) cb.checked = true;
+  }});
+}}
 function delPerson(){{
   if(!confirm('Delete this person from the roster?')) return;
   fetch('/sow/person/delete', {{method:'POST', headers:{{'Content-Type':'application/x-www-form-urlencoded'}}, body:'id={_esc(p.get("id") or "")}'}})
@@ -3682,7 +3713,23 @@ def handle(method, path, body, ctx):
         linked_c = body.get("linked_contracts") or []
         if not isinstance(linked_c, list):
             linked_c = [linked_c]
-        rec["linked_contracts"] = [str(x) for x in linked_c if x]
+        # a vendor contract always drags its SEA parent along (강프로 2026-07-24)
+        expanded = []
+        for x in linked_c:
+            x = str(x)
+            if not x:
+                continue
+            if x not in expanded:
+                expanded.append(x)
+            c0 = _contract_by_id(data, x)
+            pid0 = (c0 or {}).get("linked_id")
+            if pid0 and pid0 not in expanded:
+                expanded.append(pid0)
+        rec["linked_contracts"] = expanded
+        if not rec.get("project") and expanded:
+            first = _contract_by_id(data, expanded[0])
+            if first and first.get("project_name"):
+                rec["project"] = first["project_name"]
         if cur:
             data["people"][data["people"].index(cur)] = rec
         else:
