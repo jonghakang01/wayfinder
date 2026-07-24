@@ -3,6 +3,8 @@ import io
 import json
 import os
 import re
+import urllib.error
+import urllib.request
 import uuid
 from datetime import date, datetime
 
@@ -2224,6 +2226,92 @@ def _extract_fields(text):
             "period_end": period_end, "project_name": project, "side": side}
 
 
+_EXTRACT_MODEL = os.environ.get("SOW_EXTRACT_MODEL", "claude-sonnet-5")
+_EXTRACT_SYSTEM = (
+    "You extract structured fields from a contract or Statement of Work. "
+    "Return ONLY a JSON object (no prose, no code fences) with exactly these keys:\n"
+    '{"side":"sea"|"vendor","client":str,"agency":str,"vendor":str,'
+    '"amount":str,"period_start":str,"period_end":str,"project_name":str}\n'
+    "Definitions:\n"
+    "- side='sea' when the contract is between Samsung (Samsung Electronics "
+    "America / SEA) and Cheil, where Samsung pays Cheil (Cheil is the agency).\n"
+    "- side='vendor' when it is between Cheil (as the paying client) and a "
+    "downstream vendor/contractor that Cheil pays.\n"
+    "- client = full legal name of the paying party. agency = 'Cheil USA, Inc.' "
+    "when Cheil is a party. vendor = the contractor entity that is neither Cheil "
+    "nor Samsung, else ''.\n"
+    "- amount = the total contract value/fee including its currency symbol, e.g. "
+    "'$240,000'. Prefer the grand total.\n"
+    "- period_start / period_end = the service period start and end dates, copied "
+    "verbatim as written in the document (e.g. 'June 1, 2024').\n"
+    "- project_name = the project or SOW name/title.\n"
+    "Use an empty string '' for anything not present. Do not invent values.")
+
+
+def _extract_fields_llm(text):
+    """Structured extraction via Claude. Returns the same dict shape as
+    _extract_fields, or None if unavailable/failed (caller falls back to regex)."""
+    key = None
+    for p in (os.path.join(os.path.dirname(__file__), os.pardir, ".env"),
+              os.path.expanduser("~/.claude/env")):
+        try:
+            with open(p) as f:
+                m = re.search(r'ANTHROPIC_API_KEY=([^\s"\']+)', f.read())
+                if m:
+                    key = m.group(1)
+                    break
+        except OSError:
+            pass
+    key = key or os.environ.get("ANTHROPIC_API_KEY")
+    if not key or not (text or "").strip():
+        return None
+    req = urllib.request.Request(
+        "https://api.anthropic.com/v1/messages", method="POST",
+        headers={"x-api-key": key, "anthropic-version": "2023-06-01",
+                 "content-type": "application/json"},
+        data=json.dumps({
+            "model": _EXTRACT_MODEL, "max_tokens": 1200,
+            "system": _EXTRACT_SYSTEM,
+            "messages": [{"role": "user", "content": (text or "")[:24000]}],
+        }).encode())
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            resp = json.loads(r.read())
+    except Exception:
+        return None
+    out = "".join(b.get("text", "") for b in resp.get("content", []))
+    m = re.search(r"\{.*\}", out, re.DOTALL)
+    if not m:
+        return None
+    try:
+        d = json.loads(m.group(0))
+    except Exception:
+        return None
+    return {
+        "side": "vendor" if d.get("side") == "vendor" else "sea",
+        "client": str(d.get("client") or ""),
+        "agency": str(d.get("agency") or ""),
+        "vendor": str(d.get("vendor") or ""),
+        "amount": str(d.get("amount") or ""),
+        "period_start": str(d.get("period_start") or ""),
+        "period_end": str(d.get("period_end") or ""),
+        "project_name": str(d.get("project_name") or ""),
+    }
+
+
+def _extract_fields_best(text):
+    """Prefer LLM extraction; fall back to regex, and backfill LLM blanks
+    from the regex pass so we never lose a field the heuristics did catch."""
+    llm = _extract_fields_llm(text)
+    if not llm:
+        return _extract_fields(text)
+    rx = _extract_fields(text)
+    for k, v in llm.items():
+        if not v and rx.get(k):
+            llm[k] = rx[k]
+    return llm
+
+
 def _norm_tokens(s):
     return set(re.findall(r"[a-z0-9]+", (s or "").lower())) - {
         "the", "a", "an", "of", "for", "and", "sow", "project", "cheil", "samsung"}
@@ -2399,6 +2487,7 @@ def _render_contract_frag(user, data, cid):
     </div>
     <div class="ctr-actions">
       <button class="btn btn-primary btn-sm" type="submit">💾 Save fields</button>
+      <button class="btn btn-secondary btn-sm" type="button" onclick="ctrReparse('{c['id']}',this)">🤖 Re-parse with AI</button>
       <a class="btn btn-secondary btn-sm" href="/sow/contract/file?id={c['id']}" target="_blank">⬇ Original</a>
       <button class="btn btn-danger btn-sm" type="button" onclick="ctrPost('/sow/contract/delete',{{id:'{c['id']}'}})">🗑 Delete</button>
     </div>
@@ -2466,19 +2555,24 @@ function openContract(id){
 function ctrPost(url,obj){
   var b=Object.keys(obj).map(function(k){return k+'='+encodeURIComponent(obj[k]);}).join('&');
   fetch(url,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:b})
-    .then(function(){location.reload();});
+    .then(function(){closeContract();location.href='/sow';});
 }
 function ctrSave(id){
   var f=document.querySelector('#cmodal form.ctr-form');
   var b='id='+encodeURIComponent(id);
   f.querySelectorAll('input,select').forEach(function(el){b+='&'+el.name+'='+encodeURIComponent(el.value);});
   fetch('/sow/contract/save',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:b})
-    .then(function(){location.reload();});
+    .then(function(){closeContract();location.href='/sow';});
 }
 function ctrAssign(id){
   var sel=document.getElementById('lnk_'+id);
   if(!sel||!sel.value)return;
   ctrPost('/sow/contract/assign',{vendor:id,sea:sel.value});
+}
+function ctrReparse(id,btn){
+  if(btn){btn.disabled=true;btn.textContent='🤖 Reading…';}
+  fetch('/sow/contract/reparse',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'id='+encodeURIComponent(id)})
+    .then(function(){location.href='/sow?newc='+encodeURIComponent(id);});
 }
 function ctrUpload(files){
   if(!files||!files.length)return;
@@ -2554,7 +2648,7 @@ def handle(method, path, body, ctx):
         fn = _safe_filename(fn)
         ext = _safe_ext(fn)
         text = _extract_text(content, ext)
-        fields = _extract_fields(text)
+        fields = _extract_fields_best(text)
         cid = uuid.uuid4().hex[:8]
         data = _load(user)
         rec = {"id": cid, "filename": fn, "ext": ext,
@@ -2572,6 +2666,17 @@ def handle(method, path, body, ctx):
         data.setdefault("contracts", []).append(rec)
         _save(user, data)
         return ("redirect", f"/sow?newc={cid}")
+
+    if method == "POST" and path == "/sow/contract/reparse":
+        data = _load(user)
+        c = _contract_by_id(data, _f(body, "id"))
+        if c:
+            fields = _extract_fields_best(c.get("raw_text") or "")
+            for k in ("client", "agency", "vendor", "amount",
+                      "period_start", "period_end", "project_name", "side"):
+                c[k] = fields.get(k, c.get(k, ""))
+            _save(user, data)
+        return ("redirect", f"/sow?newc={_f(body, 'id')}")
 
     if method == "POST" and path == "/sow/contract/save":
         data = _load(user)
