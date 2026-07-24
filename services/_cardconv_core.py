@@ -2057,7 +2057,9 @@ def _run_batch_ocr(username: str) -> dict:
         # previous runs the user hasn't reviewed yet).
         staging = _load_ocr_staging(username)
         staged_fids = {e.get("file_id") for e in staging.get("entries", [])}
-        skip_fids = done_fids | staged_fids
+        # And skip discarded tombstones — without this, every scheduled batch
+        # run re-staged receipts the user had already discarded (2026-07-24).
+        skip_fids = done_fids | staged_fids | set(_load_discarded_fids(username))
 
         new_staged = []
         now_disp = datetime.now().strftime("%Y-%m-%d %H:%M")
