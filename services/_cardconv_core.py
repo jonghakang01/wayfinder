@@ -3562,8 +3562,20 @@ def _handle_upload(body, user=None):
             csv_bytes = _master_xlsx_to_csv_bytes(csv_bytes)
         stats = _ingest_csv(user, csv_bytes, csv_name)
         if not stats["added"] and not stats["dup_skipped"]:
-            # Nothing recognized (wrong file, or no card-name match) — bounce
-            # back to Convert with a visible notice instead of a silent no-op.
+            # Nothing matched the registered card names — show who IS in the
+            # file so the user knows which name to register (강프로 2026-07-24).
+            counts = Counter()
+            try:
+                rdr = csv.DictReader(io.TextIOWrapper(
+                    io.BytesIO(csv_bytes), encoding="utf-8-sig", newline=""))
+                for r in rdr:
+                    nm = (r.get("Card Member Name") or "").strip().upper()
+                    if nm:
+                        counts[nm] += 1
+            except Exception:
+                pass
+            if counts:
+                return ("html", _render_member_mismatch(user, csv_name, counts))
             import urllib.parse as _up
             return ("redirect", "/cardconv/convert?ingest_empty=" + _up.quote(csv_name))
         _save_uploaded_csv(user, csv_bytes, csv_name, stats["added"], "")
@@ -3592,6 +3604,38 @@ def _handle_upload(body, user=None):
             f'<p style="font-size:.74rem;color:var(--text-muted);margin-bottom:18px">Details: {_esc(str(e))}</p>'
             '<a href="/cardconv/convert" class="btn btn-primary">← Back to Convert</a>'
             '</div></div></div></body></html>'))
+
+
+def _render_member_mismatch(username: str, csv_name: str, counts) -> str:
+    """0-match notice: which Card Member Names the file actually contains vs
+    what this profile has registered, so the user can register the right one."""
+    registered = _get_card_member_names(username)
+    reg_html = (", ".join(f"<b>{_esc(n)}</b>" for n in registered)
+                if registered else "<i>none registered yet</i>")
+    chips = "".join(
+        f'<span style="display:inline-flex;align-items:center;gap:6px;margin:3px;'
+        f'padding:5px 12px;border:1px solid var(--border);border-radius:99px;'
+        f'font-size:.8rem;background:var(--surface-2)">{_esc(n)} '
+        f'<span style="color:var(--text-muted);font-size:.7rem">{c} tx</span></span>'
+        for n, c in counts.most_common(40))
+    more = (f'<p style="font-size:.72rem;color:var(--text-muted)">…and '
+            f'{len(counts) - 40} more</p>' if len(counts) > 40 else "")
+    return (
+        '<!DOCTYPE html><html><head><meta charset="UTF-8">'
+        '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        '<link rel="stylesheet" href="/static/style.css"></head><body>'
+        '<div class="container" style="max-width:720px;padding-top:60px">'
+        '<div class="notepad-card"><div class="notepad-body" style="padding:28px">'
+        f'<h2 style="font-size:1.05rem;margin-bottom:10px">🪪 No rows matched your card names — {_esc(csv_name)}</h2>'
+        '<p style="font-size:.86rem;color:var(--text-muted);line-height:1.7;margin-bottom:14px">'
+        'The file parsed fine, but none of its cardmembers match the names registered '
+        'in this card profile. Register the name you manage (Convert → Card member '
+        'names), then upload again.</p>'
+        f'<p style="font-size:.8rem;margin-bottom:8px">Registered in this profile: {reg_html}</p>'
+        '<p style="font-size:.8rem;font-weight:700;margin:14px 0 6px">Cardmembers found in this file:</p>'
+        f'<div style="line-height:2">{chips}</div>{more}'
+        '<div style="margin-top:22px"><a href="/cardconv/convert" class="btn btn-primary">← Back to Convert</a></div>'
+        '</div></div></div></body></html>')
 
 
 def _handle_upload_rerun(username: str, uid: str):
