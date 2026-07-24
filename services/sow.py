@@ -2582,6 +2582,98 @@ def _contract_card(c, draggable=False, show_title=True):
         f'</div></div>')
 
 
+def _parse_any_date(s):
+    """Contract dates are stored verbatim ('November 15, 2023',
+    '5-September-2023', '2023-11-15') — try the shapes we actually see."""
+    s = (s or "").strip()
+    if not s:
+        return None
+    d = _parse_date(s)
+    if d:
+        return d
+    s2 = re.sub(r"[,\.]", " ", s).replace("-", " ").replace("/", " ")
+    s2 = re.sub(r"\s+", " ", s2).strip()
+    for fmt in ("%B %d %Y", "%d %B %Y", "%b %d %Y", "%d %b %Y",
+                "%m %d %Y", "%Y %m %d"):
+        try:
+            return datetime.strptime(s2, fmt).date()
+        except ValueError:
+            pass
+    return None
+
+
+def _contract_month_amounts(c):
+    """{(y,m): amount} — the contract total spread across its term with the
+    same days/30 partial-month convention the SOW schedules use. None when
+    period or amount is missing/unparseable."""
+    s = _parse_any_date(c.get("period_start"))
+    e = _parse_any_date(c.get("period_end"))
+    amt = _num_or_none(c.get("amount"))
+    if not s or not e or amt is None:
+        return None
+    spans = _month_spans(s, e)
+    tot = sum(f for _, _, f in spans)
+    if not spans or tot <= 0:
+        return None
+    per = amt / tot
+    return {(y, m): per * f for y, m, f in spans}
+
+
+def _group_cashflow_table(sea, kids):
+    """Per-group monthly cashflow: what Cheil bills SEA vs what it pays each
+    vendor, month by month over the contract duration (강프로 2026-07-24)."""
+    sea_m = _contract_month_amounts(sea)
+    kid_ms = [(k, _contract_month_amounts(k)) for k in kids]
+    kid_ms = [(k, m) for k, m in kid_ms if m]
+    months = set(sea_m or {})
+    for _, m in kid_ms:
+        months |= set(m)
+    if not months or (not sea_m and not kid_ms):
+        return ""
+    months = sorted(months)
+
+    def lb(ym):
+        return date(ym[0], ym[1], 1).strftime("%b %y")
+
+    def num_cells(mmap, cls=""):
+        cells = []
+        for ym in months:
+            v = (mmap or {}).get(ym)
+            cells.append(f'<td class="num {cls}">{_money(v) if v is not None else "–"}</td>')
+        total = sum((mmap or {}).values())
+        cells.append(f'<td class="num tot {cls}">{_money(total)}</td>')
+        return "".join(cells)
+
+    head = ("<tr><th class=\"pin\"></th>"
+            + "".join(f"<th>{lb(ym)}</th>" for ym in months)
+            + "<th>Total</th></tr>")
+    rows = []
+    if sea_m:
+        rows.append('<tr><td class="pin">🔵 Bill to SEA</td>' + num_cells(sea_m, "bill") + '</tr>')
+    for k, m in kid_ms:
+        vname = _esc(k.get("vendor") or k.get("project_name") or "vendor")
+        rows.append(f'<tr><td class="pin">🟠 {vname}</td>' + num_cells(m, "pay") + '</tr>')
+    if sea_m and kid_ms:
+        net = {}
+        for ym in months:
+            net[ym] = (sea_m.get(ym, 0.0)
+                       - sum(m.get(ym, 0.0) for _, m in kid_ms))
+        net_cells = []
+        for ym in months:
+            v = net[ym]
+            cls = "pos" if v >= 0 else "neg"
+            net_cells.append(f'<td class="num {cls}">{_money(v)}</td>')
+        tot = sum(net.values())
+        net_cells.append(f'<td class="num tot {"pos" if tot >= 0 else "neg"}">{_money(tot)}</td>')
+        rows.append('<tr class="net"><td class="pin">Net (margin)</td>' + "".join(net_cells) + '</tr>')
+    note = ("Contract totals spread evenly across each term (days/30 partial months). "
+            "Documents without a parsed period or amount are omitted.")
+    return (f'<details class="cf-details" open><summary>📅 Monthly billing &amp; payouts</summary>'
+            f'<div class="cf-wrap"><table class="cf-table"><thead>{head}</thead>'
+            f'<tbody>{"".join(rows)}</tbody></table></div>'
+            f'<div class="sow-meta" style="margin-top:6px">{note}</div></details>')
+
+
 def _group_rollup(sea, kids):
     """SEA amount vs the sum of aligned vendor amounts → margin chips."""
     sea_amt = _num_or_none(sea.get("amount"))
@@ -2618,7 +2710,8 @@ def _render_contracts_section(user, data):
             f'<div class="ctr-sea-col">{_contract_card(sea, show_title=False)}</div>'
             f'<div class="ctr-ven-col" data-seadrop data-sea="{sea["id"]}">'
             f'{kid_cards}{empty}</div>'
-            f'</div></div>')
+            f'</div>'
+            f'{_group_cashflow_table(sea, kids)}</div>')
     groups_html = "".join(gblocks) or (
         '<div class="sow-meta" style="padding:22px;text-align:center">'
         'No SEA↔Cheil contracts yet — upload one to start a group.</div>')
@@ -2790,6 +2883,24 @@ _CTR_CSS = """
 .ctr-rows{display:grid;grid-template-columns:52px 1fr;gap:3px 10px;font-size:.78rem;color:var(--text);align-items:baseline}
 .ctr-lb{font-size:.6rem;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);font-weight:700}
 .ctr-meta{font-size:.74rem;color:var(--text-muted)}
+/* ── monthly cashflow table per group ── */
+.cf-details{margin-top:12px}
+.cf-details summary{cursor:pointer;font-size:.78rem;font-weight:700;color:var(--text-muted);user-select:none}
+.cf-details summary:hover{color:var(--text)}
+.cf-wrap{overflow-x:auto;margin-top:10px;border:1px solid var(--border);border-radius:var(--radius-md)}
+.cf-table{border-collapse:collapse;font-size:.72rem;min-width:100%}
+.cf-table th{border-bottom:1px solid var(--border);padding:6px 9px;font-size:.6rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);background:var(--surface-2);text-align:right;white-space:nowrap}
+.cf-table td{border-bottom:1px solid var(--border);padding:5px 9px;white-space:nowrap}
+.cf-table tr:last-child td{border-bottom:none}
+.cf-table .num{text-align:right;font-variant-numeric:tabular-nums;color:var(--text)}
+.cf-table .pin{position:sticky;left:0;background:var(--surface-2);font-weight:700;font-size:.72rem;color:var(--text);z-index:1;max-width:190px;overflow:hidden;text-overflow:ellipsis}
+.cf-table th.pin{z-index:2}
+.cf-table .bill{color:var(--success)}
+.cf-table .pay{color:#fb923c}
+.cf-table .tot{font-weight:800;border-left:1px solid var(--border-bright)}
+.cf-table .pos{color:var(--success)}
+.cf-table .neg{color:var(--danger)}
+.cf-table tr.net td{background:rgba(56,189,248,.05);font-weight:700}
 .ctr-kidlist{margin:8px 0 0;padding:0;list-style:none;font-size:.82rem}
 .ctr-kidlist li{display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-bottom:1px dashed var(--border)}
 .ctr-kidlist li b{font-variant-numeric:tabular-nums;color:var(--success);white-space:nowrap}
