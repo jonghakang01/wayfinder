@@ -364,6 +364,7 @@ def _migrate_person(p):
               "cheil_since", "salary_oh", "pc", "svpn", "ebita", "location"):
         p.setdefault(k, "")
     p.setdefault("linked_sows", [])
+    p.setdefault("linked_contracts", [])
     return p
 
 
@@ -753,6 +754,21 @@ def _esc(s):
 
 
 _CSS = """
+/* ── pill tab bar (cardconv pattern) ── */
+.dd-tabbar{position:sticky;top:52px;z-index:90;background:var(--bg-deep);padding:12px 0 10px;margin:-12px 0 10px}
+.dd-tabs{display:inline-flex;align-items:center;gap:2px;padding:3px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md);flex-wrap:wrap;max-width:100%}
+.dd-tab{display:inline-flex;align-items:center;padding:7px 16px;font-size:.82rem;font-weight:600;color:var(--text-muted);border-radius:var(--radius-sm);text-decoration:none;transition:background .15s,color .15s}
+.dd-tab:hover{color:var(--text)}
+.dd-tab.active{background:var(--accent);color:var(--on-accent)}
+/* ── landing stat cards ── */
+.dd-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:0 0 8px}
+.dd-stat{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px 18px;text-decoration:none;color:var(--text);transition:.15s;display:flex;flex-direction:column;gap:2px}
+.dd-stat:hover{border-color:var(--accent);transform:translateY(-2px);box-shadow:var(--shadow-md)}
+.dd-stat b{font-size:1.45rem;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.dd-stat .lb{font-size:.72rem;color:var(--text-muted);font-weight:600}
+.dd-stat .sub{font-size:.68rem;color:var(--text-muted)}
+.dd-stat .sub.pos{color:var(--success)}
+.dd-stat .sub.neg{color:var(--danger)}
 .sow-hero{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:20px 0 34px}
 .dir-card{display:flex;flex-direction:column;gap:10px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-xl);padding:30px 28px;text-decoration:none;color:var(--text);transition:.2s;position:relative;overflow:hidden}
 .dir-card::before{content:"";position:absolute;top:0;left:0;right:0;height:3px;background:var(--dir-color,var(--accent));opacity:.85}
@@ -815,6 +831,11 @@ select.slot{cursor:pointer}
 .ex-mark{background:rgba(56,189,248,.14);border-bottom:1.5px dashed rgba(56,189,248,.55);border-radius:3px;padding:0 3px;color:var(--text)}
 @media(max-width:1100px){.ed-wrap{grid-template-columns:1fr}.ex-col{position:static;max-height:none;order:2}}
 @media(max-width:768px){
+  .dd-tabbar{padding:8px 0}
+  .dd-tabs{display:flex;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+  .dd-tabs::-webkit-scrollbar{display:none}
+  .dd-tab{flex:0 0 auto;padding:10px 16px}
+  .dd-stats{grid-template-columns:repeat(2,1fr)}
   .sow-hero,.type-grid{grid-template-columns:1fr}
   .paper{padding:22px 16px}
   .doc-bar{top:0;position:static}
@@ -825,14 +846,39 @@ select.slot{cursor:pointer}
 """
 
 
-def _shell(user, title, body, wide=False):
+_TABS = [
+    ("home", "/sow", "🏠 Home"),
+    ("contracts", "/sow/contracts", "📎 Contracts"),
+    ("docs", "/sow/docs", "📄 Documents"),
+    ("people", "/sow/people", "👥 People"),
+    ("vendors", "/sow/vendors", "🏢 Vendors"),
+]
+
+
+def _tab_bar(active):
+    links = "".join(
+        f'<a href="{href}" class="dd-tab{" active" if k == active else ""}">{label}</a>'
+        for k, href, label in _TABS)
+    # keep the pill pinned just below the live nav height (nav wraps on mobile)
+    sync = ('<script>(function(){var n=document.querySelector("nav"),'
+            't=document.querySelector(".dd-tabbar");if(!n||!t)return;'
+            'var f=function(){t.style.top=n.offsetHeight+"px"};'
+            'f();window.addEventListener("resize",f);'
+            'var a=t.querySelector(".dd-tab.active"),r=a&&a.parentElement;'
+            'if(r&&r.scrollWidth>r.clientWidth)r.scrollLeft=a.offsetLeft-(r.clientWidth-a.offsetWidth)/2;'
+            '})();</script>')
+    return f'<div class="dd-tabbar"><div class="dd-tabs">{links}</div></div>{sync}'
+
+
+def _shell(user, title, body, wide=False, tab=None):
+    tabs = _tab_bar(tab) if tab else ""
     return f"""<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>🤝 {_esc(title)} · Wayfinder</title><link rel="stylesheet" href="/static/style.css">
 <style>{_CSS}{_CTR_CSS}</style></head><body>
 <nav><span class="nav-brand">🤝 Deal Desk</span>
 <span class="nav-user">👤 {_esc(user)} &nbsp;·&nbsp; <a href="/logout">Logout</a></span></nav>
-<div class="container" style="max-width:{'1800px' if wide else '1000px'}">{body}</div></body></html>"""
+<div class="container" style="max-width:{'1800px' if wide else '1000px'}">{tabs}{body}</div></body></html>"""
 
 
 def _mk(v, field):
@@ -987,15 +1033,44 @@ function delSow(id){
 </script>"""
 
 
+def _landing_stats(data):
+    """Clickable stat cards — the dashboard summary on the clean landing."""
+    groups, orphans = _contract_groups(data)
+    n_contracts = len(data.get("contracts", []))
+    margin = 0.0
+    have_margin = False
+    for sea, kids in groups:
+        sea_amt = _num_or_none(sea.get("amount"))
+        kid_amts = [a for a in (_num_or_none(k.get("amount")) for k in kids) if a is not None]
+        if sea_amt is not None and kid_amts:
+            margin += sea_amt - sum(kid_amts)
+            have_margin = True
+    mcls = "pos" if margin >= 0 else "neg"
+    msub = (f'<span class="sub {mcls}">Margin {_money(margin)}</span>'
+            if have_margin else '<span class="sub">SEA ↔ vendor alignment</span>')
+    cards = [
+        ("/sow/contracts", n_contracts, "📎 Contracts", msub),
+        ("/sow/docs", len(data.get("sows", [])), "📄 Documents",
+         '<span class="sub">SOW · MSA · NDA · Estimation</span>'),
+        ("/sow/people", len(data.get("people", [])), "👥 People",
+         '<span class="sub">Roster & profiles</span>'),
+        ("/sow/vendors", len(data.get("vendors", [])), "🏢 Vendors",
+         '<span class="sub">Contractor registry</span>'),
+    ]
+    return '<div class="dd-stats">' + "".join(
+        f'<a class="dd-stat" href="{href}"><span class="lb">{lb}</span><b>{n}</b>{sub}</a>'
+        for href, n, lb, sub in cards) + '</div>'
+
+
 def _render_landing(user):
     data = _load(user)
     _migrate_contract_texts(user, data)
-    rows = _sow_rows(user, data)
-    contracts = _render_contracts_section(user, data)
     body = f"""
 <h1 style="margin:8px 0 4px">Deal Desk</h1>
-<p style="color:var(--text-muted);font-size:.86rem;margin-bottom:6px">Draft a new SOW — who is it with?</p>
-<div class="sow-hero">
+<p style="color:var(--text-muted);font-size:.86rem;margin-bottom:14px">Start a document, drop in a contract, or jump to a workspace below.</p>
+{_landing_stats(data)}
+<h2 style="font-size:1rem;font-weight:800;margin:26px 0 4px">✍️ Draft a new SOW — who is it with?</h2>
+<div class="sow-hero" style="margin-top:12px">
   <a class="dir-card" href="/sow/types?dir=sea" style="--dir-color:#38bdf8">
     <span class="dir-icon">🔵</span>
     <span class="dir-name">with Samsung (SEA)</span>
@@ -1007,19 +1082,40 @@ def _render_landing(user):
     <span class="dir-desc">Cheil as Client — outbound SOW under each vendor's MSA. Cheil pays the contractor.</span>
   </a>
 </div>
-<div style="display:flex;align-items:center;justify-content:space-between;margin:0 0 12px">
-  <h2 style="font-size:1rem;font-weight:800;margin:0">My Documents</h2>
-  <span style="display:flex;gap:8px">
-    <a class="btn btn-secondary btn-sm" href="/sow/people">👥 People</a>
-    <a class="btn btn-secondary btn-sm" href="/sow/vendors">🏢 Vendors</a>
-  </span>
+<h2 style="font-size:1rem;font-weight:800;margin:0 0 12px">📎 Register an executed contract</h2>
+<div class="ctr-dropzone" id="ctrDrop" data-filedrop tabindex="0">
+  <input type="file" id="ctrFile" accept=".pdf,.docx,.doc,.txt" hidden>
+  <b>⬆ Drop a contract here</b> or click to upload — PDF/Word. Parties, period, amount and people are read automatically; the vendor is registered for you.
 </div>
-<div class="sow-list">{rows or '<div class="sow-meta" style="padding:36px;text-align:center">No SOWs yet — pick a counterpart above to start.</div>'}</div>
-{contracts}
-<div class="cmodal-ov" id="cmodalOv"><div class="cmodal" id="cmodal"></div></div>
-{_DEL_JS}
 {_CTR_JS}"""
-    return _shell(user, "Deal Desk", body)
+    return _shell(user, "Deal Desk", body, tab="home")
+
+
+def _render_contracts_page(user):
+    data = _load(user)
+    _migrate_contract_texts(user, data)
+    body = f"""
+<h1 style="margin:8px 0 4px">📎 Contracts</h1>
+<p style="color:var(--text-muted);font-size:.86rem;margin-bottom:14px">Executed contracts, grouped by SEA ↔ Cheil deal — vendor contracts align underneath with the margin rolled up.</p>
+{_render_contracts_section(user, data)}
+<div class="cmodal-ov" id="cmodalOv"><div class="cmodal" id="cmodal"></div></div>
+{_CTR_JS}"""
+    return _shell(user, "Contracts", body, tab="contracts")
+
+
+def _render_docs_page(user):
+    data = _load(user)
+    rows = _sow_rows(user, data)
+    body = f"""
+<div style="display:flex;align-items:center;gap:12px;margin:8px 0 14px;flex-wrap:wrap">
+  <h1 style="margin:0">📄 Documents</h1>
+  <span style="flex:1"></span>
+  <a class="btn btn-secondary btn-sm" href="/sow/types?dir=sea">🔵 New with SEA</a>
+  <a class="btn btn-secondary btn-sm" href="/sow/types?dir=agy">🟠 New with Vendor</a>
+</div>
+<div class="sow-list">{rows or '<div class="sow-meta" style="padding:36px;text-align:center">No documents yet — start one from the buttons above.</div>'}</div>
+{_DEL_JS}"""
+    return _shell(user, "Documents", body, tab="docs")
 
 
 def _person_docs(data, person):
@@ -1122,7 +1218,6 @@ def _render_people(user, saved=False):
 .pp-table tbody tr:hover td.pp-pin{{background:var(--surface-2)}}
 </style>
 <div style="display:flex;align-items:center;gap:12px;margin:8px 0 4px">
-  <a class="btn btn-ghost btn-sm" href="/sow">←</a>
   <h1 style="margin:0">👥 People</h1>
   <span style="flex:1"></span>
   <a class="btn btn-primary btn-sm" href="/sow/person">+ Add person</a>
@@ -1147,7 +1242,7 @@ def _render_people(user, saved=False):
   </thead>
   <tbody>{''.join(rows) or '<tr><td colspan="19" style="text-align:center;padding:30px;color:var(--text-muted)">No people yet.</td></tr>'}</tbody>
 </table></div>"""
-    return _shell(user, "People", body, wide=True)
+    return _shell(user, "People", body, wide=True, tab="people")
 
 
 def _render_person_detail(user, person, saved=False):
@@ -1498,7 +1593,6 @@ def _render_vendors(user, saved=False):
                     if saved else "")
     body = f"""
 <div style="display:flex;align-items:center;gap:12px;margin:8px 0 4px">
-  <a class="btn btn-ghost btn-sm" href="/sow">←</a>
   <h1 style="margin:0">🏢 Vendors</h1>
 </div>
 <p style="color:var(--text-muted);font-size:.86rem">One row per contractor — name, the entity line that lands in document preambles, and the MSA date. Referenced by Agency-side SOWs, MSAs and NDAs.</p>
@@ -1517,7 +1611,7 @@ function delVendor(id){{
     .then(function(){{ location.reload(); }});
 }}
 </script>"""
-    return _shell(user, "Vendors", body)
+    return _shell(user, "Vendors", body, tab="vendors")
 
 
 def _render_types(user, dir_key):
@@ -2288,7 +2382,8 @@ def _extract_fields(text):
     side = "sea" if has_samsung else ("vendor" if vendor else "sea")
     return {"client": client, "agency": agency, "vendor": vendor,
             "amount": amount, "period_start": period_start,
-            "period_end": period_end, "project_name": project, "side": side}
+            "period_end": period_end, "project_name": project, "side": side,
+            "people": []}
 
 
 _EXTRACT_MODEL = os.environ.get("SOW_EXTRACT_MODEL", "claude-sonnet-5")
@@ -2296,7 +2391,8 @@ _EXTRACT_SYSTEM = (
     "You extract structured fields from a contract or Statement of Work. "
     "Return ONLY a JSON object (no prose, no code fences) with exactly these keys:\n"
     '{"side":"sea"|"vendor","client":str,"agency":str,"vendor":str,'
-    '"amount":str,"period_start":str,"period_end":str,"project_name":str}\n'
+    '"amount":str,"period_start":str,"period_end":str,"project_name":str,'
+    '"people":[{"name":str,"role":str}]}\n'
     "Definitions:\n"
     "- side='sea' when the contract is between Samsung (Samsung Electronics "
     "America / SEA) and Cheil, where Samsung pays Cheil (Cheil is the agency).\n"
@@ -2310,6 +2406,10 @@ _EXTRACT_SYSTEM = (
     "- period_start / period_end = the service period start and end dates, copied "
     "verbatim as written in the document (e.g. 'June 1, 2024').\n"
     "- project_name = the project or SOW name/title.\n"
+    "- people = individuals named as project resources/personnel (resource "
+    "tables, staffing sections, key personnel lists) with their role/title. "
+    "EXCLUDE signatories, witnesses and legal representatives who only sign "
+    "the document. Empty list if none.\n"
     "Use an empty string '' for anything not present. Do not invent values.")
 
 
@@ -2352,6 +2452,11 @@ def _extract_fields_llm(text):
         d = json.loads(m.group(0))
     except Exception:
         return None
+    people = []
+    for p in (d.get("people") or [])[:40]:
+        if isinstance(p, dict) and str(p.get("name") or "").strip():
+            people.append({"name": str(p.get("name"))[:80].strip(),
+                           "role": str(p.get("role") or "")[:80].strip()})
     return {
         "side": "vendor" if d.get("side") == "vendor" else "sea",
         "client": str(d.get("client") or ""),
@@ -2361,6 +2466,7 @@ def _extract_fields_llm(text):
         "period_start": str(d.get("period_start") or ""),
         "period_end": str(d.get("period_end") or ""),
         "project_name": str(d.get("project_name") or ""),
+        "people": people,
     }
 
 
@@ -2401,6 +2507,27 @@ def _contract_by_id(data, cid):
     return next((c for c in data.get("contracts", []) if c["id"] == cid), None)
 
 
+def _auto_register_vendor(data, name):
+    """Register the extracted vendor entity right away (강프로 2026-07-24)
+    unless a vendor already matches by normalized name."""
+    name = (name or "").strip()
+    if not name:
+        return
+    norm = _norm_tokens(name)
+    for v in data.get("vendors", []):
+        vn = (v.get("name") or "").strip()
+        if vn.lower() == name.lower() or (norm and _norm_tokens(vn) == norm):
+            return
+    data.setdefault("vendors", []).append(
+        {"id": uuid.uuid4().hex[:8], "name": name, "entity_line": "", "msa_date": ""})
+
+
+def _find_person(data, name):
+    n = (name or "").strip().lower()
+    return next((p for p in data.get("people", [])
+                 if (p.get("name") or "").strip().lower() == n), None)
+
+
 def _contract_groups(data):
     """1:many grouping. Returns (groups, orphans):
       groups  = [(sea_contract, [vendor children…]) …] for every SEA contract
@@ -2430,8 +2557,13 @@ _SIDE_META = {
 
 
 def _contract_card(c, draggable=False, show_title=True):
+    """Contract box: counterparty, period, total amount as labeled rows
+    (강프로 2026-07-24) — the group header above carries the contract name."""
     label, chip, color, icon = _SIDE_META.get(c.get("side"), _SIDE_META["sea"])
-    parties = c.get("vendor") or c.get("client") or "—"
+    party = c.get("vendor") or c.get("client") or "—"
+    period = "—"
+    if c.get("period_start") or c.get("period_end"):
+        period = f'{_esc(c.get("period_start") or "…")} ~ {_esc(c.get("period_end") or "…")}'
     drag = ' draggable="true"' if draggable else ""
     title = ""
     if show_title:
@@ -2441,13 +2573,13 @@ def _contract_card(c, draggable=False, show_title=True):
         f'<div class="ctr-card" data-cid="{c["id"]}"{drag} '
         f'onclick="openContract(\'{c["id"]}\')" style="cursor:pointer">'
         + ('<span class="ctr-grip">⠿</span>' if draggable else '')
-        + f'<div class="ctr-top"><span class="dir-chip {chip}">{icon} {label}</span>'
-        f'<span class="ctr-amt">{_esc(c.get("amount") or "")}</span></div>'
+        + f'<div class="ctr-top"><span class="dir-chip {chip}">{icon} {label}</span></div>'
         f'{title}'
-        f'<div class="ctr-meta">{_esc(parties)}'
-        + (f' · {_esc(c.get("period_start"))}' if c.get("period_start") else "")
-        + (f' ~ {_esc(c.get("period_end"))}' if c.get("period_end") else "")
-        + '</div></div>')
+        f'<div class="ctr-rows">'
+        f'<span class="ctr-lb">Party</span><span>{_esc(party)}</span>'
+        f'<span class="ctr-lb">Period</span><span>{period}</span>'
+        f'<span class="ctr-lb">Amount</span><span class="ctr-amt">{_esc(c.get("amount") or "—")}</span>'
+        f'</div></div>')
 
 
 def _group_rollup(sea, kids):
@@ -2495,9 +2627,6 @@ def _render_contracts_section(user, data):
            if orphans else '<div class="ctr-drop-hint">None — drop a vendor card here to unlink it</div>')
         + '</div>')
     return f"""
-<div style="display:flex;align-items:center;justify-content:space-between;margin:30px 0 12px">
-  <h2 style="font-size:1rem;font-weight:800;margin:0">📎 Contracts</h2>
-</div>
 <div class="ctr-dropzone" id="ctrDrop" data-filedrop tabindex="0">
   <input type="file" id="ctrFile" accept=".pdf,.docx,.doc,.txt" hidden>
   <b>⬆ Drop a contract here</b> or click to upload — PDF/Word, parsed automatically.
@@ -2565,6 +2694,31 @@ def _render_contract_frag(user, data, cid):
     else:
         party_fld = fld("Client (payer)", "client", c.get("client") or SAMSUNG_ENTITY)
         parties_note = f"{c.get('client') or SAMSUNG_ENTITY} ↔ {CHEIL_ENTITY} (agency)"
+    # people found in the contract — 1차 정리 후 리뷰 요청 후 저장 (강프로 2026-07-24):
+    # nothing lands in the roster until the user confirms here.
+    people_html = ""
+    pending = c.get("people_pending") or []
+    if pending:
+        aff = c.get("vendor") if c.get("side") == "vendor" else "Cheil"
+        rows = []
+        for i, p in enumerate(pending):
+            known = _find_person(data, p.get("name"))
+            note = (' <span class="sow-meta">already in roster — will link this contract</span>'
+                    if known else "")
+            val = _esc(f'{p.get("name", "")}\t{p.get("role", "")}')
+            rows.append(
+                f'<label class="ppl-row"><input type="checkbox" value="{val}" checked>'
+                f'<span><b>{_esc(p.get("name"))}</b>'
+                + (f' · {_esc(p.get("role"))}' if p.get("role") else "")
+                + f' <span class="sow-meta">({_esc(aff)})</span>{note}</span></label>')
+        people_html = (
+            f'<div class="ctr-linkbox" id="pplBox"><b>👥 People found in this contract ({len(pending)})</b>'
+            '<div class="sow-meta">Mapped to the vendor and this contract — review, uncheck any noise, then save to the People roster.</div>'
+            + "".join(rows) +
+            '<div style="display:flex;gap:8px;margin-top:4px">'
+            f'<button class="btn btn-primary btn-sm" type="button" onclick="ctrPeopleSave(\'{c["id"]}\')">💾 Save selected to People</button>'
+            f'<button class="btn btn-secondary btn-sm" type="button" onclick="ctrPost(\'/sow/contract/people_dismiss\',{{id:\'{c["id"]}\'}})">Dismiss</button>'
+            '</div></div>')
     uploaded = (c.get("uploaded") or "")[:10]
     preview = _esc(_contract_text(user, c)[:6000])
     return f"""
@@ -2596,6 +2750,7 @@ def _render_contract_frag(user, data, cid):
     </div>
   </form>
   {link_html}
+  {people_html}
   <details class="ctr-prev"><summary>📄 Document text preview</summary><pre>{preview}</pre></details>
 </div>"""
 
@@ -2628,7 +2783,9 @@ _CTR_CSS = """
 .ctr-grip{position:absolute;left:9px;top:50%;transform:translateY(-50%);color:var(--text-muted);cursor:grab;font-size:1rem;letter-spacing:-2px}
 .ctr-top{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}
 .ctr-amt{font-weight:800;color:var(--success);font-variant-numeric:tabular-nums;font-size:.86rem}
-.ctr-title{font-weight:700;font-size:.9rem;color:var(--text);margin-bottom:3px}
+.ctr-title{font-weight:700;font-size:.9rem;color:var(--text);margin-bottom:6px}
+.ctr-rows{display:grid;grid-template-columns:52px 1fr;gap:3px 10px;font-size:.78rem;color:var(--text);align-items:baseline}
+.ctr-lb{font-size:.6rem;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);font-weight:700}
 .ctr-meta{font-size:.74rem;color:var(--text-muted)}
 .ctr-kidlist{margin:8px 0 0;padding:0;list-style:none;font-size:.82rem}
 .ctr-kidlist li{display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-bottom:1px dashed var(--border)}
@@ -2648,6 +2805,8 @@ _CTR_CSS = """
 .ctr-fld .slot{width:100%}
 .ctr-actions{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
 .ctr-linkbox,.ctr-linked{margin-top:16px;padding-top:14px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px;font-size:.82rem}
+.ppl-row{display:flex;gap:8px;align-items:flex-start;font-size:.82rem;padding:2px 0;cursor:pointer}
+.ppl-row input{margin-top:3px}
 .ctr-linked{flex-direction:row;align-items:center;gap:10px}
 .ctr-prev{margin-top:14px}
 .ctr-prev summary{cursor:pointer;font-size:.8rem;color:var(--text-muted)}
@@ -2666,14 +2825,22 @@ function openContract(id){
 function ctrPost(url,obj){
   var b=Object.keys(obj).map(function(k){return k+'='+encodeURIComponent(obj[k]);}).join('&');
   fetch(url,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:b})
-    .then(function(){closeContract();location.href='/sow';});
+    .then(function(){closeContract();location.href='/sow/contracts';});
 }
 function ctrSave(id){
   var f=document.querySelector('#cmodal form.ctr-form');
   var b='id='+encodeURIComponent(id);
   f.querySelectorAll('input,select').forEach(function(el){b+='&'+el.name+'='+encodeURIComponent(el.value);});
   fetch('/sow/contract/save',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:b})
-    .then(function(){closeContract();location.href='/sow';});
+    .then(function(){closeContract();location.href='/sow/contracts';});
+}
+function ctrPeopleSave(id){
+  var box=document.getElementById('pplBox');if(!box)return;
+  var sel=[];
+  box.querySelectorAll('input[type=checkbox]:checked').forEach(function(cb){sel.push(cb.value);});
+  var b='id='+encodeURIComponent(id)+'&sel='+encodeURIComponent(sel.join('\\n'));
+  fetch('/sow/contract/people_save',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:b})
+    .then(function(){location.href='/sow/contracts?newc='+encodeURIComponent(id);});
 }
 function ctrAssign(id){
   var sel=document.getElementById('lnk_'+id);
@@ -2683,7 +2850,7 @@ function ctrAssign(id){
 function ctrReparse(id,btn){
   if(btn){btn.disabled=true;btn.textContent='🪄 Reading…';}
   fetch('/sow/contract/reparse',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'id='+encodeURIComponent(id)})
-    .then(function(){location.href='/sow?newc='+encodeURIComponent(id);});
+    .then(function(){location.href='/sow/contracts?newc='+encodeURIComponent(id);});
 }
 function ctrUpload(files){
   if(!files||!files.length)return;
@@ -2745,6 +2912,12 @@ def handle(method, path, body, ctx):
     if method == "GET" and path == "/sow":
         return ("html", _render_landing(user))
 
+    if method == "GET" and path == "/sow/contracts":
+        return ("html", _render_contracts_page(user))
+
+    if method == "GET" and path == "/sow/docs":
+        return ("html", _render_docs_page(user))
+
     # ── uploaded contracts ────────────────────────────────────────────────
     if method == "GET" and path == "/sow/contract":
         data = _load(user)
@@ -2768,16 +2941,19 @@ def handle(method, path, body, ctx):
         rec.update({k: fields.get(k, "") for k in
                     ("client", "agency", "vendor", "amount",
                      "period_start", "period_end", "project_name", "side")})
+        if fields.get("people"):
+            rec["people_pending"] = fields["people"]
         try:
             os.makedirs(_contracts_dir(user), exist_ok=True)
             with open(_contract_file_path(user, rec), "wb") as fp:
                 fp.write(content)
             _store_contract_text(user, rec, text)
         except OSError:
-            return ("redirect", "/sow")
+            return ("redirect", "/sow/contracts")
+        _auto_register_vendor(data, rec.get("vendor"))
         data.setdefault("contracts", []).append(rec)
         _save(user, data)
-        return ("redirect", f"/sow?newc={cid}")
+        return ("redirect", f"/sow/contracts?newc={cid}")
 
     if method == "POST" and path == "/sow/contract/reparse":
         data = _load(user)
@@ -2796,8 +2972,11 @@ def handle(method, path, body, ctx):
             for k in ("client", "agency", "vendor", "amount",
                       "period_start", "period_end", "project_name", "side"):
                 c[k] = fields.get(k, c.get(k, ""))
+            if fields.get("people"):
+                c["people_pending"] = fields["people"]
+            _auto_register_vendor(data, c.get("vendor"))
             _save(user, data)
-        return ("redirect", f"/sow?newc={_f(body, 'id')}")
+        return ("redirect", f"/sow/contracts?newc={_f(body, 'id')}")
 
     if method == "POST" and path == "/sow/contract/save":
         data = _load(user)
@@ -2814,7 +2993,7 @@ def handle(method, path, body, ctx):
             if c["side"] == "vendor":
                 c["client"] = CHEIL_ENTITY
             _save(user, data)
-        return ("redirect", "/sow")
+        return ("redirect", "/sow/contracts")
 
     if method == "POST" and path == "/sow/contract/assign":
         # Align a vendor contract under a SEA↔Cheil parent (1:many). An empty
@@ -2830,7 +3009,40 @@ def handle(method, path, body, ctx):
             else:
                 v["linked_id"] = None
             _save(user, data)
-        return ("redirect", "/sow")
+        return ("redirect", "/sow/contracts")
+
+    if method == "POST" and path == "/sow/contract/people_save":
+        data = _load(user)
+        c = _contract_by_id(data, _f(body, "id"))
+        if c:
+            aff = (c.get("vendor") if c.get("side") == "vendor" else "Cheil") or "Cheil"
+            for line in _f(body, "sel").split("\n"):
+                name, _, role = line.partition("\t")
+                name = name.strip()
+                if not name:
+                    continue
+                p = _find_person(data, name)
+                if not p:
+                    p = _migrate_person({"id": uuid.uuid4().hex[:8], "name": name,
+                                         "sell_hr": ""})
+                    p["affiliation"] = aff
+                    p["role_title"] = role.strip()
+                    p["project"] = c.get("project_name") or ""
+                    data.setdefault("people", []).append(p)
+                lc = p.setdefault("linked_contracts", [])
+                if c["id"] not in lc:
+                    lc.append(c["id"])
+            c.pop("people_pending", None)
+            _save(user, data)
+        return ("redirect", "/sow/contracts")
+
+    if method == "POST" and path == "/sow/contract/people_dismiss":
+        data = _load(user)
+        c = _contract_by_id(data, _f(body, "id"))
+        if c:
+            c.pop("people_pending", None)
+            _save(user, data)
+        return ("redirect", "/sow/contracts")
 
     if method == "POST" and path == "/sow/contract/unlink":
         data = _load(user)
@@ -2838,7 +3050,7 @@ def handle(method, path, body, ctx):
         if a:
             a["linked_id"] = None
             _save(user, data)
-        return ("redirect", "/sow")
+        return ("redirect", "/sow/contracts")
 
     if method == "POST" and path == "/sow/contract/delete":
         data = _load(user)
@@ -2855,7 +3067,7 @@ def handle(method, path, body, ctx):
                     pass
             data["contracts"] = [x for x in data["contracts"] if x["id"] != c["id"]]
             _save(user, data)
-        return ("redirect", "/sow")
+        return ("redirect", "/sow/contracts")
 
     if method == "GET" and path == "/sow/contract/file":
         data = _load(user)
@@ -2907,6 +3119,8 @@ def handle(method, path, body, ctx):
             rec[k] = _f(body, k)
         rec["affiliation"] = rec["affiliation"] or "Cheil"
         rec["linked_sows"] = [str(x) for x in linked if x]
+        if cur:
+            rec["linked_contracts"] = cur.get("linked_contracts", [])
         if cur:
             data["people"][data["people"].index(cur)] = rec
         else:
