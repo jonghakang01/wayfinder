@@ -121,6 +121,11 @@ _CC_TAB_CSS = (
     ".cc-collapse>summary::before{content:'▸';font-size:.7rem;color:var(--text-muted);transition:transform .15s}"
     ".cc-collapse[open]>summary::before{transform:rotate(90deg)}"
     ".cc-collapse-body{padding:4px 16px 14px}"
+    ".cc-tabrow{display:flex;align-items:center;gap:10px;justify-content:space-between;flex-wrap:wrap}"
+    ".cc-profile-sel{padding:7px 10px;background:var(--surface-2);border:1px solid var(--border);"
+    "border-radius:var(--radius-md);color:var(--text);font-size:.8rem;font-weight:600;cursor:pointer;"
+    "max-width:220px;outline:none}"
+    ".cc-profile-sel:hover,.cc-profile-sel:focus{border-color:var(--accent)}"
     ".cc-tabs{display:inline-flex;align-items:center;gap:2px;padding:3px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md);flex-wrap:wrap;max-width:100%}"
     ".cc-tab{display:inline-flex;align-items:center;padding:7px 16px;font-size:.82rem;font-weight:600;color:var(--text-muted);border-radius:var(--radius-sm);text-decoration:none;transition:background .15s,color .15s}"
     ".cc-tab:hover{color:var(--text)}"
@@ -166,6 +171,7 @@ _CC_TAB_CSS = (
     # wrap — one scrollable pill row, last pill peeking at the edge as the cue.
     "@media(max-width:768px){"
     ".cc-tabbar{padding:8px 0}"
+    ".cc-profile-sel{flex:1 1 100%;max-width:none}"
     ".cc-tabs{display:flex;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}"
     ".cc-tabs::-webkit-scrollbar{display:none}"
     ".cc-tab{flex:0 0 auto;padding:10px 16px}"
@@ -194,6 +200,30 @@ def _tab_bar(active: str, user: str) -> str:
         cls = "cc-tab active" if key == active else "cc-tab"
         out.append(f'<a href="{href}" class="{cls}">{label}</a>')
     out.append('</div>')
+
+    # card-profile switcher — each profile is a fully separate pipeline
+    # (statements, ledger, OCR queue, card names, Drive subfolder)
+    profs, active_pid = _load_profiles(user)
+    def _esc_attr(s):
+        return str(s).replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;")
+    popts = "".join(
+        f'<option value="{p["id"]}"{" selected" if p["id"] == active_pid else ""}>'
+        f'💳 {_esc_attr(p["name"])}</option>' for p in profs)
+    prof_sel = (
+        f'<select class="cc-profile-sel" data-cur="{active_pid}" '
+        f'onchange="ccProfileChange(this)" title="Card profile — separate statements, ledger and Drive folder per card">'
+        f'{popts}<option value="__new__">＋ New card profile…</option></select>'
+        '<script>function ccProfileChange(s){'
+        "if(s.value==='__new__'){var n=prompt('New card profile name — e.g. CEO card');"
+        "if(!n||!n.trim()){s.value=s.getAttribute('data-cur');return;}"
+        "ccProfilePost('/cardconv/profile/create',{name:n.trim()});return;}"
+        "ccProfilePost('/cardconv/profile/switch',{pid:s.value});}"
+        'function ccProfilePost(url,obj){var f=document.createElement("form");'
+        'f.method="POST";f.action=url;'
+        'Object.keys(obj).forEach(function(k){var i=document.createElement("input");'
+        'i.type="hidden";i.name=k;i.value=obj[k];f.appendChild(i);});'
+        'document.body.appendChild(f);f.submit();}</script>')
+    out = ['<div class="cc-tabrow">'] + out + [prof_sel, '</div>']
     # Sticky wrapper: the tab pill stays pinned while the page scrolls, and its
     # full-width ground hides content passing behind it. The script keeps the
     # pin offset equal to the actual nav height (it changes when nav wraps).

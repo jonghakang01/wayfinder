@@ -107,6 +107,23 @@ def handle(method, path, body, ctx=None):
     if method == "POST" and path == "/cardconv/batch/run":
         return _handle_batch_run(user, ctx)
 
+    # Card profiles — self-service create/switch (강프로 2026-07-24)
+    if method == "POST" and path == "/cardconv/profile/switch":
+        pid = body.get("pid", [""])[0]
+        profs, _ = _load_profiles(user)
+        if pid in {p["id"] for p in profs}:
+            _save_profiles(user, [p for p in profs if p["id"]], pid)
+        return ("redirect", "/cardconv/ledger")
+    if method == "POST" and path == "/cardconv/profile/create":
+        name = body.get("name", [""])[0].strip()[:40]
+        profs, active = _load_profiles(user)
+        if name and name.lower() not in {p["name"].lower() for p in profs}:
+            extra = [p for p in profs if p["id"]]
+            pid = uuid.uuid4().hex[:8]
+            extra.append({"id": pid, "name": name})
+            _save_profiles(user, extra, pid)
+        return ("redirect", "/cardconv/ledger")
+
     # Drive OAuth
     if method == "GET" and path == "/cardconv/drive/connect":
         return _handle_drive_connect(user, body)

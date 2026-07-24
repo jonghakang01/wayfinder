@@ -198,8 +198,59 @@ def _add_hist(entry: dict):
     _save_hist(hist[:100])
 
 
+# ── Card profiles (강프로 2026-07-24) ────────────────────────────────────────
+# One login can manage several corporate cards. A profile scopes the whole
+# pipeline — statement pool, ledger, OCR staging, card names, Drive folder,
+# review — by suffixing the per-user data filenames with `@<pid>`. The default
+# profile (pid='') keeps the legacy filenames, so existing data needs no
+# migration. Profiles are self-service: users create them from the tab bar.
+import threading as _prof_threading
+_PROFILE_CTX = _prof_threading.local()
+
+
+def _profiles_file(username: str) -> Path:
+    return DATA_DIR / f"profiles_{username}.json"
+
+
+def _load_profiles(username: str):
+    """Returns (profiles, active_pid); the default profile (pid='') is always
+    first. Extra profiles are [{'id','name'}...]."""
+    try:
+        d = json.loads(_profiles_file(username).read_text())
+    except Exception:
+        d = {}
+    profs = [p for p in d.get("profiles", [])
+             if isinstance(p, dict) and p.get("id")]
+    profs.insert(0, {"id": "", "name": d.get("default_name") or "My card"})
+    active = d.get("active", "")
+    if active not in {p["id"] for p in profs}:
+        active = ""
+    return profs, active
+
+
+def _save_profiles(username: str, extra_profiles: list, active: str):
+    _ensure_dirs()
+    _profiles_file(username).write_text(json.dumps(
+        {"profiles": extra_profiles, "active": active},
+        ensure_ascii=False, indent=2))
+
+
+def _active_pid(username: str) -> str:
+    forced = getattr(_PROFILE_CTX, "force_pid", None)
+    if forced is not None:
+        return forced
+    return _load_profiles(username)[1]
+
+
+def _pkey(username: str) -> str:
+    """Storage key for the active card profile — legacy `<user>` for the
+    default profile, `<user>@<pid>` for additional cards."""
+    pid = _active_pid(username)
+    return f"{username}@{pid}" if pid else username
+
+
 def _receipts_file(username: str) -> Path:
-    return DATA_DIR / f"receipts_{username}.json"
+    return DATA_DIR / f"receipts_{_pkey(username)}.json"
 
 
 def _migrate_entry(e: dict) -> dict:
@@ -312,7 +363,7 @@ def _save_receipts(username: str, receipts: list):
 
 
 def _drive_meta_file(username: str) -> Path:
-    return DATA_DIR / f"drive_meta_{username}.json"
+    return DATA_DIR / f"drive_meta_{_pkey(username)}.json"
 
 
 def _load_drive_meta(username: str) -> dict:
@@ -331,7 +382,7 @@ def _save_drive_meta(username: str, meta: dict):
 
 
 def _review_file(username: str) -> Path:
-    return DATA_DIR / f"review_{username}.json"
+    return DATA_DIR / f"review_{_pkey(username)}.json"
 
 
 def _load_review(username: str) -> dict:
@@ -352,7 +403,7 @@ def _save_review(username: str, review: dict):
 # ── OCR Staging (pre-ledger visual review) ────────────────────────────────────
 
 def _ocr_staging_file(username: str) -> Path:
-    return DATA_DIR / f"ocr_staging_{username}.json"
+    return DATA_DIR / f"ocr_staging_{_pkey(username)}.json"
 
 def _load_ocr_staging(username: str) -> dict:
     f = _ocr_staging_file(username)
@@ -381,7 +432,7 @@ def _clear_ocr_staging(username: str):
 _DISCARDED_CAP = 500
 
 def _ocr_discarded_file(username: str) -> Path:
-    return DATA_DIR / f"ocr_discarded_{username}.json"
+    return DATA_DIR / f"ocr_discarded_{_pkey(username)}.json"
 
 def _load_discarded_fids(username: str) -> dict:
     f = _ocr_discarded_file(username)
@@ -624,7 +675,7 @@ EXAMPLE_CARD_NAME = "JONGHA KANG"
 
 
 def _user_settings_file(username: str) -> Path:
-    return DATA_DIR / f"user_settings_{username}.json"
+    return DATA_DIR / f"user_settings_{_pkey(username)}.json"
 
 
 def _load_user_settings(username: str) -> dict:
@@ -654,11 +705,11 @@ def _get_card_member_names(username: str) -> list:
 # ── Uploaded CSV store (Convert page reuse) ────────────────────────────────────
 
 def _uploads_dir(username: str) -> Path:
-    return DATA_DIR / f"uploads_{username}"
+    return DATA_DIR / f"uploads_{_pkey(username)}"
 
 
 def _uploads_index_file(username: str) -> Path:
-    return DATA_DIR / f"uploads_{username}.json"
+    return DATA_DIR / f"uploads_{_pkey(username)}.json"
 
 
 def _load_uploads(username: str) -> list:
@@ -754,7 +805,7 @@ def _dedup_rows(rows: list, prior: Counter) -> tuple:
 # completed; the xlsx download is built from the open set on demand.
 
 def _tx_pool_file(username: str) -> Path:
-    return DATA_DIR / f"transactions_{username}.json"
+    return DATA_DIR / f"transactions_{_pkey(username)}.json"
 
 
 def _save_tx_pool(username: str, pool: dict):
@@ -1536,6 +1587,13 @@ def _get_receipts_folder_id(service, username: str) -> str:
     (The legacy Matched/ subfolder is no longer created or used.)"""
     wayfinder_id = _get_or_create_folder(service, 'Wayfinder')
     receipts_id  = _get_or_create_folder(service, 'Receipts', wayfinder_id)
+    # Extra card profiles get their own subfolder (Wayfinder/Receipts/<name>);
+    # the default profile keeps the legacy root so nothing moves.
+    pid = _active_pid(username)
+    if pid:
+        profs, _ = _load_profiles(username)
+        pname = next((p["name"] for p in profs if p["id"] == pid), pid)
+        receipts_id = _get_or_create_folder(service, pname, receipts_id)
     # Cache receipts folder ID for UI link
     meta = _load_drive_meta(username)
     if meta.get('receipts_folder_id') != receipts_id:
@@ -2120,7 +2178,20 @@ def _handle_batch_run(username: str, ctx):
     provided = headers.get("X-Batch-Secret", "") if headers else ""
     if not secret or provided != secret:
         return ("json", {"error": "unauthorized"}, 401)
-    return ("json", _run_batch_ocr(username))
+    # sweep every card profile, not just the active one
+    profs, _ = _load_profiles(username)
+    results = []
+    for p in profs:
+        _PROFILE_CTX.force_pid = p["id"]
+        try:
+            r = _run_batch_ocr(username)
+        finally:
+            _PROFILE_CTX.force_pid = None
+        r["profile"] = p["name"]
+        results.append(r)
+    if len(results) == 1:
+        return ("json", results[0])
+    return ("json", {"profiles": results})
 
 
 def _apply_ledger_filters(entries: list, status: str, dfrom: str, dto: str,
@@ -2345,6 +2416,7 @@ def purge_user_data(username: str) -> None:
     account so nothing — especially the Google Drive token — is left behind."""
     import shutil
     _revoke_drive_token(username)
+    _PROFILE_CTX.force_pid = ""   # resolve helpers to the legacy default paths
     for f in [
         TOKENS_DIR / f"{username}.json",
         _drive_meta_file(username),
@@ -2362,6 +2434,14 @@ def purge_user_data(username: str) -> None:
         except Exception:
             pass
     shutil.rmtree(_uploads_dir(username), ignore_errors=True)
+    _PROFILE_CTX.force_pid = None
+    # profile-scoped files/dirs (…_{user}@{pid}.json) + the profile registry
+    for pat in (f"*_{username}@*", f"profiles_{username}.json"):
+        for f in DATA_DIR.glob(pat):
+            try:
+                shutil.rmtree(f, ignore_errors=True) if f.is_dir() else f.unlink()
+            except Exception:
+                pass
 
 
 def _apply_receipt_completion(username: str, ids: set, completed: bool) -> dict:
