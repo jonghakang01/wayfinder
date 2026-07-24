@@ -25,10 +25,16 @@ def handle(method, path, body, ctx=None):
         target = body.get("username", [""])[0].strip()
         services_raw = body.get("services", [])
         services_list = [s for s in services_raw if s in auth.CONTROLLED_SERVICES]
+        # the form only manages the services in its scope — grants outside the
+        # scope (hidden from the decluttered UI) are preserved untouched
+        scope = [s for s in body.get("scope", [""])[0].split(",")
+                 if s in auth.CONTROLLED_SERVICES]
         if target and target != user:
             users = auth.load_users()
             if target in users:
-                users[target]["services"] = services_list
+                cur = users[target].get("services", [])
+                keep = [s for s in cur if s not in scope]
+                users[target]["services"] = keep + [s for s in services_list if s in scope]
                 auth.save_users(users)
         return ("redirect", "/admin")
 
@@ -145,6 +151,9 @@ def _forbidden():
     )
 
 
+_VISIBLE_SERVICES = ["cardconv"]  # per-user 권한 UI에 노출할 서비스
+
+
 def _drive_token_exists(username):
     import os
     from services._paths import DATA_ROOT
@@ -232,13 +241,16 @@ def render_admin(current_user, notify_result=""):
               </form>
             </div>'''
             user_svcs = set(info.get("services", []))
+            # decluttered to AMEX only (강프로 2026-07-24) — other grants are
+            # preserved via the scope field, just not shown here
             checks = "".join(
                 f'<label class="svc-check"><input type="checkbox" name="services" value="{s}"'
                 f'{" checked" if s in user_svcs else ""}> {svc_labels.get(s, s)}</label>'
-                for s in sorted(auth.CONTROLLED_SERVICES)
+                for s in _VISIBLE_SERVICES
             )
             svc_col = f'''<form method="POST" action="/admin/set_services" class="svc-form">
               <input type="hidden" name="username" value="{username}">
+              <input type="hidden" name="scope" value="{",".join(_VISIBLE_SERVICES)}">
               {checks}
               <button type="submit" class="svc-save-btn">저장</button>
             </form>'''
@@ -257,7 +269,7 @@ def render_admin(current_user, notify_result=""):
               <input type="hidden" name="username" value="{username}">
               <button type="submit" class="action-btn delete-btn" onclick="return confirm('{username}님을 완전히 삭제할까요? 되돌릴 수 없습니다.')">🗑 Delete</button>
             </form>'''
-            action_col = block_btn + " " + delete_btn
+            action_col = f'<div class="action-stack">{block_btn}{delete_btn}</div>'
 
         rows += f'''
         <tr class="{"row-self" if is_self else "row-blocked" if blocked else ""}">
@@ -391,7 +403,9 @@ tr.row-self{{background:#f0f9ff}}
 .unblock-btn:hover{{background:#a7f3d0}}
 .delete-btn{{background:#fee2e2;color:#991b1b;border:1px solid #fca5a5}}
 .delete-btn:hover{{background:#fca5a5}}
-.col-action{{display:flex;gap:6px;align-items:center;flex-wrap:wrap}}
+.action-stack{{display:flex;flex-direction:column;gap:6px;width:92px}}
+.action-stack form{{display:block!important}}
+.action-stack .action-btn{{width:100%;text-align:center}}
 tr.row-blocked td{{opacity:.65;background:#fff5f5}}
 .tq-email{{font-size:13px;font-weight:600;color:#1e293b}}
 .tq-meta{{font-size:12px;color:#64748b;white-space:nowrap}}
