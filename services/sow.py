@@ -2229,13 +2229,13 @@ def _norm_tokens(s):
         "the", "a", "an", "of", "for", "and", "sow", "project", "cheil", "samsung"}
 
 
-def _suggest_links(data, contract):
-    """Opposite-side contracts ranked by project-name token overlap."""
-    opp = "vendor" if contract.get("side") == "sea" else "sea"
-    mine = _norm_tokens(contract.get("project_name"))
+def _suggest_parents(data, vendor):
+    """SEA contracts ranked by project-name overlap — candidate parents for a
+    vendor contract (one SEA↔Cheil deal can hold many Cheil↔Vendor deals)."""
+    mine = _norm_tokens(vendor.get("project_name"))
     out = []
     for c in data.get("contracts", []):
-        if c["id"] == contract["id"] or c.get("side") != opp or c.get("linked_id"):
+        if c.get("side") != "sea":
             continue
         theirs = _norm_tokens(c.get("project_name"))
         score = len(mine & theirs) / max(1, len(mine | theirs)) if (mine or theirs) else 0
@@ -2248,26 +2248,26 @@ def _contract_by_id(data, cid):
     return next((c for c in data.get("contracts", []) if c["id"] == cid), None)
 
 
-def _link_pairs(data):
-    """Return (pairs, singles): pairs = list of (sea_contract, vendor_contract),
-    singles = unlinked contracts."""
+def _contract_groups(data):
+    """1:many grouping. Returns (groups, orphans):
+      groups  = [(sea_contract, [vendor children…]) …] for every SEA contract
+      orphans = vendor contracts with no valid SEA parent
+    A vendor's `linked_id` points to its SEA parent."""
     cs = data.get("contracts", [])
-    by_id = {c["id"]: c for c in cs}
-    pairs, seen, singles = [], set(), []
+    seas = [c for c in cs if c.get("side") == "sea"]
+    sea_ids = {s["id"] for s in seas}
+    children = {s["id"]: [] for s in seas}
+    orphans = []
     for c in cs:
-        if c["id"] in seen:
+        if c.get("side") == "sea":
             continue
-        lid = c.get("linked_id")
-        other = by_id.get(lid) if lid else None
-        if other and other.get("linked_id") == c["id"]:
-            sea = c if c.get("side") == "sea" else other
-            ven = other if c.get("side") == "sea" else c
-            pairs.append((sea, ven))
-            seen.add(c["id"]); seen.add(other["id"])
+        pid = c.get("linked_id")
+        if pid in sea_ids:
+            children[pid].append(c)
         else:
-            singles.append(c)
-            seen.add(c["id"])
-    return pairs, singles
+            orphans.append(c)
+    groups = [(s, children[s["id"]]) for s in seas]
+    return groups, orphans
 
 
 _SIDE_META = {
@@ -2276,13 +2276,15 @@ _SIDE_META = {
 }
 
 
-def _contract_card(c, clickable=True):
+def _contract_card(c, draggable=False):
     label, chip, color, icon = _SIDE_META.get(c.get("side"), _SIDE_META["sea"])
     parties = c.get("vendor") or c.get("client") or "—"
-    click = f' onclick="openContract(\'{c["id"]}\')" style="cursor:pointer"' if clickable else ""
+    drag = ' draggable="true"' if draggable else ""
     return (
-        f'<div class="ctr-card"{click}>'
-        f'<div class="ctr-top"><span class="dir-chip {chip}">{icon} {label}</span>'
+        f'<div class="ctr-card" data-cid="{c["id"]}"{drag} '
+        f'onclick="openContract(\'{c["id"]}\')" style="cursor:pointer">'
+        + ('<span class="ctr-grip">⠿</span>' if draggable else '')
+        + f'<div class="ctr-top"><span class="dir-chip {chip}">{icon} {label}</span>'
         f'<span class="ctr-amt">{_esc(c.get("amount") or "")}</span></div>'
         f'<div class="ctr-title">{_esc(c.get("project_name") or c.get("filename") or "(untitled contract)")}</div>'
         f'<div class="ctr-meta">{_esc(parties)}'
@@ -2292,36 +2294,36 @@ def _contract_card(c, clickable=True):
 
 
 def _render_contracts_section(user, data):
-    pairs, singles = _link_pairs(data)
-    blocks = []
-    for sea, ven in pairs:
-        blocks.append(
-            '<div class="ctr-pair">'
-            + _contract_card(sea) + '<div class="ctr-link">⇄</div>' + _contract_card(ven)
-            + '</div>')
-    pair_html = "".join(blocks) or (
-        '<div class="sow-meta" style="padding:22px;text-align:center">No aligned contract pairs yet.</div>')
-    single_html = ""
-    if singles:
-        single_html = ('<div style="font-size:.72rem;color:var(--text-muted);'
-                       'text-transform:uppercase;letter-spacing:.05em;margin:18px 0 8px">'
-                       'Not yet linked</div><div class="ctr-singles">'
-                       + "".join(f'<div class="ctr-single">{_contract_card(c)}'
-                                 f'<button class="btn btn-secondary btn-sm" '
-                                 f'onclick="openContract(\'{c["id"]}\')">🔗 Link</button></div>'
-                                 for c in singles) + "</div>")
+    groups, orphans = _contract_groups(data)
+    gblocks = []
+    for sea, kids in groups:
+        kid_cards = "".join(_contract_card(v, draggable=True) for v in kids)
+        empty = ('<div class="ctr-drop-hint">Drag vendor contracts here</div>'
+                 if not kids else "")
+        gblocks.append(
+            f'<div class="ctr-group">{_contract_card(sea)}'
+            f'<div class="ctr-children" data-seadrop data-sea="{sea["id"]}">'
+            f'{kid_cards}{empty}</div></div>')
+    groups_html = "".join(gblocks) or (
+        '<div class="sow-meta" style="padding:22px;text-align:center">'
+        'No SEA↔Cheil contracts yet — upload one to start a group.</div>')
+    orphan_html = (
+        '<div class="ctr-orphans" data-seadrop data-sea="">'
+        '<div class="ctr-orphan-hd">Unlinked vendor contracts '
+        '<span>· drag onto a SEA↔Cheil contract above to align them</span></div>'
+        + ("".join(_contract_card(c, draggable=True) for c in orphans)
+           if orphans else '<div class="ctr-drop-hint">None — drop a vendor card here to unlink it</div>')
+        + '</div>')
     return f"""
 <div style="display:flex;align-items:center;justify-content:space-between;margin:30px 0 12px">
   <h2 style="font-size:1rem;font-weight:800;margin:0">📎 Contracts</h2>
-  <button class="btn btn-primary btn-sm" onclick="document.getElementById('ctrUp').classList.toggle('hide')">⬆ Upload contract</button>
 </div>
-<form id="ctrUp" class="ctr-upload hide" method="post" action="/sow/contract/upload" enctype="multipart/form-data">
-  <input type="file" name="file" accept=".pdf,.docx,.doc,.txt" required>
-  <button class="btn btn-primary btn-sm" type="submit">Parse &amp; add</button>
-  <span class="sow-meta">PDF or Word — parties, amount &amp; period are read automatically; you confirm on the next screen.</span>
-</form>
-<div class="ctr-pairs">{pair_html}</div>
-{single_html}"""
+<div class="ctr-dropzone" id="ctrDrop" data-filedrop tabindex="0">
+  <input type="file" id="ctrFile" accept=".pdf,.docx,.doc,.txt" hidden>
+  <b>⬆ Drop a contract here</b> or click to upload — PDF/Word, parsed automatically.
+</div>
+<div class="ctr-groups">{groups_html}</div>
+{orphan_html}"""
 
 
 def _render_contract_frag(user, data, cid):
@@ -2331,28 +2333,42 @@ def _render_contract_frag(user, data, cid):
     if not c:
         return '<div class="cmodal-body"><p>Contract not found.</p></div>'
     label, chip, color, icon = _SIDE_META.get(c.get("side"), _SIDE_META["sea"])
-    linked = _contract_by_id(data, c.get("linked_id")) if c.get("linked_id") else None
 
-    # link controls
-    if linked:
-        link_html = (
-            f'<div class="ctr-linked">🔗 Linked to <b>{_esc(linked.get("project_name") or linked.get("filename"))}</b> '
-            f'({_SIDE_META.get(linked.get("side"), _SIDE_META["sea"])[0]})'
-            f'<button class="btn btn-danger btn-sm" onclick="ctrPost(\'/sow/contract/unlink\',{{id:\'{c["id"]}\'}})">Unlink</button></div>')
-    else:
-        opts = []
-        for score, cand in _suggest_links(data, c):
-            tag = " ★ suggested" if score > 0 else ""
-            opts.append(f'<option value="{cand["id"]}">{_esc(cand.get("project_name") or cand.get("filename"))}'
-                        f' — {_SIDE_META.get(cand.get("side"), _SIDE_META["sea"])[0]}{tag}</option>')
-        if opts:
+    # link controls — 1:many (a vendor belongs under one SEA; a SEA holds many)
+    if c.get("side") == "vendor":
+        parent = _contract_by_id(data, c.get("linked_id")) if c.get("linked_id") else None
+        if parent and parent.get("side") == "sea":
             link_html = (
-                '<div class="ctr-linkbox"><b>Link to the aligned contract:</b>'
-                f'<select id="lnk_{c["id"]}" class="slot">{"".join(opts)}</select>'
-                f'<button class="btn btn-primary btn-sm" onclick="ctrLink(\'{c["id"]}\')">🔗 Confirm link</button>'
-                '<div class="sow-meta">Uploads on the opposite side (★ = project-name match).</div></div>')
+                f'<div class="ctr-linked">🔗 Under <b>{_esc(parent.get("project_name") or parent.get("filename"))}</b> '
+                '(SEA ↔ Cheil)'
+                f'<button class="btn btn-danger btn-sm" onclick="ctrPost(\'/sow/contract/unlink\',{{id:\'{c["id"]}\'}})">Unlink</button></div>')
         else:
-            link_html = '<div class="sow-meta">No opposite-side contract to link yet.</div>'
+            opts = []
+            for score, cand in _suggest_parents(data, c):
+                tag = " ★ suggested" if score > 0 else ""
+                opts.append(f'<option value="{cand["id"]}">{_esc(cand.get("project_name") or cand.get("filename"))}{tag}</option>')
+            if opts:
+                link_html = (
+                    '<div class="ctr-linkbox"><b>Align under a SEA ↔ Cheil contract:</b>'
+                    f'<select id="lnk_{c["id"]}" class="slot">{"".join(opts)}</select>'
+                    f'<button class="btn btn-primary btn-sm" onclick="ctrAssign(\'{c["id"]}\')">🔗 Confirm</button>'
+                    '<div class="sow-meta">★ = project-name match. You can also drag the card onto a SEA contract.</div></div>')
+            else:
+                link_html = '<div class="sow-meta">No SEA ↔ Cheil contract to align under yet.</div>'
+    else:
+        _, kids = next(((s, k) for s, k in _contract_groups(data)[0] if s["id"] == c["id"]),
+                       (c, []))
+        if kids:
+            items = "".join(
+                f'<li>{_esc(k.get("project_name") or k.get("filename"))}'
+                f' <span class="sow-meta">{_esc(k.get("vendor") or "")}</span></li>' for k in kids)
+            link_html = (f'<div class="ctr-linkbox"><b>Aligned vendor contracts ({len(kids)}):</b>'
+                         f'<ul class="ctr-kidlist">{items}</ul>'
+                         '<div class="sow-meta">Drag a vendor card onto this contract to add more.</div></div>')
+        else:
+            link_html = ('<div class="sow-meta" style="margin-top:16px;padding-top:14px;'
+                         'border-top:1px solid var(--border)">No vendor contracts aligned yet — '
+                         'drag a vendor card onto this contract on the main screen.</div>')
 
     def fld(lbl, key, val):
         return (f'<label class="ctr-fld"><span>{lbl}</span>'
@@ -2393,20 +2409,31 @@ def _render_contract_frag(user, data, cid):
 
 
 _CTR_CSS = """
-.ctr-upload{display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:var(--surface-2,var(--surface));border:1px dashed var(--border-bright);border-radius:var(--radius-lg);padding:14px 18px;margin-bottom:14px}
-.ctr-upload.hide{display:none}
-.ctr-pairs{display:flex;flex-direction:column;gap:14px}
-.ctr-pair{display:grid;grid-template-columns:1fr auto 1fr;gap:12px;align-items:center}
-.ctr-link{font-size:1.4rem;color:var(--text-muted);text-align:center}
-.ctr-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px 16px;transition:.15s}
+.ctr-dropzone{display:block;width:100%;text-align:center;background:var(--surface-2,var(--surface));border:2px dashed var(--border-bright);border-radius:var(--radius-lg);padding:16px 18px;margin-bottom:16px;cursor:pointer;color:var(--text-muted);font-size:.82rem;transition:.15s}
+.ctr-dropzone:hover{border-color:var(--accent);color:var(--text)}
+.ctr-dropzone b{color:var(--text)}
+.ctr-dropzone.drag-over{border-color:var(--accent);background:rgba(56,189,248,.10);color:var(--text)}
+.ctr-groups{display:flex;flex-direction:column;gap:16px}
+.ctr-group{background:var(--surface-2,var(--surface));border:1px solid var(--border);border-radius:var(--radius-xl);padding:12px}
+.ctr-group>.ctr-card{border-left:3px solid #38bdf8}
+.ctr-children{display:flex;flex-direction:column;gap:8px;margin:10px 0 2px 20px;padding:8px;border-left:2px dashed var(--border);border-radius:0 var(--radius-md) var(--radius-md) 0;min-height:20px;transition:.15s}
+.ctr-children.drag-over,.ctr-orphans.drag-over{background:rgba(56,189,248,.10);border-color:var(--accent)}
+.ctr-children .ctr-card{border-left:3px solid #fb923c}
+.ctr-drop-hint{font-size:.72rem;color:var(--text-muted);font-style:italic;padding:6px 4px}
+.ctr-orphans{margin-top:16px;padding:12px;border:1px dashed var(--border-bright);border-radius:var(--radius-lg);display:flex;flex-direction:column;gap:8px;transition:.15s}
+.ctr-orphan-hd{font-size:.74rem;font-weight:700;color:var(--text)}
+.ctr-orphan-hd span{font-weight:400;color:var(--text-muted)}
+.ctr-card{position:relative;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px 16px;transition:.15s}
 .ctr-card:hover{border-color:var(--accent);box-shadow:var(--shadow-md)}
+.ctr-card[draggable="true"]{padding-left:30px}
+.ctr-card.dragging{opacity:.45}
+.ctr-grip{position:absolute;left:9px;top:50%;transform:translateY(-50%);color:var(--text-muted);cursor:grab;font-size:1rem;letter-spacing:-2px}
 .ctr-top{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}
 .ctr-amt{font-weight:800;color:var(--success);font-variant-numeric:tabular-nums;font-size:.86rem}
 .ctr-title{font-weight:700;font-size:.9rem;color:var(--text);margin-bottom:3px}
 .ctr-meta{font-size:.74rem;color:var(--text-muted)}
-.ctr-singles{display:flex;flex-direction:column;gap:10px}
-.ctr-single{display:flex;gap:10px;align-items:stretch}
-.ctr-single .ctr-card{flex:1}
+.ctr-kidlist{margin:8px 0 0;padding-left:18px;font-size:.82rem}
+.ctr-kidlist li{margin-bottom:4px}
 .cmodal-ov{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:flex-start;justify-content:center;z-index:200;padding:40px 16px;overflow-y:auto}
 .cmodal-ov.show{display:flex}
 .cmodal{background:var(--surface);border:1px solid var(--border-bright);border-radius:var(--radius-xl);max-width:720px;width:100%;box-shadow:var(--shadow-lg)}
@@ -2425,7 +2452,7 @@ _CTR_CSS = """
 .ctr-prev{margin-top:14px}
 .ctr-prev summary{cursor:pointer;font-size:.8rem;color:var(--text-muted)}
 .ctr-prev pre{white-space:pre-wrap;font-size:.72rem;max-height:300px;overflow:auto;background:var(--surface-2,var(--surface));border:1px solid var(--border);border-radius:8px;padding:10px;margin-top:8px}
-@media(max-width:768px){.ctr-pair{grid-template-columns:1fr}.ctr-link{transform:rotate(90deg)}.ctr-grid{grid-template-columns:1fr}}
+@media(max-width:768px){.ctr-children{margin-left:8px}.ctr-grid{grid-template-columns:1fr}}
 """
 
 _CTR_JS = """<script>
@@ -2448,14 +2475,59 @@ function ctrSave(id){
   fetch('/sow/contract/save',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:b})
     .then(function(){location.reload();});
 }
-function ctrLink(id){
+function ctrAssign(id){
   var sel=document.getElementById('lnk_'+id);
   if(!sel||!sel.value)return;
-  ctrPost('/sow/contract/link',{id:id,other:sel.value});
+  ctrPost('/sow/contract/assign',{vendor:id,sea:sel.value});
 }
+function ctrUpload(files){
+  if(!files||!files.length)return;
+  var fd=new FormData(); fd.append('file', files[0]);
+  fetch('/sow/contract/upload',{method:'POST',body:fd})
+    .then(function(r){ location.href = r.url || '/sow'; });
+}
+var ctrDragId=null;
+document.addEventListener('dragstart',function(e){
+  var card=e.target.closest('.ctr-card[draggable="true"]');
+  if(!card){return;}
+  ctrDragId=card.getAttribute('data-cid');
+  e.dataTransfer.effectAllowed='move';
+  try{e.dataTransfer.setData('text/plain',ctrDragId);}catch(err){}
+  card.classList.add('dragging');
+});
+document.addEventListener('dragend',function(e){
+  var card=e.target.closest('.ctr-card'); if(card)card.classList.remove('dragging');
+  ctrDragId=null;
+});
+document.addEventListener('dragover',function(e){
+  var t=e.target.closest('[data-seadrop],[data-filedrop]');
+  if(t){e.preventDefault(); t.classList.add('drag-over');}
+});
+document.addEventListener('dragleave',function(e){
+  var t=e.target.closest('[data-seadrop],[data-filedrop]');
+  if(t && !t.contains(e.relatedTarget))t.classList.remove('drag-over');
+});
+document.addEventListener('drop',function(e){
+  var fzone=e.target.closest('[data-filedrop]');
+  if(fzone){e.preventDefault(); fzone.classList.remove('drag-over');
+    if(e.dataTransfer.files&&e.dataTransfer.files.length)ctrUpload(e.dataTransfer.files);
+    return;}
+  var t=e.target.closest('[data-seadrop]');
+  if(!t)return;
+  e.preventDefault(); t.classList.remove('drag-over');
+  if(e.dataTransfer.files&&e.dataTransfer.files.length){ctrUpload(e.dataTransfer.files); return;}
+  var vid=ctrDragId||(e.dataTransfer&&e.dataTransfer.getData('text/plain'));
+  if(!vid)return;
+  ctrPost('/sow/contract/assign',{vendor:vid,sea:t.getAttribute('data-sea')||''});
+});
 document.addEventListener('DOMContentLoaded',function(){
   var ov=document.getElementById('cmodalOv');
   if(ov)ov.addEventListener('click',function(e){if(e.target===ov)closeContract();});
+  var dz=document.getElementById('ctrDrop'), fi=document.getElementById('ctrFile');
+  if(dz&&fi){
+    dz.addEventListener('click',function(){fi.click();});
+    fi.addEventListener('change',function(){ctrUpload(fi.files);});
+  }
   var m=location.search.match(/[?&]newc=([^&]+)/);
   if(m)openContract(decodeURIComponent(m[1]));
 });
@@ -2512,16 +2584,19 @@ def handle(method, path, body, ctx):
             _save(user, data)
         return ("redirect", "/sow")
 
-    if method == "POST" and path == "/sow/contract/link":
+    if method == "POST" and path == "/sow/contract/assign":
+        # Align a vendor contract under a SEA↔Cheil parent (1:many). An empty
+        # or invalid `sea` unlinks. `vendor` may currently be tagged either
+        # side; assigning it under a SEA also forces its side to vendor.
         data = _load(user)
-        a = _contract_by_id(data, _f(body, "id"))
-        b = _contract_by_id(data, _f(body, "other"))
-        if a and b and a["id"] != b["id"]:
-            for x in (a, b):  # break any prior pairing first
-                prev = _contract_by_id(data, x.get("linked_id"))
-                if prev:
-                    prev["linked_id"] = None
-            a["linked_id"], b["linked_id"] = b["id"], a["id"]
+        v = _contract_by_id(data, _f(body, "vendor"))
+        sea = _contract_by_id(data, _f(body, "sea"))
+        if v:
+            if sea and sea.get("side") == "sea" and sea["id"] != v["id"]:
+                v["side"] = "vendor"
+                v["linked_id"] = sea["id"]
+            else:
+                v["linked_id"] = None
             _save(user, data)
         return ("redirect", "/sow")
 
@@ -2529,10 +2604,7 @@ def handle(method, path, body, ctx):
         data = _load(user)
         a = _contract_by_id(data, _f(body, "id"))
         if a:
-            b = _contract_by_id(data, a.get("linked_id"))
             a["linked_id"] = None
-            if b:
-                b["linked_id"] = None
             _save(user, data)
         return ("redirect", "/sow")
 
@@ -2540,9 +2612,10 @@ def handle(method, path, body, ctx):
         data = _load(user)
         c = _contract_by_id(data, _f(body, "id"))
         if c:
-            b = _contract_by_id(data, c.get("linked_id"))
-            if b:
-                b["linked_id"] = None
+            # deleting a SEA parent orphans its vendor children
+            for other in data["contracts"]:
+                if other.get("linked_id") == c["id"]:
+                    other["linked_id"] = None
             try:
                 os.remove(_contract_file_path(user, c))
             except OSError:
