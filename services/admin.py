@@ -32,6 +32,15 @@ def handle(method, path, body, ctx=None):
                 auth.save_users(users)
         return ("redirect", "/admin")
 
+    if method == "POST" and path == "/admin/set_profile":
+        target = body.get("username", [""])[0].strip()
+        users = auth.load_users()
+        if target in users:
+            for k in ("company", "department", "drive_account"):
+                users[target][k] = body.get(k, [""])[0].strip()
+            auth.save_users(users)
+        return ("redirect", "/admin")
+
     if method == "POST" and path == "/admin/block_user":
         target = body.get("username", [""])[0].strip()
         if target and target != user:
@@ -134,6 +143,12 @@ def _forbidden():
     )
 
 
+def _drive_token_exists(username):
+    import os
+    from services._paths import DATA_ROOT
+    return os.path.exists(os.path.join(DATA_ROOT, "cardconv", "tokens", f"{username}.json"))
+
+
 def render_admin(current_user, notify_result=""):
     users = auth.load_users()
     settings = auth.load_settings()
@@ -146,10 +161,26 @@ def render_admin(current_user, notify_result=""):
     for username in sorted(users):
         info     = users[username]
         role     = info.get("role", "user")
-        email    = info.get("email", "") or "—"
+        email_raw = info.get("email", "")
+        email    = email_raw or "—"
         blocked  = info.get("blocked", False)
         is_self  = username == current_user
         is_adm   = role == "admin"
+
+        # 소속 · 부서 · Drive 연동 Google 계정 (강프로 2026-07-24). Drive 계정은
+        # 토큰에 이메일이 없어 수기 기입 — 토큰 보유 유저는 로그인 이메일로 프리필.
+        drive = info.get("drive_account", "")
+        drive_guess = ""
+        if not drive and _drive_token_exists(username):
+            drive_guess = email_raw if "@" in email_raw else (username if "@" in username else "")
+        profile_col = f'''<form method="POST" action="/admin/set_profile" class="prof-form">
+          <input type="hidden" name="username" value="{username}">
+          <input name="company" value="{info.get("company", "")}" placeholder="소속 (예: Cheil USA)">
+          <input name="department" value="{info.get("department", "")}" placeholder="부서">
+          <input name="drive_account" value="{drive or drive_guess}" placeholder="Drive 연동 Google 계정"
+            {'style="color:#94a3b8" title="추정값(미저장) — 저장을 눌러 확정"' if (not drive and drive_guess) else 'title="Google Drive를 연동한 Google 계정"'}>
+          <button type="submit" class="svc-save-btn">저장</button>
+        </form>'''
 
         name_style = "color:#ef4444;text-decoration:line-through" if blocked else ""
         blocked_tag = ' <span class="badge" style="background:#fee2e2;color:#b91c1c;font-size:11px">🚫 Blocked</span>' if blocked else ""
@@ -230,6 +261,7 @@ def render_admin(current_user, notify_result=""):
           </td>
           <td>{badge}</td>
           <td class="col-email">{email}</td>
+          <td>{profile_col}</td>
           <td>{svc_col}</td>
           <td>{control}</td>
           <td class="col-action">{action_col}</td>
@@ -303,13 +335,18 @@ h2{{ font-size:16px;font-weight:700;color:#1e293b;margin-bottom:14px }}
 .sum-val{{font-size:24px;font-weight:700;color:#1a1a1a}}
 .sum-lbl{{font-size:12px;color:#64748b;text-transform:uppercase;letter-spacing:.4px}}
 .tbl-wrap{{background:white;border:1px solid #e2e8f0;border-radius:12px;overflow:auto;margin-bottom:32px}}
-table{{width:100%;border-collapse:collapse;min-width:700px}}
+table{{width:100%;border-collapse:collapse;min-width:900px}}
+.prof-form{{display:flex;flex-direction:column;gap:4px;min-width:170px}}
+.prof-form input{{padding:4px 8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;outline:none}}
+.prof-form input:focus{{border-color:#3b82f6}}
+.prof-form .svc-save-btn{{align-self:flex-start}}
 thead tr{{background:#f8fafc}}
 th{{text-align:left;padding:12px 16px;font-size:12px;color:#64748b;text-transform:uppercase;letter-spacing:.5px;font-weight:600;border-bottom:1px solid #e2e8f0;white-space:nowrap}}
 td{{padding:12px 16px;border-bottom:1px solid #f1f5f9;vertical-align:middle}}
 tr:last-child td{{border-bottom:none}}
 tr.row-self{{background:#f0f9ff}}
-.col-name{{display:flex;align-items:center;gap:10px}}
+.col-name{{white-space:nowrap}}
+.col-name .u-icon{{margin-right:8px}}
 .u-icon{{font-size:18px}}
 .u-name{{font-size:14px;font-weight:600;color:#1e293b}}
 .col-email{{font-size:13px;color:#64748b;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
@@ -374,6 +411,7 @@ tr.row-blocked td{{opacity:.65;background:#fff5f5}}
           <th>사용자</th>
           <th>역할</th>
           <th>이메일</th>
+          <th>소속 · 부서 · Drive 계정</th>
           <th>서비스 권한</th>
           <th>권한 변경</th>
           <th>관리</th>
