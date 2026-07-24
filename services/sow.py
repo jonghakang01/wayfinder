@@ -2143,17 +2143,45 @@ def _read_uploaded_files(raw_handler):
     return files
 
 
+def _docx_text(content):
+    """Pull ALL current text from a .docx by reading the package XML directly.
+
+    python-docx's paragraph/table model silently drops text in text boxes,
+    nested tables and headers/footers — real SOWs keep their fee tables there,
+    so it under-reads badly (one 485k-char contract came back as 15k). Reading
+    every <w:t> run from document.xml + headers/footers captures all of it, in
+    order, with paragraph breaks. <w:delText> (tracked-change deletions) uses a
+    different tag, so stale/deleted figures are naturally excluded."""
+    import html
+    import zipfile
+    with zipfile.ZipFile(io.BytesIO(content)) as z:
+        parts = [n for n in z.namelist()
+                 if re.match(r"word/(document|header\d*|footer\d*)\.xml$", n)]
+        parts.sort(key=lambda n: (not n.startswith("word/document"), n))
+        out = []
+        for n in parts:
+            xml = z.read(n).decode("utf-8", "replace")
+            for t, pend, tab in re.findall(
+                    r"<w:t[^>]*>(.*?)</w:t>|(</w:p>)|(</w:tc>)", xml, re.DOTALL):
+                if t:
+                    out.append(html.unescape(t))
+                elif tab:
+                    out.append(" | ")
+                elif pend:
+                    out.append("\n")
+    return "".join(out)
+
+
 def _extract_text(content, ext):
     """Best-effort plain text from an uploaded contract (docx/pdf/txt)."""
     try:
         if ext == "docx":
-            from docx import Document
-            doc = Document(io.BytesIO(content))
-            parts = [p.text for p in doc.paragraphs]
-            for tbl in doc.tables:
-                for row in tbl.rows:
-                    parts.append(" | ".join(c.text for c in row.cells))
-            return "\n".join(parts)
+            text = _docx_text(content)
+            if len(text.strip()) < 40:  # empty/odd package → fall back
+                from docx import Document
+                doc = Document(io.BytesIO(content))
+                text = "\n".join(p.text for p in doc.paragraphs)
+            return text
         if ext == "pdf":
             import fitz
             with fitz.open(stream=content, filetype="pdf") as doc:
@@ -2487,7 +2515,7 @@ def _render_contract_frag(user, data, cid):
     </div>
     <div class="ctr-actions">
       <button class="btn btn-primary btn-sm" type="submit">💾 Save fields</button>
-      <button class="btn btn-secondary btn-sm" type="button" onclick="ctrReparse('{c['id']}',this)">🤖 Re-parse with AI</button>
+      <button class="btn btn-secondary btn-sm" type="button" onclick="ctrReparse('{c['id']}',this)">🪄 Re-read with AI</button>
       <a class="btn btn-secondary btn-sm" href="/sow/contract/file?id={c['id']}" target="_blank">⬇ Original</a>
       <button class="btn btn-danger btn-sm" type="button" onclick="ctrPost('/sow/contract/delete',{{id:'{c['id']}'}})">🗑 Delete</button>
     </div>
@@ -2570,7 +2598,7 @@ function ctrAssign(id){
   ctrPost('/sow/contract/assign',{vendor:id,sea:sel.value});
 }
 function ctrReparse(id,btn){
-  if(btn){btn.disabled=true;btn.textContent='🤖 Reading…';}
+  if(btn){btn.disabled=true;btn.textContent='🪄 Reading…';}
   fetch('/sow/contract/reparse',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'id='+encodeURIComponent(id)})
     .then(function(){location.href='/sow?newc='+encodeURIComponent(id);});
 }
@@ -2671,7 +2699,16 @@ def handle(method, path, body, ctx):
         data = _load(user)
         c = _contract_by_id(data, _f(body, "id"))
         if c:
-            fields = _extract_fields_best(c.get("raw_text") or "")
+            # re-read the ORIGINAL file so extractor improvements reach already
+            # uploaded contracts (stored raw_text may be an old under-read)
+            text = c.get("raw_text") or ""
+            try:
+                with open(_contract_file_path(user, c), "rb") as fp:
+                    text = _extract_text(fp.read(), c.get("ext", "bin"))
+                c["raw_text"] = text[:200000]
+            except OSError:
+                pass
+            fields = _extract_fields_best(text)
             for k in ("client", "agency", "vendor", "amount",
                       "period_start", "period_end", "project_name", "side"):
                 c[k] = fields.get(k, c.get(k, ""))
