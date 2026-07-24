@@ -2,6 +2,7 @@ import calendar
 import io
 import json
 import os
+import re
 import uuid
 from datetime import date, datetime
 
@@ -329,18 +330,19 @@ def _data_path(user):
 def _load(user):
     f = _data_path(user)
     if not os.path.exists(f):
-        return {"sows": [], "vendors": [], "people": []}
+        return {"sows": [], "vendors": [], "people": [], "contracts": []}
     try:
         with open(f) as fp:
             d = json.load(fp)
             d.setdefault("sows", [])
             d.setdefault("vendors", [])
             d.setdefault("people", [])
+            d.setdefault("contracts", [])
             for p in d["people"]:
                 _migrate_person(p)
             return d
     except Exception:
-        return {"sows": [], "vendors": [], "people": []}
+        return {"sows": [], "vendors": [], "people": [], "contracts": []}
 
 
 def _migrate_person(p):
@@ -825,7 +827,7 @@ def _shell(user, title, body, wide=False):
     return f"""<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>📝 {_esc(title)} · Wayfinder</title><link rel="stylesheet" href="/static/style.css">
-<style>{_CSS}</style></head><body>
+<style>{_CSS}{_CTR_CSS}</style></head><body>
 <nav><span class="nav-brand">📝 SOW Assistant</span>
 <span class="nav-user">👤 {_esc(user)} &nbsp;·&nbsp; <a href="/logout">Logout</a></span></nav>
 <div class="container" style="max-width:{'1800px' if wide else '1000px'}">{body}</div></body></html>"""
@@ -986,6 +988,7 @@ function delSow(id){
 def _render_landing(user):
     data = _load(user)
     rows = _sow_rows(user, data)
+    contracts = _render_contracts_section(user, data)
     body = f"""
 <h1 style="margin:8px 0 4px">Statements of Work</h1>
 <p style="color:var(--text-muted);font-size:.86rem;margin-bottom:6px">Who is this SOW with?</p>
@@ -1009,7 +1012,10 @@ def _render_landing(user):
   </span>
 </div>
 <div class="sow-list">{rows or '<div class="sow-meta" style="padding:36px;text-align:center">No SOWs yet — pick a counterpart above to start.</div>'}</div>
-{_DEL_JS}"""
+{contracts}
+<div class="cmodal-ov" id="cmodalOv"><div class="cmodal" id="cmodal"></div></div>
+{_DEL_JS}
+{_CTR_JS}"""
     return _shell(user, "SOW Assistant", body)
 
 
@@ -2060,11 +2066,503 @@ def _f(body, key, default=""):
     return (v or "").strip()
 
 
+# ══════════════════════════════════════════════════════════════════════════
+# Uploaded contracts — SEA↔Cheil (upstream) aligned to Cheil↔Vendor (downstream)
+# ══════════════════════════════════════════════════════════════════════════
+
+_CONTRACT_MIME = {
+    "pdf": "application/pdf",
+    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "doc": "application/msword",
+    "txt": "text/plain",
+}
+_MONTHS = ("January|February|March|April|May|June|July|August|September|"
+           "October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec")
+_DATE_RE = re.compile(
+    r"(?:%s)\.?\s+\d{1,2},?\s+\d{4}" % _MONTHS + r"|\b\d{1,2}/\d{1,2}/\d{2,4}\b",
+    re.IGNORECASE)
+_AMOUNT_RE = re.compile(r"(?:US)?\$\s?([\d]{1,3}(?:,\d{3})+(?:\.\d{2})?|\d+(?:\.\d{2})?)")
+
+
+def _contracts_dir(user):
+    return os.path.join(DATA_ROOT, user, "sow_contracts")
+
+
+def _contract_file_path(user, c):
+    return os.path.join(_contracts_dir(user), f"{c['id']}.{c.get('ext', 'bin')}")
+
+
+_ALLOWED_EXT = {"pdf", "docx", "doc", "txt"}
+
+
+def _safe_filename(fn):
+    """Display/storage-safe filename: no path, no control chars/quotes."""
+    fn = (fn or "").replace("\r", " ").replace("\n", " ").replace('"', " ").replace("\\", "/")
+    fn = os.path.basename(fn).strip()
+    return fn[:120] or "contract"
+
+
+def _safe_ext(fn):
+    """Whitelisted, alnum-only extension — keeps it out of the filesystem path
+    as anything but a plain suffix (no '/', no '..')."""
+    ext = fn.rsplit(".", 1)[-1].lower() if "." in fn else ""
+    ext = re.sub(r"[^a-z0-9]", "", ext)[:5]
+    return ext if ext in _ALLOWED_EXT else "bin"
+
+
+def _read_uploaded_files(raw_handler):
+    """Parse a multipart body; return list of (filename, bytes, mime)."""
+    try:
+        ct = raw_handler.headers.get("Content-Type", "")
+        m = re.search(r"boundary=([^\s;]+)", ct)
+        if not m:
+            return []
+        boundary = ("--" + m.group(1).strip('"')).encode()
+        length = int(raw_handler.headers.get("Content-Length", 0))
+        data = raw_handler.rfile.read(length)
+    except Exception:
+        return []
+    files = []
+    for part in data.split(boundary):
+        if b'filename="' not in part:
+            continue
+        fn_m = re.search(rb'filename="([^"]*)"', part)
+        if not fn_m or not fn_m.group(1):
+            continue
+        filename = fn_m.group(1).decode("utf-8", errors="replace")
+        hdr_end = part.find(b"\r\n\r\n")
+        if hdr_end == -1:
+            continue
+        content = part[hdr_end + 4:]
+        if content.endswith(b"\r\n"):
+            content = content[:-2]
+        if content:
+            files.append((filename, content, "application/octet-stream"))
+    return files
+
+
+def _extract_text(content, ext):
+    """Best-effort plain text from an uploaded contract (docx/pdf/txt)."""
+    try:
+        if ext == "docx":
+            from docx import Document
+            doc = Document(io.BytesIO(content))
+            parts = [p.text for p in doc.paragraphs]
+            for tbl in doc.tables:
+                for row in tbl.rows:
+                    parts.append(" | ".join(c.text for c in row.cells))
+            return "\n".join(parts)
+        if ext == "pdf":
+            import fitz
+            with fitz.open(stream=content, filetype="pdf") as doc:
+                return "\n".join(page.get_text() for page in doc)
+        return content.decode("utf-8", errors="replace")
+    except Exception as e:
+        return f"[could not read {ext}: {e}]"
+
+
+def _extract_fields(text):
+    """Heuristic pull of parties / amount / period / project from contract text.
+    Deliberately forgiving — the user confirms & corrects on the popup."""
+    low = text.lower()
+    flat = re.sub(r"\s+", " ", text)
+
+    # parties — try "by and between X and Y", else entity-like names
+    client = agency = vendor = ""
+    m = re.search(r"by and between\s+(.+?)\s+(?:\(|,)", flat, re.IGNORECASE)
+    n = re.search(r"\band\s+([A-Z][\w&.,'\- ]+?(?:Inc|LLC|L\.L\.C|Corp|Corporation|Ltd|Company)\.?)",
+                  flat)
+    p1 = (m.group(1).strip() if m else "")
+    p2 = (n.group(1).strip() if n else "")
+    has_samsung = "samsung" in low
+    has_cheil = "cheil" in low
+    if has_samsung:
+        client = SAMSUNG_ENTITY
+        agency = CHEIL_ENTITY
+    elif has_cheil:
+        agency = CHEIL_ENTITY
+    # vendor = whichever named party is neither Cheil nor Samsung
+    for cand in (p1, p2):
+        cl = cand.lower()
+        if cand and "cheil" not in cl and "samsung" not in cl and len(cand) < 90:
+            vendor = cand
+            break
+
+    # amount — take the largest $ figure (usually the contract total)
+    amounts = []
+    for a in _AMOUNT_RE.findall(text):
+        try:
+            amounts.append(float(a.replace(",", "")))
+        except ValueError:
+            pass
+    amount = _money(max(amounts)) if amounts else ""
+
+    # dates — effective/start first, an end/expiry date second
+    dates = _DATE_RE.findall(text)
+    period_start = dates[0] if dates else ""
+    period_end = ""
+    em = re.search(r"(?:end date|expir\w*|through|terminat\w*)[^\n]{0,40}?(" +
+                   _DATE_RE.pattern + ")", text, re.IGNORECASE)
+    if em:
+        period_end = em.group(1)
+    elif len(dates) > 1:
+        period_end = dates[-1]
+
+    # project name — a "Project Name:" label, else the doc title-ish first line
+    project = ""
+    pm = re.search(r"project\s*name\s*[:\-]\s*(.+)", text, re.IGNORECASE)
+    if pm:
+        project = pm.group(1).strip().split("\n")[0][:120]
+    else:
+        pm = re.search(r"project\s*[:\-]\s*(.+)", text, re.IGNORECASE)
+        if pm:
+            project = pm.group(1).strip().split("\n")[0][:120]
+
+    side = "sea" if has_samsung else ("vendor" if vendor else "sea")
+    return {"client": client, "agency": agency, "vendor": vendor,
+            "amount": amount, "period_start": period_start,
+            "period_end": period_end, "project_name": project, "side": side}
+
+
+def _norm_tokens(s):
+    return set(re.findall(r"[a-z0-9]+", (s or "").lower())) - {
+        "the", "a", "an", "of", "for", "and", "sow", "project", "cheil", "samsung"}
+
+
+def _suggest_links(data, contract):
+    """Opposite-side contracts ranked by project-name token overlap."""
+    opp = "vendor" if contract.get("side") == "sea" else "sea"
+    mine = _norm_tokens(contract.get("project_name"))
+    out = []
+    for c in data.get("contracts", []):
+        if c["id"] == contract["id"] or c.get("side") != opp or c.get("linked_id"):
+            continue
+        theirs = _norm_tokens(c.get("project_name"))
+        score = len(mine & theirs) / max(1, len(mine | theirs)) if (mine or theirs) else 0
+        out.append((score, c))
+    out.sort(key=lambda x: x[0], reverse=True)
+    return out
+
+
+def _contract_by_id(data, cid):
+    return next((c for c in data.get("contracts", []) if c["id"] == cid), None)
+
+
+def _link_pairs(data):
+    """Return (pairs, singles): pairs = list of (sea_contract, vendor_contract),
+    singles = unlinked contracts."""
+    cs = data.get("contracts", [])
+    by_id = {c["id"]: c for c in cs}
+    pairs, seen, singles = [], set(), []
+    for c in cs:
+        if c["id"] in seen:
+            continue
+        lid = c.get("linked_id")
+        other = by_id.get(lid) if lid else None
+        if other and other.get("linked_id") == c["id"]:
+            sea = c if c.get("side") == "sea" else other
+            ven = other if c.get("side") == "sea" else c
+            pairs.append((sea, ven))
+            seen.add(c["id"]); seen.add(other["id"])
+        else:
+            singles.append(c)
+            seen.add(c["id"])
+    return pairs, singles
+
+
+_SIDE_META = {
+    "sea": ("SEA ↔ Cheil", "dir-samsung", "#38bdf8", "🔵"),
+    "vendor": ("Cheil ↔ Vendor", "dir-agency", "#fb923c", "🟠"),
+}
+
+
+def _contract_card(c, clickable=True):
+    label, chip, color, icon = _SIDE_META.get(c.get("side"), _SIDE_META["sea"])
+    parties = c.get("vendor") or c.get("client") or "—"
+    click = f' onclick="openContract(\'{c["id"]}\')" style="cursor:pointer"' if clickable else ""
+    return (
+        f'<div class="ctr-card"{click}>'
+        f'<div class="ctr-top"><span class="dir-chip {chip}">{icon} {label}</span>'
+        f'<span class="ctr-amt">{_esc(c.get("amount") or "")}</span></div>'
+        f'<div class="ctr-title">{_esc(c.get("project_name") or c.get("filename") or "(untitled contract)")}</div>'
+        f'<div class="ctr-meta">{_esc(parties)}'
+        + (f' · {_esc(c.get("period_start"))}' if c.get("period_start") else "")
+        + (f' ~ {_esc(c.get("period_end"))}' if c.get("period_end") else "")
+        + '</div></div>')
+
+
+def _render_contracts_section(user, data):
+    pairs, singles = _link_pairs(data)
+    blocks = []
+    for sea, ven in pairs:
+        blocks.append(
+            '<div class="ctr-pair">'
+            + _contract_card(sea) + '<div class="ctr-link">⇄</div>' + _contract_card(ven)
+            + '</div>')
+    pair_html = "".join(blocks) or (
+        '<div class="sow-meta" style="padding:22px;text-align:center">No aligned contract pairs yet.</div>')
+    single_html = ""
+    if singles:
+        single_html = ('<div style="font-size:.72rem;color:var(--text-muted);'
+                       'text-transform:uppercase;letter-spacing:.05em;margin:18px 0 8px">'
+                       'Not yet linked</div><div class="ctr-singles">'
+                       + "".join(f'<div class="ctr-single">{_contract_card(c)}'
+                                 f'<button class="btn btn-secondary btn-sm" '
+                                 f'onclick="openContract(\'{c["id"]}\')">🔗 Link</button></div>'
+                                 for c in singles) + "</div>")
+    return f"""
+<div style="display:flex;align-items:center;justify-content:space-between;margin:30px 0 12px">
+  <h2 style="font-size:1rem;font-weight:800;margin:0">📎 Contracts</h2>
+  <button class="btn btn-primary btn-sm" onclick="document.getElementById('ctrUp').classList.toggle('hide')">⬆ Upload contract</button>
+</div>
+<form id="ctrUp" class="ctr-upload hide" method="post" action="/sow/contract/upload" enctype="multipart/form-data">
+  <input type="file" name="file" accept=".pdf,.docx,.doc,.txt" required>
+  <button class="btn btn-primary btn-sm" type="submit">Parse &amp; add</button>
+  <span class="sow-meta">PDF or Word — parties, amount &amp; period are read automatically; you confirm on the next screen.</span>
+</form>
+<div class="ctr-pairs">{pair_html}</div>
+{single_html}"""
+
+
+def _render_contract_frag(user, data, cid):
+    """Popup body for one contract: extracted fields (editable) + text preview
+    + original download + link controls."""
+    c = _contract_by_id(data, cid)
+    if not c:
+        return '<div class="cmodal-body"><p>Contract not found.</p></div>'
+    label, chip, color, icon = _SIDE_META.get(c.get("side"), _SIDE_META["sea"])
+    linked = _contract_by_id(data, c.get("linked_id")) if c.get("linked_id") else None
+
+    # link controls
+    if linked:
+        link_html = (
+            f'<div class="ctr-linked">🔗 Linked to <b>{_esc(linked.get("project_name") or linked.get("filename"))}</b> '
+            f'({_SIDE_META.get(linked.get("side"), _SIDE_META["sea"])[0]})'
+            f'<button class="btn btn-danger btn-sm" onclick="ctrPost(\'/sow/contract/unlink\',{{id:\'{c["id"]}\'}})">Unlink</button></div>')
+    else:
+        opts = []
+        for score, cand in _suggest_links(data, c):
+            tag = " ★ suggested" if score > 0 else ""
+            opts.append(f'<option value="{cand["id"]}">{_esc(cand.get("project_name") or cand.get("filename"))}'
+                        f' — {_SIDE_META.get(cand.get("side"), _SIDE_META["sea"])[0]}{tag}</option>')
+        if opts:
+            link_html = (
+                '<div class="ctr-linkbox"><b>Link to the aligned contract:</b>'
+                f'<select id="lnk_{c["id"]}" class="slot">{"".join(opts)}</select>'
+                f'<button class="btn btn-primary btn-sm" onclick="ctrLink(\'{c["id"]}\')">🔗 Confirm link</button>'
+                '<div class="sow-meta">Uploads on the opposite side (★ = project-name match).</div></div>')
+        else:
+            link_html = '<div class="sow-meta">No opposite-side contract to link yet.</div>'
+
+    def fld(lbl, key, val):
+        return (f'<label class="ctr-fld"><span>{lbl}</span>'
+                f'<input class="slot" name="{key}" value="{_esc(val)}"></label>')
+
+    preview = _esc((c.get("raw_text") or "")[:6000])
+    return f"""
+<div class="cmodal-head">
+  <span class="dir-chip {chip}">{icon} {label}</span>
+  <span class="cmodal-file">{_esc(c.get("filename") or "")}</span>
+  <button class="cmodal-x" onclick="closeContract()">✕</button>
+</div>
+<div class="cmodal-body">
+  <form onsubmit="ctrSave('{c['id']}');return false" class="ctr-form">
+    <div class="ctr-grid">
+      {fld("Client (payer)", "client", c.get("client"))}
+      {fld("Agency", "agency", c.get("agency"))}
+      {fld("Vendor / Contractor", "vendor", c.get("vendor"))}
+      {fld("Contract amount", "amount", c.get("amount"))}
+      {fld("Period start", "period_start", c.get("period_start"))}
+      {fld("Period end", "period_end", c.get("period_end"))}
+      {fld("Project name", "project_name", c.get("project_name"))}
+      <label class="ctr-fld"><span>Side</span>
+        <select class="slot" name="side">
+          <option value="sea"{' selected' if c.get('side')=='sea' else ''}>SEA ↔ Cheil</option>
+          <option value="vendor"{' selected' if c.get('side')=='vendor' else ''}>Cheil ↔ Vendor</option>
+        </select></label>
+    </div>
+    <div class="ctr-actions">
+      <button class="btn btn-primary btn-sm" type="submit">💾 Save fields</button>
+      <a class="btn btn-secondary btn-sm" href="/sow/contract/file?id={c['id']}" target="_blank">⬇ Original</a>
+      <button class="btn btn-danger btn-sm" type="button" onclick="ctrPost('/sow/contract/delete',{{id:'{c['id']}'}})">🗑 Delete</button>
+    </div>
+  </form>
+  {link_html}
+  <details class="ctr-prev"><summary>📄 Document text preview</summary><pre>{preview}</pre></details>
+</div>"""
+
+
+_CTR_CSS = """
+.ctr-upload{display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:var(--surface-2,var(--surface));border:1px dashed var(--border-bright);border-radius:var(--radius-lg);padding:14px 18px;margin-bottom:14px}
+.ctr-upload.hide{display:none}
+.ctr-pairs{display:flex;flex-direction:column;gap:14px}
+.ctr-pair{display:grid;grid-template-columns:1fr auto 1fr;gap:12px;align-items:center}
+.ctr-link{font-size:1.4rem;color:var(--text-muted);text-align:center}
+.ctr-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px 16px;transition:.15s}
+.ctr-card:hover{border-color:var(--accent);box-shadow:var(--shadow-md)}
+.ctr-top{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}
+.ctr-amt{font-weight:800;color:var(--success);font-variant-numeric:tabular-nums;font-size:.86rem}
+.ctr-title{font-weight:700;font-size:.9rem;color:var(--text);margin-bottom:3px}
+.ctr-meta{font-size:.74rem;color:var(--text-muted)}
+.ctr-singles{display:flex;flex-direction:column;gap:10px}
+.ctr-single{display:flex;gap:10px;align-items:stretch}
+.ctr-single .ctr-card{flex:1}
+.cmodal-ov{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:flex-start;justify-content:center;z-index:200;padding:40px 16px;overflow-y:auto}
+.cmodal-ov.show{display:flex}
+.cmodal{background:var(--surface);border:1px solid var(--border-bright);border-radius:var(--radius-xl);max-width:720px;width:100%;box-shadow:var(--shadow-lg)}
+.cmodal-head{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--border)}
+.cmodal-file{font-size:.76rem;color:var(--text-muted);margin-left:auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:50%}
+.cmodal-x{background:none;border:none;color:var(--text-muted);font-size:1.1rem;cursor:pointer;padding:2px 6px}
+.cmodal-x:hover{color:var(--danger)}
+.cmodal-body{padding:18px}
+.ctr-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px 14px}
+.ctr-fld{display:flex;flex-direction:column;gap:3px}
+.ctr-fld>span{font-size:.68rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted)}
+.ctr-fld .slot{width:100%}
+.ctr-actions{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
+.ctr-linkbox,.ctr-linked{margin-top:16px;padding-top:14px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px;font-size:.82rem}
+.ctr-linked{flex-direction:row;align-items:center;gap:10px}
+.ctr-prev{margin-top:14px}
+.ctr-prev summary{cursor:pointer;font-size:.8rem;color:var(--text-muted)}
+.ctr-prev pre{white-space:pre-wrap;font-size:.72rem;max-height:300px;overflow:auto;background:var(--surface-2,var(--surface));border:1px solid var(--border);border-radius:8px;padding:10px;margin-top:8px}
+@media(max-width:768px){.ctr-pair{grid-template-columns:1fr}.ctr-link{transform:rotate(90deg)}.ctr-grid{grid-template-columns:1fr}}
+"""
+
+_CTR_JS = """<script>
+function closeContract(){document.getElementById('cmodalOv').classList.remove('show');}
+function openContract(id){
+  fetch('/sow/contract?frag=1&id='+encodeURIComponent(id))
+    .then(function(r){return r.text();})
+    .then(function(h){document.getElementById('cmodal').innerHTML=h;
+      document.getElementById('cmodalOv').classList.add('show');});
+}
+function ctrPost(url,obj){
+  var b=Object.keys(obj).map(function(k){return k+'='+encodeURIComponent(obj[k]);}).join('&');
+  fetch(url,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:b})
+    .then(function(){location.reload();});
+}
+function ctrSave(id){
+  var f=document.querySelector('#cmodal form.ctr-form');
+  var b='id='+encodeURIComponent(id);
+  f.querySelectorAll('input,select').forEach(function(el){b+='&'+el.name+'='+encodeURIComponent(el.value);});
+  fetch('/sow/contract/save',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:b})
+    .then(function(){location.reload();});
+}
+function ctrLink(id){
+  var sel=document.getElementById('lnk_'+id);
+  if(!sel||!sel.value)return;
+  ctrPost('/sow/contract/link',{id:id,other:sel.value});
+}
+document.addEventListener('DOMContentLoaded',function(){
+  var ov=document.getElementById('cmodalOv');
+  if(ov)ov.addEventListener('click',function(e){if(e.target===ov)closeContract();});
+  var m=location.search.match(/[?&]newc=([^&]+)/);
+  if(m)openContract(decodeURIComponent(m[1]));
+});
+</script>"""
+
+
 def handle(method, path, body, ctx):
     user = ctx.get("user", "guest")
 
     if method == "GET" and path == "/sow":
         return ("html", _render_landing(user))
+
+    # ── uploaded contracts ────────────────────────────────────────────────
+    if method == "GET" and path == "/sow/contract":
+        data = _load(user)
+        return ("html", _render_contract_frag(user, data, _f(body, "id")))
+
+    if method == "POST" and path == "/sow/contract/upload":
+        raw = body.get("__raw__") or body.get("__raw_handler__")
+        files = _read_uploaded_files(raw) if raw else []
+        if not files:
+            return ("redirect", "/sow")
+        fn, content, _mime = files[0]
+        fn = _safe_filename(fn)
+        ext = _safe_ext(fn)
+        text = _extract_text(content, ext)
+        fields = _extract_fields(text)
+        cid = uuid.uuid4().hex[:8]
+        data = _load(user)
+        rec = {"id": cid, "filename": fn, "ext": ext,
+               "uploaded": datetime.now().isoformat(timespec="seconds"),
+               "raw_text": text[:200000], "linked_id": None}
+        rec.update({k: fields.get(k, "") for k in
+                    ("client", "agency", "vendor", "amount",
+                     "period_start", "period_end", "project_name", "side")})
+        try:
+            os.makedirs(_contracts_dir(user), exist_ok=True)
+            with open(_contract_file_path(user, rec), "wb") as fp:
+                fp.write(content)
+        except OSError:
+            return ("redirect", "/sow")
+        data.setdefault("contracts", []).append(rec)
+        _save(user, data)
+        return ("redirect", f"/sow?newc={cid}")
+
+    if method == "POST" and path == "/sow/contract/save":
+        data = _load(user)
+        c = _contract_by_id(data, _f(body, "id"))
+        if c:
+            for k in ("client", "agency", "vendor", "amount",
+                      "period_start", "period_end", "project_name"):
+                c[k] = _f(body, k)
+            c["side"] = "vendor" if _f(body, "side") == "vendor" else "sea"
+            _save(user, data)
+        return ("redirect", "/sow")
+
+    if method == "POST" and path == "/sow/contract/link":
+        data = _load(user)
+        a = _contract_by_id(data, _f(body, "id"))
+        b = _contract_by_id(data, _f(body, "other"))
+        if a and b and a["id"] != b["id"]:
+            for x in (a, b):  # break any prior pairing first
+                prev = _contract_by_id(data, x.get("linked_id"))
+                if prev:
+                    prev["linked_id"] = None
+            a["linked_id"], b["linked_id"] = b["id"], a["id"]
+            _save(user, data)
+        return ("redirect", "/sow")
+
+    if method == "POST" and path == "/sow/contract/unlink":
+        data = _load(user)
+        a = _contract_by_id(data, _f(body, "id"))
+        if a:
+            b = _contract_by_id(data, a.get("linked_id"))
+            a["linked_id"] = None
+            if b:
+                b["linked_id"] = None
+            _save(user, data)
+        return ("redirect", "/sow")
+
+    if method == "POST" and path == "/sow/contract/delete":
+        data = _load(user)
+        c = _contract_by_id(data, _f(body, "id"))
+        if c:
+            b = _contract_by_id(data, c.get("linked_id"))
+            if b:
+                b["linked_id"] = None
+            try:
+                os.remove(_contract_file_path(user, c))
+            except OSError:
+                pass
+            data["contracts"] = [x for x in data["contracts"] if x["id"] != c["id"]]
+            _save(user, data)
+        return ("redirect", "/sow")
+
+    if method == "GET" and path == "/sow/contract/file":
+        data = _load(user)
+        c = _contract_by_id(data, _f(body, "id"))
+        if not c:
+            return ("redirect", "/sow")
+        try:
+            with open(_contract_file_path(user, c), "rb") as fp:
+                blob = fp.read()
+        except OSError:
+            return ("redirect", "/sow")
+        mime = _CONTRACT_MIME.get(c.get("ext"), "application/octet-stream")
+        return ("file_inline", blob, mime, c.get("filename") or f"{c['id']}.{c.get('ext')}")
 
     if method == "GET" and path.startswith("/sow/types"):
         d = _f(body, "dir")

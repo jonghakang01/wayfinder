@@ -1,7 +1,16 @@
 #!/usr/bin/env python3
 import importlib, os, sys, json, hashlib
 from http.server import HTTPServer, BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, quote
+
+
+def _content_disposition(fname, disp="attachment"):
+    """Build a header-safe Content-Disposition. Strips CR/LF/quotes (header
+    injection) and adds an RFC 5987 filename* so non-Latin-1 names (e.g.
+    Korean) survive — a bare filename="…" is latin-1-encoded and would 500."""
+    fname = (fname or "download").replace("\r", "").replace("\n", "").replace('"', "")
+    ascii_name = fname.encode("ascii", "ignore").decode("ascii").strip() or "download"
+    return f"{disp}; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(fname)}"
 
 SERVICES_DIR = os.path.join(os.path.dirname(__file__), "services")
 sys.path.insert(0, os.path.dirname(__file__))
@@ -680,7 +689,7 @@ class Handler(BaseHTTPRequestHandler):
             data = open(fpath, "rb").read()
             self.send_response(200)
             self.send_header("Content-Type", mime)
-            self.send_header("Content-Disposition", f'attachment; filename="{fname}"')
+            self.send_header("Content-Disposition", _content_disposition(fname))
             self.send_header("Content-Length", len(data))
             self.end_headers()
             self.wfile.write(data)
@@ -689,7 +698,7 @@ class Handler(BaseHTTPRequestHandler):
             data, mime, fname = result[1], result[2], result[3]
             self.send_response(200)
             self.send_header("Content-Type", mime)
-            self.send_header("Content-Disposition", f'attachment; filename="{fname}"')
+            self.send_header("Content-Disposition", _content_disposition(fname))
             self.send_header("Content-Length", len(data))
             self.end_headers()
             self.wfile.write(data)
@@ -701,7 +710,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(code)
             self.send_header("Content-Type", mime)
             if fname:
-                self.send_header("Content-Disposition", f'attachment; filename="{fname}"')
+                self.send_header("Content-Disposition", _content_disposition(fname))
             else:
                 self.send_header("Content-Disposition", "inline")
             self.send_header("Content-Length", len(data))
