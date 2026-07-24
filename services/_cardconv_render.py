@@ -576,34 +576,50 @@ def _render_convert(user: str, empty_fn: str = "", mismatch_uid: str = "") -> st
                          if u.get("id") == mismatch_uid and u.get("member_counts")), None)
         if mm_entry:
             reg = _get_card_member_names(user)
-            reg_html = (", ".join(f"<b>{_esc(n)}</b>" for n in reg)
-                        if reg else "<i>none registered yet</i>")
-            chip_style = ('display:inline-flex;align-items:center;gap:6px;margin:3px;'
-                          'padding:7px 14px;border:1px solid var(--accent);border-radius:99px;'
-                          'font-size:.8rem;background:var(--surface-2);color:var(--text);'
-                          'cursor:pointer;font-family:inherit')
+            fn = _esc(mm_entry.get("filename") or "")
+            if reg:
+                title = f"🪪 Whose card is this? — {fn}"
+                copy = ('The file parsed fine, but none of its cardmembers match this '
+                        'profile\'s registered names. <b>Pick the cardmember you manage</b> '
+                        '— they will be registered and their transactions imported right away.')
+                reg_line = ('<p style="font-size:.78rem;color:var(--text-muted);margin-bottom:6px">'
+                            'Currently registered: '
+                            + ", ".join(f"<b>{_esc(n)}</b>" for n in reg) + '</p>')
+            else:
+                title = f"🪪 Set up this card profile — {fn}"
+                copy = ('This card profile has no cardmember registered yet. '
+                        '<b>Pick the cardmember you manage</b> from the file below — '
+                        'they will be registered to this profile and their transactions '
+                        'imported right away.')
+                reg_line = ""
+            row_style = ('display:flex;align-items:center;gap:12px;width:100%;text-align:left;'
+                         'padding:12px 16px;border:1px solid var(--border);border-radius:var(--radius-md,10px);'
+                         'font-size:.88rem;background:var(--surface-2);color:var(--text);'
+                         'cursor:pointer;font-family:inherit;margin-bottom:8px;transition:border-color .15s')
             counts = sorted(mm_entry["member_counts"].items(), key=lambda x: -x[1])
-            chips = "".join(
-                f'<form method="POST" action="/cardconv/upload/register-name" style="display:inline">'
+            rows = "".join(
+                f'<form method="POST" action="/cardconv/upload/register-name" style="margin:0">'
                 f'<input type="hidden" name="uid" value="{_esc(mismatch_uid)}">'
                 f'<input type="hidden" name="name" value="{_esc(n)}">'
-                f'<button type="submit" style="{chip_style}" '
+                f'<button type="submit" style="{row_style}" class="mm-opt" '
                 f'title="Register this cardmember and import their transactions">'
-                f'＋ {_esc(n)} <span style="color:var(--text-muted);font-size:.7rem">{c} tx</span></button>'
-                f'</form>' for n, c in counts)
+                f'<span style="font-size:1rem">💳</span>'
+                f'<span style="flex:1;font-weight:700">{_esc(n)}</span>'
+                f'<span style="color:var(--text-muted);font-size:.76rem">{c} transaction{"s" if c != 1 else ""}</span>'
+                f'<span style="color:var(--accent);font-weight:700">Select →</span>'
+                f'</button></form>' for n, c in counts)
             mm_modal = f'''
+<style>.mm-opt:hover{{border-color:var(--accent)!important;background:var(--surface-3)!important}}</style>
 <div id="mmOverlay" style="position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:flex-start;justify-content:center;z-index:300;padding:60px 16px;overflow-y:auto" onclick="if(event.target===this)mmClose()">
-  <div style="background:var(--surface);border:1px solid var(--border-bright);border-radius:var(--radius-xl,14px);max-width:640px;width:100%;box-shadow:var(--shadow-lg);padding:24px 26px">
+  <div style="background:var(--surface);border:1px solid var(--border-bright);border-radius:var(--radius-xl,14px);max-width:560px;width:100%;box-shadow:var(--shadow-lg);padding:24px 26px">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
-      <h2 style="font-size:1rem;margin:0;flex:1">🪪 Whose card is this? — {_esc(mm_entry.get("filename") or "")}</h2>
+      <h2 style="font-size:1rem;margin:0;flex:1">{title}</h2>
       <button onclick="mmClose()" style="background:none;border:none;color:var(--text-muted);font-size:1.1rem;cursor:pointer;padding:2px 6px">✕</button>
     </div>
-    <p style="font-size:.84rem;color:var(--text-muted);line-height:1.65;margin-bottom:12px">
-      The file parsed fine, but none of its cardmembers match this profile's registered names.
-      <b>Click the cardmember you manage</b> — it will be registered and their transactions imported right away.</p>
-    <p style="font-size:.78rem;margin-bottom:6px">Registered in this profile: {reg_html}</p>
-    <p style="font-size:.78rem;font-weight:700;margin:12px 0 4px">Cardmembers found in this file:</p>
-    <div style="line-height:2.6">{chips}</div>
+    <p style="font-size:.84rem;color:var(--text-muted);line-height:1.65;margin-bottom:12px">{copy}</p>
+    {reg_line}
+    <p style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin:14px 0 8px">Cardmembers in this file</p>
+    {rows}
   </div>
 </div>
 <script>
