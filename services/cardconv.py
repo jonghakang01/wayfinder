@@ -224,6 +224,8 @@ def handle(method, path, body, ctx=None):
         return _drm_guard(_handle_upload(body, user), user)
 
     # Uploaded CSV reuse (re-run / delete)
+    if method == "POST" and path == "/cardconv/upload/register-name":
+        return _handle_register_name_and_rerun(user, body)
     if method == "POST" and path == "/cardconv/upload/rerun":
         uid = (body.get("id", [""])[0]).strip()
         return _handle_upload_rerun(user, uid)

@@ -3544,10 +3544,9 @@ def _handle_upload(body, user=None):
     if not user:
         return ("redirect", "/cardconv/ledger")
 
-    # Without registered card names every row would be filtered out silently;
-    # send the user back to Convert, whose empty-state banner explains the fix.
-    if not _get_card_member_names(user):
-        return ("redirect", "/cardconv/convert")
+    # (No early card-name guard: with zero registered names the ingest matches
+    # nothing and the 0-match notice below lists the file's cardmembers with
+    # one-click register buttons — far clearer than a silent bounce.)
 
     # DRM guard: a still-encrypted NASCA file would otherwise blow up the parser
     # and surface as a raw red error. Bounce it to a friendly notice instead.
@@ -3575,7 +3574,11 @@ def _handle_upload(body, user=None):
             except Exception:
                 pass
             if counts:
-                return ("html", _render_member_mismatch(user, csv_name, counts))
+                # keep the converted CSV so the register buttons can re-ingest
+                # without a second upload
+                entry = _save_uploaded_csv(user, csv_bytes, csv_name, 0, "")
+                return ("html", _render_member_mismatch(user, csv_name, counts,
+                                                        entry["id"]))
             import urllib.parse as _up
             return ("redirect", "/cardconv/convert?ingest_empty=" + _up.quote(csv_name))
         _save_uploaded_csv(user, csv_bytes, csv_name, stats["added"], "")
@@ -3606,17 +3609,26 @@ def _handle_upload(body, user=None):
             '</div></div></div></body></html>'))
 
 
-def _render_member_mismatch(username: str, csv_name: str, counts) -> str:
+def _render_member_mismatch(username: str, csv_name: str, counts,
+                            uid: str = "") -> str:
     """0-match notice: which Card Member Names the file actually contains vs
-    what this profile has registered, so the user can register the right one."""
+    what this profile has registered. Each found name is a one-click button
+    that registers it and re-ingests the stored upload."""
     registered = _get_card_member_names(username)
     reg_html = (", ".join(f"<b>{_esc(n)}</b>" for n in registered)
                 if registered else "<i>none registered yet</i>")
+    chip_style = ('display:inline-flex;align-items:center;gap:6px;margin:3px;'
+                  'padding:6px 14px;border:1px solid var(--accent);border-radius:99px;'
+                  'font-size:.8rem;background:var(--surface-2);color:var(--text);'
+                  'cursor:pointer;font-family:inherit')
     chips = "".join(
-        f'<span style="display:inline-flex;align-items:center;gap:6px;margin:3px;'
-        f'padding:5px 12px;border:1px solid var(--border);border-radius:99px;'
-        f'font-size:.8rem;background:var(--surface-2)">{_esc(n)} '
-        f'<span style="color:var(--text-muted);font-size:.7rem">{c} tx</span></span>'
+        f'<form method="POST" action="/cardconv/upload/register-name" style="display:inline">'
+        f'<input type="hidden" name="uid" value="{_esc(uid)}">'
+        f'<input type="hidden" name="name" value="{_esc(n)}">'
+        f'<button type="submit" style="{chip_style}" '
+        f'title="Register this cardmember and import their transactions">'
+        f'＋ {_esc(n)} <span style="color:var(--text-muted);font-size:.7rem">{c} tx</span></button>'
+        f'</form>'
         for n, c in counts.most_common(40))
     more = (f'<p style="font-size:.72rem;color:var(--text-muted)">…and '
             f'{len(counts) - 40} more</p>' if len(counts) > 40 else "")
@@ -3629,13 +3641,31 @@ def _render_member_mismatch(username: str, csv_name: str, counts) -> str:
         f'<h2 style="font-size:1.05rem;margin-bottom:10px">🪪 No rows matched your card names — {_esc(csv_name)}</h2>'
         '<p style="font-size:.86rem;color:var(--text-muted);line-height:1.7;margin-bottom:14px">'
         'The file parsed fine, but none of its cardmembers match the names registered '
-        'in this card profile. Register the name you manage (Convert → Card member '
-        'names), then upload again.</p>'
+        'in this card profile. <b>Click the cardmember you manage below</b> — it will be '
+        'registered to this profile and their transactions imported right away.</p>'
         f'<p style="font-size:.8rem;margin-bottom:8px">Registered in this profile: {reg_html}</p>'
         '<p style="font-size:.8rem;font-weight:700;margin:14px 0 6px">Cardmembers found in this file:</p>'
-        f'<div style="line-height:2">{chips}</div>{more}'
-        '<div style="margin-top:22px"><a href="/cardconv/convert" class="btn btn-primary">← Back to Convert</a></div>'
+        f'<div style="line-height:2.4">{chips}</div>{more}'
+        '<div style="margin-top:22px"><a href="/cardconv/convert" class="btn btn-secondary">← Back to Convert</a></div>'
         '</div></div></div></body></html>')
+
+
+def _handle_register_name_and_rerun(username: str, body: dict):
+    """POST /cardconv/upload/register-name — one-click from the 0-match page:
+    add the cardmember name to this profile, then re-ingest the stored upload."""
+    name = (body.get("name", [""])[0] or "").strip().upper()
+    uid = (body.get("uid", [""])[0] or "").strip()
+    if not name:
+        return ("redirect", "/cardconv/convert")
+    s = _load_user_settings(username)
+    names = s.get("card_member_names") or []
+    if name not in [n.strip().upper() for n in names]:
+        names.append(name)
+        s["card_member_names"] = names
+        _save_user_settings(username, s)
+    if uid:
+        return _handle_upload_rerun(username, uid)
+    return ("redirect", "/cardconv/convert")
 
 
 def _handle_upload_rerun(username: str, uid: str):
