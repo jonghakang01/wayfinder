@@ -773,6 +773,12 @@ _CSS = """
 .dd-stat .cash-pay{color:#fb923c}
 .dd-stat .cash-neg{color:var(--danger)}
 button.dd-tab{border:none;background:transparent;cursor:pointer;font-family:inherit}
+/* ── Home To Do alert ── */
+.dd-todo{background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.35);border-radius:var(--radius-lg);padding:14px 16px;margin-bottom:16px}
+.dd-todo-hd{font-size:.84rem;font-weight:800;margin-bottom:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.dd-todo-item{display:flex;gap:10px;align-items:baseline;padding:7px 4px;font-size:.82rem;color:var(--text);text-decoration:none;border-top:1px dashed var(--border)}
+.dd-todo-item:hover{background:rgba(245,158,11,.08)}
+.tab-badge{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;border-radius:8px;font-size:.62rem;font-weight:700;color:#fff;padding:0 5px}
 .sow-hero{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:20px 0 34px}
 .dir-card{display:flex;flex-direction:column;gap:10px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-xl);padding:30px 28px;text-decoration:none;color:var(--text);transition:.2s;position:relative;overflow:hidden}
 .dir-card::before{content:"";position:absolute;top:0;left:0;right:0;height:3px;background:var(--dir-color,var(--accent));opacity:.85}
@@ -1043,6 +1049,8 @@ def _landing_stats(data):
     contracts = data.get("contracts", [])
     active = 0
     for c in contracts:
+        if _lifecycle(data, c) != "active":
+            continue
         s = _parse_any_date(c.get("period_start"))
         e = _parse_any_date(c.get("period_end"))
         if s and e and s <= today <= e:
@@ -1071,6 +1079,8 @@ def _dd_year_cashflow(data, year):
     roster's monthly salary+OH (falling back to salary) held constant."""
     bill, pay = [0.0] * 12, [0.0] * 12
     for c in data.get("contracts", []):
+        if _lifecycle(data, c) != "active":
+            continue
         m = _contract_month_amounts(c)
         if not m:
             continue
@@ -1168,9 +1178,22 @@ def _render_landing(user):
     data = _load(user)
     _migrate_contract_texts(user, data)
     year = date.today().year
+    todos = _contract_todos(data)
+    todo_html = ""
+    if todos:
+        items = "".join(
+            f'<a href="/sow/contracts?newc={c["id"]}" class="dd-todo-item">'
+            f'<span>⚠️</span><span style="flex:1"><b>{_esc(c.get("project_name") or c.get("filename") or "(untitled contract)")}</b>'
+            f' — {reason}</span><span style="color:var(--accent);font-weight:700;white-space:nowrap">Open →</span></a>'
+            for c, reason in todos)
+        todo_html = (f'<div class="dd-todo"><div class="dd-todo-hd">📋 To Do '
+                     f'<span class="tab-badge" style="background:#f59e0b">{len(todos)}</span>'
+                     f' <span style="font-weight:400;color:var(--text-muted);font-size:.74rem">— every contract needs a confirmed SEA ↔ vendor (or Cheil-USA-self) mapping</span></div>'
+                     f'{items}</div>')
     body = f"""
 <h1 style="margin:8px 0 4px">Deal Desk</h1>
 <p style="color:var(--text-muted);font-size:.86rem;margin-bottom:14px">Status at a glance — work happens in the tabs above.</p>
+{todo_html}
 {_landing_stats(data)}
 {_dd_cashflow_section(data, year)}"""
     return _shell(user, "Deal Desk", body, tab="home")
@@ -1234,11 +1257,119 @@ def _fmt_money_cell(v):
     return _money(n) if n is not None else (_esc(v) if v else "–")
 
 
-def _render_people(user, saved=False):
+def _render_people_by_contract(data):
+    """People grouped per contract (active first) with each person's monthly
+    money and a totals row — the contract-level cost breakdown (강프로
+    2026-07-24). Membership = person.linked_contracts."""
+    today = date.today()
+
+    def is_active(c):
+        if _lifecycle(data, c) != "active":
+            return False
+        s = _parse_any_date(c.get("period_start"))
+        e = _parse_any_date(c.get("period_end"))
+        return bool(s and e and s <= today <= e)
+
+    contracts = sorted(data.get("contracts", []),
+                       key=lambda c: (not is_active(c),
+                                      (c.get("project_name") or "").lower()))
+    assigned = set()
+    sections = []
+    for c in contracts:
+        members = [p for p in data.get("people", [])
+                   if c["id"] in (p.get("linked_contracts") or [])]
+        active = is_active(c)
+        if not members and not active:
+            continue
+        assigned.update(p["id"] for p in members)
+        label, chip, _, icon = _SIDE_META.get(c.get("side"), _SIDE_META["sea"])
+        badge = ('<span class="ctr-chip pos">● Active</span>' if active
+                 else '<span class="ctr-chip">○ Inactive</span>')
+        period = ""
+        if c.get("period_start") or c.get("period_end"):
+            period = f'{_esc(c.get("period_start") or "…")} ~ {_esc(c.get("period_end") or "…")}'
+        rows, sell_sum, cost_sum = [], 0.0, 0.0
+        for p in sorted(members, key=lambda x: (x.get("name") or "").lower()):
+            sell = _num_or_none(p.get("sell_mo"))
+            cost = _num_or_none(p.get("cost_mo"))
+            cost_src = "contract"
+            if cost is None:
+                cost = _num_or_none(p.get("salary_oh")) or _num_or_none(p.get("salary_mo"))
+                cost_src = "salary"
+            sell_sum += sell or 0.0
+            cost_sum += cost or 0.0
+            rows.append(
+                f'<tr><td class="pin"><a href="/sow/person?id={p["id"]}" '
+                f'style="color:var(--text);text-decoration:none;font-weight:700">{_esc(p.get("name"))}</a></td>'
+                f'<td>{_esc(p.get("role_title") or "–")}</td>'
+                f'<td>{_esc(p.get("affiliation") or "Cheil")}</td>'
+                f'<td class="num bill">{_money(sell) if sell is not None else "–"}</td>'
+                f'<td class="num pay">{_money(cost) if cost is not None else "–"}'
+                + (f' <span style="font-size:.6rem;color:var(--text-muted)">{cost_src}</span>' if cost is not None else "")
+                + f'</td>'
+                f'<td class="num {"pos" if (sell or 0) - (cost or 0) >= 0 else "neg"}">'
+                f'{_money((sell or 0) - (cost or 0)) if (sell is not None or cost is not None) else "–"}</td></tr>')
+        net = sell_sum - cost_sum
+        total_row = (
+            f'<tr class="net"><td class="pin">Total / month</td><td></td><td></td>'
+            f'<td class="num bill">{_money(sell_sum)}</td>'
+            f'<td class="num pay">{_money(cost_sum)}</td>'
+            f'<td class="num {"pos" if net >= 0 else "neg"}">{_money(net)}</td></tr>'
+            if rows else "")
+        body_rows = "".join(rows) or (
+            '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);'
+            'padding:14px;font-size:.78rem">No people linked yet — open a person '
+            'and tick this contract under "Linked contracts".</td></tr>')
+        sections.append(f"""
+<div class="ctr-group" style="margin-bottom:16px">
+  <div class="ctr-group-hd">
+    <span class="dir-chip {chip}">{icon} {label}</span>
+    <span class="ctr-group-name">{_esc(c.get("project_name") or c.get("filename") or "(untitled contract)")}</span>
+    {badge}
+    <span class="sow-meta">{period}{(" · " + _esc(c.get("amount"))) if c.get("amount") else ""}</span>
+  </div>
+  <div class="cf-wrap"><table class="cf-table" style="min-width:760px">
+    <thead><tr><th class="pin">Name</th><th>Role</th><th>소속</th>
+      <th>Selling/mo</th><th>Cost/mo</th><th>Net/mo</th></tr></thead>
+    <tbody>{body_rows}{total_row}</tbody>
+  </table></div>
+</div>""")
+    rest = [p for p in data.get("people", []) if p["id"] not in assigned]
+    if rest:
+        chips = "".join(
+            f'<a href="/sow/person?id={p["id"]}" class="btn btn-secondary btn-sm" '
+            f'style="margin:3px">{_esc(p.get("name"))}</a>' for p in
+            sorted(rest, key=lambda x: (x.get("name") or "").lower()))
+        sections.append(
+            f'<div class="ctr-orphans"><div class="ctr-orphan-hd">Not linked to any contract '
+            f'({len(rest)}) <span>· open a person and tick their contract</span></div>'
+            f'<div>{chips}</div></div>')
+    return "".join(sections) or (
+        '<div class="sow-meta" style="padding:30px;text-align:center">'
+        'No contracts on file yet.</div>')
+
+
+def _render_people(user, saved=False, view="roster"):
     """Excel-style summary grid (강프로 2026-07-22): one row per person, the
     3 money axes as banded column groups, first column pinned, horizontal
-    scroll inside the wrapper per the design-system reference-table rule."""
+    scroll inside the wrapper per the design-system reference-table rule.
+    view='contract' swaps the grid for the per-contract cost breakdown."""
     data = _load(user)
+
+    if view == "contract":
+        body = f"""
+<div style="display:flex;align-items:center;gap:12px;margin:8px 0 14px;flex-wrap:wrap">
+  <h1 style="margin:0">👥 People</h1>
+  <span class="dd-tabs" style="padding:2px">
+    <a class="dd-tab" href="/sow/people">Roster</a>
+    <a class="dd-tab active" href="/sow/people?view=contract">By contract</a>
+  </span>
+  <span style="flex:1"></span>
+  <a class="btn btn-primary btn-sm" href="/sow/person">+ Add person</a>
+</div>
+<p style="color:var(--text-muted);font-size:.86rem">Each contract's team and monthly money — selling vs cost per person (cost falls back to salary+OH for Cheil staff), active contracts first. Link people from their profile page.</p>
+{_render_people_by_contract(data)}"""
+        return _shell(user, "People", body, wide=True, tab="people")
 
     def mo_auto(hr_v, mo_v):
         if mo_v:
@@ -1302,8 +1433,12 @@ def _render_people(user, saved=False):
 .pp-table tbody tr:hover td{{background:var(--surface-2)}}
 .pp-table tbody tr:hover td.pp-pin{{background:var(--surface-2)}}
 </style>
-<div style="display:flex;align-items:center;gap:12px;margin:8px 0 4px">
+<div style="display:flex;align-items:center;gap:12px;margin:8px 0 4px;flex-wrap:wrap">
   <h1 style="margin:0">👥 People</h1>
+  <span class="dd-tabs" style="padding:2px">
+    <a class="dd-tab{' active' if view != 'contract' else ''}" href="/sow/people">Roster</a>
+    <a class="dd-tab{' active' if view == 'contract' else ''}" href="/sow/people?view=contract">By contract</a>
+  </span>
   <span style="flex:1"></span>
   <a class="btn btn-primary btn-sm" href="/sow/person">+ Add person</a>
 </div>
@@ -1367,6 +1502,26 @@ def _render_person_detail(user, person, saved=False):
             f'<span style="color:var(--text-muted);font-size:.72rem">{_esc(s.get("start") or "")}{(" ~ " + _esc(s.get("end"))) if s.get("end") else ""}</span>'
             f'{auto}'
             f'<a href="/sow/edit?id={s["id"]}" style="margin-left:auto;color:var(--accent);font-size:.74rem;text-decoration:none">open →</a></label>')
+
+    # linked contracts: explicit checkboxes — powers the People "By contract"
+    # breakdown (강프로 2026-07-24)
+    ctr_opts = []
+    linked_c = set(p.get("linked_contracts") or [])
+    _today = date.today()
+    for c in data.get("contracts", []):
+        s0 = _parse_any_date(c.get("period_start"))
+        e0 = _parse_any_date(c.get("period_end"))
+        act = ('<span style="font-size:.64rem;color:var(--success)">● Active</span>'
+               if (s0 and e0 and s0 <= _today <= e0) else
+               '<span style="font-size:.64rem;color:var(--text-muted)">○ Inactive</span>')
+        _, chip, _, icon = _SIDE_META.get(c.get("side"), _SIDE_META["sea"])
+        checked = " checked" if c["id"] in linked_c else ""
+        ctr_opts.append(
+            f'<label style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:.82rem;cursor:pointer">'
+            f'<input type="checkbox" name="linked_contracts" value="{c["id"]}"{checked}>'
+            f'{icon} {_esc(c.get("project_name") or c.get("filename") or "(untitled contract)")}'
+            f'<span style="color:var(--text-muted);font-size:.72rem">{_esc(c.get("vendor") or c.get("client") or "")}</span>'
+            f'{act}</label>')
 
     saved_banner = ('<div style="color:var(--success);font-size:.85rem;margin-bottom:12px">✓ Saved</div>'
                     if saved else "")
@@ -1443,6 +1598,12 @@ def _render_person_detail(user, person, saved=False):
 <div class="sow-card">
   <div class="sec-title" style="font-size:.8rem;font-weight:800;margin-bottom:12px">Linked SOWs &amp; estimates</div>
   {''.join(doc_opts) or '<div style="font-size:.8rem;color:var(--text-muted)">No documents yet.</div>'}
+</div>
+
+<div class="sow-card">
+  <div class="sec-title" style="font-size:.8rem;font-weight:800;margin-bottom:12px">Linked contracts</div>
+  <div style="font-size:.72rem;color:var(--text-muted);margin-bottom:8px">Drives the People → By contract breakdown.</div>
+  {''.join(ctr_opts) or '<div style="font-size:.8rem;color:var(--text-muted)">No contracts uploaded yet.</div>'}
 </div>
 
 <div style="display:flex;gap:10px;margin:16px 0 40px">
@@ -1659,21 +1820,55 @@ def _render_vendors(user, saved=False):
         vid = s.get("vendor_id")
         if vid:
             counts[vid] = counts.get(vid, 0) + 1
+    today = date.today()
     rows = []
     for v in data["vendors"]:
         n = counts.get(v["id"], 0)
         del_btn = (f'<button type="button" class="btn btn-danger btn-sm" onclick="delVendor(\'{v["id"]}\')">🗑</button>'
                    if n == 0 else
                    f'<span style="font-size:.72rem;color:var(--text-muted)" title="Referenced by {n} document(s) — delete those first">{n} doc(s)</span>')
+        # mapping line: this vendor's contracts (name-matched) + its people
+        # (affiliation match or linked to those contracts) — 강프로 2026-07-24
+        vn_norm = _norm_tokens(v.get("name"))
+        v_low = (v.get("name") or "").strip().lower()
+        v_ctrs = [c for c in data.get("contracts", [])
+                  if c.get("side") == "vendor"
+                  and ((vn_norm and _norm_tokens(c.get("vendor")) == vn_norm)
+                       or (c.get("vendor") or "").strip().lower() == v_low)]
+        cids = {c["id"] for c in v_ctrs}
+        v_ppl = [p for p in data.get("people", [])
+                 if (vn_norm and _norm_tokens(p.get("affiliation")) == vn_norm)
+                 or (set(p.get("linked_contracts") or []) & cids)]
+        map_bits = []
+        for c in v_ctrs:
+            s0 = _parse_any_date(c.get("period_start"))
+            e0 = _parse_any_date(c.get("period_end"))
+            act = ' <span style="color:var(--success)">●</span>' if (s0 and e0 and s0 <= today <= e0) else ''
+            map_bits.append(
+                f'<a href="/sow/contracts?newc={c["id"]}" class="ctr-chip" '
+                f'style="text-decoration:none">📎 {_esc(c.get("project_name") or c.get("filename") or "contract")}'
+                f'{(" · " + _esc(c.get("amount"))) if c.get("amount") else ""}{act}</a>')
+        for p in sorted(v_ppl, key=lambda x: (x.get("name") or "").lower()):
+            map_bits.append(
+                f'<a href="/sow/person?id={p["id"]}" class="ctr-chip" '
+                f'style="text-decoration:none">👤 {_esc(p.get("name"))}'
+                f'{(" · " + _esc(p.get("role_title"))) if p.get("role_title") else ""}</a>')
+        map_line = ""
+        if map_bits:
+            map_line = ('<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;'
+                        'padding:0 18px 12px;margin-top:-6px">' + "".join(map_bits) + '</div>')
         rows.append(f"""
-<form method="post" action="/sow/vendor/save" class="sow-card" style="display:grid;grid-template-columns:1fr 2fr 150px auto auto;gap:10px;align-items:center;padding:14px 18px">
+<div class="sow-card" style="padding:0">
+<form method="post" action="/sow/vendor/save" style="display:grid;grid-template-columns:1fr 2fr 150px auto auto;gap:10px;align-items:center;padding:14px 18px">
   <input type="hidden" name="id" value="{v['id']}">
   <input class="slot" name="name" value="{_esc(v.get('name'))}" placeholder="Vendor name">
   <input class="slot" name="entity_line" value="{_esc(v.get('entity_line'))}" placeholder="Entity line (name + address, used in the SOW/MSA preamble)">
   <input class="slot" type="date" name="msa_date" value="{_esc(v.get('msa_date'))}" title="MSA date">
   <button type="submit" class="btn btn-secondary btn-sm">💾 Save</button>
   {del_btn}
-</form>""")
+</form>
+{map_line}
+</div>""")
     saved_banner = ('<div style="color:var(--success);font-size:.85rem;margin-bottom:12px">✓ Saved</div>'
                     if saved else "")
     body = f"""
@@ -2592,6 +2787,18 @@ def _contract_by_id(data, cid):
     return next((c for c in data.get("contracts", []) if c["id"] == cid), None)
 
 
+def _lifecycle(data, c):
+    """Contract lifecycle: cancelled (manual) > superseded (derived — a live
+    amendment points at it via amends_id) > active. Only active versions count
+    toward cashflow, margins, Active tallies and To Dos (강프로 2026-07-24)."""
+    if c.get("cancelled"):
+        return "cancelled"
+    if any(o.get("amends_id") == c["id"] and not o.get("cancelled")
+           for o in data.get("contracts", [])):
+        return "superseded"
+    return "active"
+
+
 def _auto_register_vendor(data, name):
     """Register the extracted vendor entity right away (강프로 2026-07-24)
     unless a vendor already matches by normalized name."""
@@ -2641,7 +2848,7 @@ _SIDE_META = {
 }
 
 
-def _contract_card(c, draggable=False, show_title=True):
+def _contract_card(c, draggable=False, show_title=True, status="active"):
     """Contract box: counterparty, period, total amount as labeled rows
     (강프로 2026-07-24) — the group header above carries the contract name."""
     label, chip, color, icon = _SIDE_META.get(c.get("side"), _SIDE_META["sea"])
@@ -2658,7 +2865,13 @@ def _contract_card(c, draggable=False, show_title=True):
         f'<div class="ctr-card" data-cid="{c["id"]}"{drag} '
         f'onclick="openContract(\'{c["id"]}\')" style="cursor:pointer">'
         + ('<span class="ctr-grip">⠿</span>' if draggable else '')
-        + f'<div class="ctr-top"><span class="dir-chip {chip}">{icon} {label}</span></div>'
+        + f'<div class="ctr-top"><span class="dir-chip {chip}">{icon} {label}</span>'
+        + ({"cancelled": '<span class="dir-chip" style="color:var(--danger);background:rgba(248,113,113,.12)">❌ Cancelled</span>',
+            "superseded": '<span class="dir-chip" style="color:#a78bfa;background:rgba(167,139,250,.14)">♻️ Superseded</span>'}
+           .get(status, ''))
+        + ('' if c.get("confirmed") or status != "active" else
+           '<span title="Needs review & confirmation" style="font-size:.8rem">⚠️</span>')
+        + '</div>'
         f'{title}'
         f'<div class="ctr-rows">'
         f'<span class="ctr-lb">Party</span><span>{_esc(party)}</span>'
@@ -2704,9 +2917,34 @@ def _contract_month_amounts(c):
     return {(y, m): per * f for y, m, f in spans}
 
 
-def _group_cashflow_table(sea, kids):
+def _contract_todos(data):
+    """Mapping/confirmation gaps that must surface as Home To Dos (강프로
+    2026-07-24): every contract needs an explicit user confirmation, every
+    vendor contract a SEA parent, and every SEA contract either vendor
+    children or a 'Cheil USA delivers itself' mark."""
+    todos = []
+    groups, orphans = _contract_groups(data)
+    live = lambda c: _lifecycle(data, c) == "active"
+    for c in data.get("contracts", []):
+        if live(c) and not c.get("confirmed"):
+            todos.append((c, "Not confirmed yet — review the extracted fields & mapping, then Confirm"))
+    for o in orphans:
+        if live(o):
+            todos.append((o, "Vendor contract with no SEA deal — drag it under its SEA contract"))
+    for sea, kids in groups:
+        if live(sea) and not any(live(k) for k in kids) and not sea.get("self_delivered"):
+            todos.append((sea, "No vendor mapped — align a vendor contract, or mark it Cheil-USA-self-delivered"))
+    return todos
+
+
+def _group_cashflow_table(sea, kids, data=None):
     """Per-group monthly cashflow: what Cheil bills SEA vs what it pays each
-    vendor, month by month over the contract duration (강프로 2026-07-24)."""
+    vendor, month by month over the contract duration (강프로 2026-07-24).
+    Only active contract versions are counted."""
+    if data is not None:
+        if _lifecycle(data, sea) != "active":
+            sea = dict(sea, amount=None)
+        kids = [k for k in kids if _lifecycle(data, k) == "active"]
     sea_m = _contract_month_amounts(sea)
     kid_ms = [(k, _contract_month_amounts(k)) for k in kids]
     kid_ms = [(k, m) for k, m in kid_ms if m]
@@ -2759,8 +2997,11 @@ def _group_cashflow_table(sea, kids):
             f'<div class="sow-meta" style="margin-top:6px">{note}</div></details>')
 
 
-def _group_rollup(sea, kids):
-    """SEA amount vs the sum of aligned vendor amounts → margin chips."""
+def _group_rollup(sea, kids, data=None):
+    """SEA amount vs the sum of aligned vendor amounts → margin chips.
+    Cancelled/superseded versions are excluded from the math."""
+    if data is not None:
+        kids = [k for k in kids if _lifecycle(data, k) == "active"]
     sea_amt = _num_or_none(sea.get("amount"))
     kid_amts = [a for a in (_num_or_none(k.get("amount")) for k in kids)
                 if a is not None]
@@ -2782,21 +3023,22 @@ def _render_contracts_section(user, data):
     for sea, kids in groups:
         # no title on grouped vendor cards — the group header already says
         # which deal this is (강프로 2026-07-24); unlinked pool keeps titles
-        kid_cards = "".join(_contract_card(v, draggable=True, show_title=False)
-                            for v in kids)
+        kid_cards = "".join(
+            _contract_card(v, draggable=True, show_title=False,
+                           status=_lifecycle(data, v)) for v in kids)
         empty = ('<div class="ctr-drop-hint">Drag vendor contracts here</div>'
                  if not kids else "")
         gname = _esc(sea.get("project_name") or sea.get("filename") or "(untitled contract)")
         gblocks.append(
             f'<div class="ctr-group">'
             f'<div class="ctr-group-hd"><span class="ctr-group-name">{gname}</span>'
-            f'{_group_rollup(sea, kids)}</div>'
+            f'{_group_rollup(sea, kids, data)}</div>'
             f'<div class="ctr-group-body">'
-            f'<div class="ctr-sea-col">{_contract_card(sea, show_title=False)}</div>'
+            f'<div class="ctr-sea-col">{_contract_card(sea, show_title=False, status=_lifecycle(data, sea))}</div>'
             f'<div class="ctr-ven-col" data-seadrop data-sea="{sea["id"]}">'
             f'{kid_cards}{empty}</div>'
             f'</div>'
-            f'{_group_cashflow_table(sea, kids)}</div>')
+            f'{_group_cashflow_table(sea, kids, data)}</div>')
     groups_html = "".join(gblocks) or (
         '<div class="sow-meta" style="padding:22px;text-align:center">'
         'No SEA↔Cheil contracts yet — upload one to start a group.</div>')
@@ -2804,7 +3046,8 @@ def _render_contracts_section(user, data):
         '<div class="ctr-orphans" data-seadrop data-sea="">'
         '<div class="ctr-orphan-hd">Unlinked vendor contracts '
         '<span>· drag onto a group above to align them</span></div>'
-        + ("".join(_contract_card(c, draggable=True) for c in orphans)
+        + ("".join(_contract_card(c, draggable=True, status=_lifecycle(data, c))
+                   for c in orphans)
            if orphans else '<div class="ctr-drop-hint">None — drop a vendor card here to unlink it</div>')
         + '</div>')
     return f"""
@@ -2853,7 +3096,7 @@ def _render_contract_frag(user, data, cid):
                 f'<li><span>{_esc(k.get("project_name") or k.get("filename"))}'
                 f' <span class="sow-meta">{_esc(k.get("vendor") or "")}</span></span>'
                 f'<b>{_esc(k.get("amount") or "—")}</b></li>' for k in kids)
-            rollup = _group_rollup(c, kids)
+            rollup = _group_rollup(c, kids, data)
             link_html = (f'<div class="ctr-linkbox"><b>Aligned vendor contracts ({len(kids)})'
                          f'{("&nbsp;" + rollup) if rollup else ""}</b>'
                          f'<ul class="ctr-kidlist">{items}</ul>'
@@ -2900,6 +3143,79 @@ def _render_contract_frag(user, data, cid):
             f'<button class="btn btn-primary btn-sm" type="button" onclick="ctrPeopleSave(\'{c["id"]}\')">💾 Save selected to People</button>'
             f'<button class="btn btn-secondary btn-sm" type="button" onclick="ctrPost(\'/sow/contract/people_dismiss\',{{id:\'{c["id"]}\'}})">Dismiss</button>'
             '</div></div>')
+    if c.get("confirmed"):
+        confirm_btn = (f'<button class="btn btn-secondary btn-sm" type="button" '
+                       f'title="Confirmed {_esc((c.get("confirmed_at") or "")[:10])} — click to un-confirm" '
+                       f'onclick="ctrPost(\'/sow/contract/confirm\',{{id:\'{c["id"]}\'}})">✔ Confirmed</button>')
+    else:
+        confirm_btn = (f'<button class="btn btn-primary btn-sm" type="button" '
+                       f'title="Mark the fields and SEA↔vendor mapping as reviewed" '
+                       f'onclick="ctrPost(\'/sow/contract/confirm\',{{id:\'{c["id"]}\'}})">✅ Confirm contract</button>')
+    # lifecycle: amendments / cancellation / re-contract (강프로 2026-07-24)
+    lc = _lifecycle(data, c)
+    succ = next((o for o in data.get("contracts", [])
+                 if o.get("amends_id") == c["id"] and not o.get("cancelled")), None)
+    prev = _contract_by_id(data, c.get("amends_id")) if c.get("amends_id") else None
+    amend_cands = [o for o in data.get("contracts", [])
+                   if o["id"] != c["id"] and o.get("side") == c.get("side")
+                   and o.get("amends_id") != c["id"]]
+    amend_opts = '<option value="">— none (original contract) —</option>' + "".join(
+        f'<option value="{o["id"]}"{" selected" if c.get("amends_id") == o["id"] else ""}>'
+        f'{_esc(o.get("project_name") or o.get("filename") or o["id"])}</option>'
+        for o in amend_cands)
+    lc_chip = {"active": '<span class="ctr-chip pos">● Active version</span>',
+               "cancelled": '<span class="ctr-chip neg">❌ Cancelled — excluded from totals</span>',
+               "superseded": '<span class="ctr-chip" style="color:#a78bfa;border-color:rgba(167,139,250,.4)">♻️ Superseded — excluded from totals</span>'}[lc]
+    succ_html = (f'<div class="sow-meta">♻️ Superseded by <b>{_esc(succ.get("project_name") or succ.get("filename"))}</b> '
+                 f'<a href="#" onclick="openContract(\'{succ["id"]}\');return false" style="color:var(--accent)">open →</a></div>'
+                 if succ else "")
+    prev_html = (f'<div class="sow-meta">↺ Amends <b>{_esc(prev.get("project_name") or prev.get("filename"))}</b> '
+                 f'<a href="#" onclick="openContract(\'{prev["id"]}\');return false" style="color:var(--accent)">open →</a></div>'
+                 if prev else "")
+    cancel_btn = (f'<button class="btn btn-secondary btn-sm" type="button" '
+                  f'onclick="ctrPost(\'/sow/contract/cancel\',{{id:\'{c["id"]}\'}})">↩ Reactivate</button>'
+                  if c.get("cancelled") else
+                  f'<button class="btn btn-danger btn-sm" type="button" '
+                  f'onclick="if(confirm(\'Cancel this contract? It stays on file but drops out of all totals. Upload the re-contract and point its Amends field here.\'))ctrPost(\'/sow/contract/cancel\',{{id:\'{c["id"]}\'}})">❌ Cancel contract</button>')
+    lifecycle_html = (
+        f'<div class="ctr-linkbox"><b>Lifecycle</b>'
+        f'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">{lc_chip}{cancel_btn}</div>'
+        f'{succ_html}{prev_html}'
+        f'<label style="display:flex;gap:8px;align-items:center;font-size:.8rem;flex-wrap:wrap">Amends (previous version):'
+        f'<select class="slot" style="flex:1;min-width:200px" '
+        f'onchange="ctrPost(\'/sow/contract/amends\',{{id:\'{c["id"]}\',prev:this.value}})">{amend_opts}</select></label>'
+        f'<div class="sow-meta">Amendment / re-contract flow: upload the new version, open it, and set "Amends" to the old one — the old version is auto-marked superseded and leaves the totals.</div>'
+        f'</div>')
+
+    if c.get("side") != "vendor":
+        link_html += (
+            f'<label style="display:flex;gap:8px;align-items:center;font-size:.8rem;'
+            f'margin-top:10px;cursor:pointer;color:var(--text)">'
+            f'<input type="checkbox"{" checked" if c.get("self_delivered") else ""} '
+            f'onchange="ctrPost(\'/sow/contract/selfdeliver\',{{id:\'{c["id"]}\'}})">'
+            f'🏠 Cheil USA delivers this itself — no vendor contract expected</label>')
+
+    # actual document viewer (강프로 2026-07-24): PDFs render inline (lazy —
+    # the iframe only loads when opened); Word files can't render in-browser,
+    # so they get a clear pointer to the original download.
+    ext = (c.get("ext") or "").lower()
+    if ext == "pdf":
+        viewer_html = (
+            '<details class="ctr-prev" '
+            'ontoggle="if(this.open){var f=this.querySelector(\'iframe\');'
+            'if(f&&!f.src)f.src=f.dataset.src;}">'
+            '<summary>📄 View contract (original PDF)</summary>'
+            f'<iframe data-src="/sow/contract/file?id={c["id"]}" '
+            'style="width:100%;height:72vh;border:1px solid var(--border);'
+            'border-radius:8px;margin-top:8px;background:#fff"></iframe></details>')
+    elif ext in ("docx", "doc"):
+        viewer_html = (
+            '<div class="sow-meta" style="margin-top:14px">📄 Word document — '
+            'browsers can\'t render it inline; use '
+            f'<a href="/sow/contract/file?id={c["id"]}" target="_blank" '
+            'style="color:var(--accent)">⬇ Original</a> to open it in Word.</div>')
+    else:
+        viewer_html = ""
     uploaded = (c.get("uploaded") or "")[:10]
     preview = _esc(_contract_text(user, c)[:6000])
     return f"""
@@ -2925,14 +3241,17 @@ def _render_contract_frag(user, data, cid):
     </div>
     <div class="ctr-actions">
       <button class="btn btn-primary btn-sm" type="submit">💾 Save fields</button>
+      {confirm_btn}
       <button class="btn btn-secondary btn-sm" type="button" onclick="ctrReparse('{c['id']}',this)">🪄 Re-read with AI</button>
       <a class="btn btn-secondary btn-sm" href="/sow/contract/file?id={c['id']}" target="_blank">⬇ Original</a>
       <button class="btn btn-danger btn-sm" type="button" onclick="ctrPost('/sow/contract/delete',{{id:'{c['id']}'}})">🗑 Delete</button>
     </div>
   </form>
   {link_html}
+  {lifecycle_html}
   {people_html}
-  <details class="ctr-prev"><summary>📄 Document text preview</summary><pre>{preview}</pre></details>
+  {viewer_html}
+  <details class="ctr-prev"><summary>🔤 Extracted text</summary><pre>{preview}</pre></details>
 </div>"""
 
 
@@ -3174,6 +3493,7 @@ def handle(method, path, body, ctx):
             if fields.get("people"):
                 c["people_pending"] = fields["people"]
             _auto_register_vendor(data, c.get("vendor"))
+            c["confirmed"] = False  # re-read fields need a fresh confirmation
             _save(user, data)
         return ("redirect", f"/sow/contracts?newc={_f(body, 'id')}")
 
@@ -3207,6 +3527,46 @@ def handle(method, path, body, ctx):
                 v["linked_id"] = sea["id"]
             else:
                 v["linked_id"] = None
+            _save(user, data)
+        return ("redirect", "/sow/contracts")
+
+    if method == "POST" and path == "/sow/contract/confirm":
+        data = _load(user)
+        c = _contract_by_id(data, _f(body, "id"))
+        if c:
+            c["confirmed"] = not c.get("confirmed")
+            c["confirmed_at"] = (datetime.now().isoformat(timespec="seconds")
+                                 if c["confirmed"] else None)
+            _save(user, data)
+        return ("redirect", "/sow/contracts")
+
+    if method == "POST" and path == "/sow/contract/selfdeliver":
+        data = _load(user)
+        c = _contract_by_id(data, _f(body, "id"))
+        if c:
+            c["self_delivered"] = not c.get("self_delivered")
+            _save(user, data)
+        return ("redirect", "/sow/contracts")
+
+    if method == "POST" and path == "/sow/contract/cancel":
+        data = _load(user)
+        c = _contract_by_id(data, _f(body, "id"))
+        if c:
+            c["cancelled"] = not c.get("cancelled")
+            _save(user, data)
+        return ("redirect", "/sow/contracts")
+
+    if method == "POST" and path == "/sow/contract/amends":
+        data = _load(user)
+        c = _contract_by_id(data, _f(body, "id"))
+        if c:
+            pid = _f(body, "prev")
+            prev = _contract_by_id(data, pid) if pid else None
+            # guard: valid target, not itself, no 2-cycle
+            if prev and prev["id"] != c["id"] and prev.get("amends_id") != c["id"]:
+                c["amends_id"] = prev["id"]
+            else:
+                c["amends_id"] = None
             _save(user, data)
         return ("redirect", "/sow/contracts")
 
@@ -3289,7 +3649,8 @@ def handle(method, path, body, ctx):
         return ("html", _render_vendors(user, saved=_f(body, "saved") == "1"))
 
     if method == "GET" and path == "/sow/people":
-        return ("html", _render_people(user, saved=_f(body, "saved") == "1"))
+        return ("html", _render_people(user, saved=_f(body, "saved") == "1",
+                                       view=_f(body, "view") or "roster"))
 
     if method == "GET" and path == "/sow/person":
         pid = _f(body, "id")
@@ -3318,8 +3679,10 @@ def handle(method, path, body, ctx):
             rec[k] = _f(body, k)
         rec["affiliation"] = rec["affiliation"] or "Cheil"
         rec["linked_sows"] = [str(x) for x in linked if x]
-        if cur:
-            rec["linked_contracts"] = cur.get("linked_contracts", [])
+        linked_c = body.get("linked_contracts") or []
+        if not isinstance(linked_c, list):
+            linked_c = [linked_c]
+        rec["linked_contracts"] = [str(x) for x in linked_c if x]
         if cur:
             data["people"][data["people"].index(cur)] = rec
         else:
