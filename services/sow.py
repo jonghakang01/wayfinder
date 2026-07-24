@@ -11,9 +11,9 @@ from datetime import date, datetime
 from ._paths import DATA_ROOT
 
 META = {
-    "name": "SOW Assistant",
+    "name": "Deal Desk",
     "path": "/sow",
-    "icon": "📝",
+    "icon": "🤝",
     "description": "Statement of Work drafting & payment schedule automation",
     "hidden": False,
     "admin_only": True,
@@ -28,12 +28,12 @@ SAMSUNG_ENTITY = "Samsung Electronics America, Inc."
 # editor instead of a separate document type.
 TYPES = {
     "sea_sow": {
-        "dir": "samsung", "kind": "sow", "mode": "hourly", "icon": "📝",
+        "dir": "samsung", "kind": "sow", "mode": "hourly", "icon": "🤝",
         "label": "Statement of Work",
         "desc": "SOW under the Advertising Services Agreement — resources billed hourly or at monthly rates (pick inside).",
     },
     "agy_sow": {
-        "dir": "agency", "kind": "sow", "mode": "hourly", "icon": "📝",
+        "dir": "agency", "kind": "sow", "mode": "hourly", "icon": "🤝",
         "label": "Statement of Work",
         "desc": "Vendor SOW under the vendor's MSA — resources billed hourly or at monthly rates (pick inside).",
     },
@@ -828,9 +828,9 @@ select.slot{cursor:pointer}
 def _shell(user, title, body, wide=False):
     return f"""<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>📝 {_esc(title)} · Wayfinder</title><link rel="stylesheet" href="/static/style.css">
+<title>🤝 {_esc(title)} · Wayfinder</title><link rel="stylesheet" href="/static/style.css">
 <style>{_CSS}{_CTR_CSS}</style></head><body>
-<nav><span class="nav-brand">📝 SOW Assistant</span>
+<nav><span class="nav-brand">🤝 Deal Desk</span>
 <span class="nav-user">👤 {_esc(user)} &nbsp;·&nbsp; <a href="/logout">Logout</a></span></nav>
 <div class="container" style="max-width:{'1800px' if wide else '1000px'}">{body}</div></body></html>"""
 
@@ -989,11 +989,12 @@ function delSow(id){
 
 def _render_landing(user):
     data = _load(user)
+    _migrate_contract_texts(user, data)
     rows = _sow_rows(user, data)
     contracts = _render_contracts_section(user, data)
     body = f"""
-<h1 style="margin:8px 0 4px">Statements of Work</h1>
-<p style="color:var(--text-muted);font-size:.86rem;margin-bottom:6px">Who is this SOW with?</p>
+<h1 style="margin:8px 0 4px">Deal Desk</h1>
+<p style="color:var(--text-muted);font-size:.86rem;margin-bottom:6px">Draft a new SOW — who is it with?</p>
 <div class="sow-hero">
   <a class="dir-card" href="/sow/types?dir=sea" style="--dir-color:#38bdf8">
     <span class="dir-icon">🔵</span>
@@ -1018,7 +1019,7 @@ def _render_landing(user):
 <div class="cmodal-ov" id="cmodalOv"><div class="cmodal" id="cmodal"></div></div>
 {_DEL_JS}
 {_CTR_JS}"""
-    return _shell(user, "SOW Assistant", body)
+    return _shell(user, "Deal Desk", body)
 
 
 def _person_docs(data, person):
@@ -2094,6 +2095,42 @@ def _contract_file_path(user, c):
     return os.path.join(_contracts_dir(user), f"{c['id']}.{c.get('ext', 'bin')}")
 
 
+def _contract_text_path(user, c):
+    return os.path.join(_contracts_dir(user), f"{c['id']}.txt")
+
+
+def _contract_text(user, c):
+    """Extracted text lives in a sidecar .txt (older records carried it inline
+    in sow.json as raw_text — migrated lazily on save paths)."""
+    if c.get("raw_text"):
+        return c["raw_text"]
+    try:
+        with open(_contract_text_path(user, c), encoding="utf-8") as fp:
+            return fp.read()
+    except OSError:
+        return ""
+
+
+def _store_contract_text(user, c, text):
+    """Write the sidecar and keep the record lean (no raw_text in sow.json —
+    a few 200k-char bodies made every _load reparse megabytes of JSON)."""
+    os.makedirs(_contracts_dir(user), exist_ok=True)
+    with open(_contract_text_path(user, c), "w", encoding="utf-8") as fp:
+        fp.write(text[:200000])
+    c.pop("raw_text", None)
+
+
+def _migrate_contract_texts(user, data):
+    """One-time move of inline raw_text blobs out of sow.json."""
+    dirty = False
+    for c in data.get("contracts", []):
+        if "raw_text" in c:
+            _store_contract_text(user, c, c.get("raw_text") or "")
+            dirty = True
+    if dirty:
+        _save(user, data)
+
+
 _ALLOWED_EXT = {"pdf", "docx", "doc", "txt"}
 
 
@@ -2392,21 +2429,42 @@ _SIDE_META = {
 }
 
 
-def _contract_card(c, draggable=False):
+def _contract_card(c, draggable=False, show_title=True):
     label, chip, color, icon = _SIDE_META.get(c.get("side"), _SIDE_META["sea"])
     parties = c.get("vendor") or c.get("client") or "—"
     drag = ' draggable="true"' if draggable else ""
+    title = ""
+    if show_title:
+        title = (f'<div class="ctr-title">'
+                 f'{_esc(c.get("project_name") or c.get("filename") or "(untitled contract)")}</div>')
     return (
         f'<div class="ctr-card" data-cid="{c["id"]}"{drag} '
         f'onclick="openContract(\'{c["id"]}\')" style="cursor:pointer">'
         + ('<span class="ctr-grip">⠿</span>' if draggable else '')
         + f'<div class="ctr-top"><span class="dir-chip {chip}">{icon} {label}</span>'
         f'<span class="ctr-amt">{_esc(c.get("amount") or "")}</span></div>'
-        f'<div class="ctr-title">{_esc(c.get("project_name") or c.get("filename") or "(untitled contract)")}</div>'
+        f'{title}'
         f'<div class="ctr-meta">{_esc(parties)}'
         + (f' · {_esc(c.get("period_start"))}' if c.get("period_start") else "")
         + (f' ~ {_esc(c.get("period_end"))}' if c.get("period_end") else "")
         + '</div></div>')
+
+
+def _group_rollup(sea, kids):
+    """SEA amount vs the sum of aligned vendor amounts → margin chips."""
+    sea_amt = _num_or_none(sea.get("amount"))
+    kid_amts = [a for a in (_num_or_none(k.get("amount")) for k in kids)
+                if a is not None]
+    parts = []
+    if kid_amts:
+        vsum = sum(kid_amts)
+        parts.append(f'<span class="ctr-chip">Vendors {_money(vsum)}</span>')
+        if sea_amt is not None:
+            margin = sea_amt - vsum
+            pct = f" · {margin / sea_amt * 100:.0f}%" if sea_amt else ""
+            cls = "pos" if margin >= 0 else "neg"
+            parts.append(f'<span class="ctr-chip {cls}">Margin {_money(margin)}{pct}</span>')
+    return "".join(parts)
 
 
 def _render_contracts_section(user, data):
@@ -2416,17 +2474,23 @@ def _render_contracts_section(user, data):
         kid_cards = "".join(_contract_card(v, draggable=True) for v in kids)
         empty = ('<div class="ctr-drop-hint">Drag vendor contracts here</div>'
                  if not kids else "")
+        gname = _esc(sea.get("project_name") or sea.get("filename") or "(untitled contract)")
         gblocks.append(
-            f'<div class="ctr-group">{_contract_card(sea)}'
-            f'<div class="ctr-children" data-seadrop data-sea="{sea["id"]}">'
-            f'{kid_cards}{empty}</div></div>')
+            f'<div class="ctr-group">'
+            f'<div class="ctr-group-hd"><span class="ctr-group-name">{gname}</span>'
+            f'{_group_rollup(sea, kids)}</div>'
+            f'<div class="ctr-group-body">'
+            f'<div class="ctr-sea-col">{_contract_card(sea, show_title=False)}</div>'
+            f'<div class="ctr-ven-col" data-seadrop data-sea="{sea["id"]}">'
+            f'{kid_cards}{empty}</div>'
+            f'</div></div>')
     groups_html = "".join(gblocks) or (
         '<div class="sow-meta" style="padding:22px;text-align:center">'
         'No SEA↔Cheil contracts yet — upload one to start a group.</div>')
     orphan_html = (
         '<div class="ctr-orphans" data-seadrop data-sea="">'
         '<div class="ctr-orphan-hd">Unlinked vendor contracts '
-        '<span>· drag onto a SEA↔Cheil contract above to align them</span></div>'
+        '<span>· drag onto a group above to align them</span></div>'
         + ("".join(_contract_card(c, draggable=True) for c in orphans)
            if orphans else '<div class="ctr-drop-hint">None — drop a vendor card here to unlink it</div>')
         + '</div>')
@@ -2476,42 +2540,53 @@ def _render_contract_frag(user, data, cid):
                        (c, []))
         if kids:
             items = "".join(
-                f'<li>{_esc(k.get("project_name") or k.get("filename"))}'
-                f' <span class="sow-meta">{_esc(k.get("vendor") or "")}</span></li>' for k in kids)
-            link_html = (f'<div class="ctr-linkbox"><b>Aligned vendor contracts ({len(kids)}):</b>'
+                f'<li><span>{_esc(k.get("project_name") or k.get("filename"))}'
+                f' <span class="sow-meta">{_esc(k.get("vendor") or "")}</span></span>'
+                f'<b>{_esc(k.get("amount") or "—")}</b></li>' for k in kids)
+            rollup = _group_rollup(c, kids)
+            link_html = (f'<div class="ctr-linkbox"><b>Aligned vendor contracts ({len(kids)})'
+                         f'{("&nbsp;" + rollup) if rollup else ""}</b>'
                          f'<ul class="ctr-kidlist">{items}</ul>'
-                         '<div class="sow-meta">Drag a vendor card onto this contract to add more.</div></div>')
+                         '<div class="sow-meta">Drag a vendor card onto this group to add more.</div></div>')
         else:
             link_html = ('<div class="sow-meta" style="margin-top:16px;padding-top:14px;'
                          'border-top:1px solid var(--border)">No vendor contracts aligned yet — '
-                         'drag a vendor card onto this contract on the main screen.</div>')
+                         'drag a vendor card onto this group on the main screen.</div>')
 
     def fld(lbl, key, val):
         return (f'<label class="ctr-fld"><span>{lbl}</span>'
                 f'<input class="slot" name="{key}" value="{_esc(val)}"></label>')
 
-    preview = _esc((c.get("raw_text") or "")[:6000])
+    # side-aware fields: the Cheil entity is a constant on both sides, and a
+    # vendor deal's payer is always Cheil — neither is worth an editable box.
+    if c.get("side") == "vendor":
+        party_fld = fld("Vendor / Contractor", "vendor", c.get("vendor"))
+        parties_note = f"{CHEIL_ENTITY} (payer) ↔ {c.get('vendor') or 'vendor'}"
+    else:
+        party_fld = fld("Client (payer)", "client", c.get("client") or SAMSUNG_ENTITY)
+        parties_note = f"{c.get('client') or SAMSUNG_ENTITY} ↔ {CHEIL_ENTITY} (agency)"
+    uploaded = (c.get("uploaded") or "")[:10]
+    preview = _esc(_contract_text(user, c)[:6000])
     return f"""
 <div class="cmodal-head">
   <span class="dir-chip {chip}">{icon} {label}</span>
-  <span class="cmodal-file">{_esc(c.get("filename") or "")}</span>
+  <span class="cmodal-file">{_esc(c.get("filename") or "")}{(' · ' + uploaded) if uploaded else ''}</span>
   <button class="cmodal-x" onclick="closeContract()">✕</button>
 </div>
 <div class="cmodal-body">
+  <div class="ctr-parties">{_esc(parties_note)}</div>
   <form onsubmit="ctrSave('{c['id']}');return false" class="ctr-form">
     <div class="ctr-grid">
-      {fld("Client (payer)", "client", c.get("client"))}
-      {fld("Agency", "agency", c.get("agency"))}
-      {fld("Vendor / Contractor", "vendor", c.get("vendor"))}
-      {fld("Contract amount", "amount", c.get("amount"))}
-      {fld("Period start", "period_start", c.get("period_start"))}
-      {fld("Period end", "period_end", c.get("period_end"))}
       {fld("Project name", "project_name", c.get("project_name"))}
+      {party_fld}
+      {fld("Contract amount", "amount", c.get("amount"))}
       <label class="ctr-fld"><span>Side</span>
         <select class="slot" name="side">
           <option value="sea"{' selected' if c.get('side')=='sea' else ''}>SEA ↔ Cheil</option>
           <option value="vendor"{' selected' if c.get('side')=='vendor' else ''}>Cheil ↔ Vendor</option>
         </select></label>
+      {fld("Period start", "period_start", c.get("period_start"))}
+      {fld("Period end", "period_end", c.get("period_end"))}
     </div>
     <div class="ctr-actions">
       <button class="btn btn-primary btn-sm" type="submit">💾 Save fields</button>
@@ -2531,11 +2606,17 @@ _CTR_CSS = """
 .ctr-dropzone b{color:var(--text)}
 .ctr-dropzone.drag-over{border-color:var(--accent);background:rgba(56,189,248,.10);color:var(--text)}
 .ctr-groups{display:flex;flex-direction:column;gap:16px}
-.ctr-group{background:var(--surface-2,var(--surface));border:1px solid var(--border);border-radius:var(--radius-xl);padding:12px}
-.ctr-group>.ctr-card{border-left:3px solid #38bdf8}
-.ctr-children{display:flex;flex-direction:column;gap:8px;margin:10px 0 2px 20px;padding:8px;border-left:2px dashed var(--border);border-radius:0 var(--radius-md) var(--radius-md) 0;min-height:20px;transition:.15s}
-.ctr-children.drag-over,.ctr-orphans.drag-over{background:rgba(56,189,248,.10);border-color:var(--accent)}
-.ctr-children .ctr-card{border-left:3px solid #fb923c}
+.ctr-group{background:var(--surface-2,var(--surface));border:1px solid var(--border);border-radius:var(--radius-xl);padding:14px 16px}
+.ctr-group-hd{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.ctr-group-name{font-size:1.02rem;font-weight:800;letter-spacing:-.01em;color:var(--text)}
+.ctr-chip{font-size:.68rem;font-weight:700;padding:3px 10px;border-radius:10px;background:var(--surface);border:1px solid var(--border);color:var(--text-muted);font-variant-numeric:tabular-nums}
+.ctr-chip.pos{color:var(--success);border-color:rgba(52,211,153,.35)}
+.ctr-chip.neg{color:var(--danger);border-color:rgba(248,113,113,.4)}
+.ctr-group-body{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:14px;align-items:start}
+.ctr-sea-col .ctr-card{border-left:3px solid #38bdf8}
+.ctr-ven-col{display:flex;flex-direction:column;gap:8px;min-height:40px;padding:6px;border:1px dashed transparent;border-radius:var(--radius-md);transition:.15s}
+.ctr-ven-col.drag-over,.ctr-orphans.drag-over{background:rgba(56,189,248,.10);border-color:var(--accent)}
+.ctr-ven-col .ctr-card{border-left:3px solid #fb923c}
 .ctr-drop-hint{font-size:.72rem;color:var(--text-muted);font-style:italic;padding:6px 4px}
 .ctr-orphans{margin-top:16px;padding:12px;border:1px dashed var(--border-bright);border-radius:var(--radius-lg);display:flex;flex-direction:column;gap:8px;transition:.15s}
 .ctr-orphan-hd{font-size:.74rem;font-weight:700;color:var(--text)}
@@ -2549,8 +2630,10 @@ _CTR_CSS = """
 .ctr-amt{font-weight:800;color:var(--success);font-variant-numeric:tabular-nums;font-size:.86rem}
 .ctr-title{font-weight:700;font-size:.9rem;color:var(--text);margin-bottom:3px}
 .ctr-meta{font-size:.74rem;color:var(--text-muted)}
-.ctr-kidlist{margin:8px 0 0;padding-left:18px;font-size:.82rem}
-.ctr-kidlist li{margin-bottom:4px}
+.ctr-kidlist{margin:8px 0 0;padding:0;list-style:none;font-size:.82rem}
+.ctr-kidlist li{display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-bottom:1px dashed var(--border)}
+.ctr-kidlist li b{font-variant-numeric:tabular-nums;color:var(--success);white-space:nowrap}
+.ctr-parties{font-size:.78rem;color:var(--text-muted);margin-bottom:12px}
 .cmodal-ov{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:flex-start;justify-content:center;z-index:200;padding:40px 16px;overflow-y:auto}
 .cmodal-ov.show{display:flex}
 .cmodal{background:var(--surface);border:1px solid var(--border-bright);border-radius:var(--radius-xl);max-width:720px;width:100%;box-shadow:var(--shadow-lg)}
@@ -2569,7 +2652,7 @@ _CTR_CSS = """
 .ctr-prev{margin-top:14px}
 .ctr-prev summary{cursor:pointer;font-size:.8rem;color:var(--text-muted)}
 .ctr-prev pre{white-space:pre-wrap;font-size:.72rem;max-height:300px;overflow:auto;background:var(--surface-2,var(--surface));border:1px solid var(--border);border-radius:8px;padding:10px;margin-top:8px}
-@media(max-width:768px){.ctr-children{margin-left:8px}.ctr-grid{grid-template-columns:1fr}}
+@media(max-width:768px){.ctr-group-body{grid-template-columns:1fr}.ctr-grid{grid-template-columns:1fr}}
 """
 
 _CTR_JS = """<script>
@@ -2681,7 +2764,7 @@ def handle(method, path, body, ctx):
         data = _load(user)
         rec = {"id": cid, "filename": fn, "ext": ext,
                "uploaded": datetime.now().isoformat(timespec="seconds"),
-               "raw_text": text[:200000], "linked_id": None}
+               "linked_id": None}
         rec.update({k: fields.get(k, "") for k in
                     ("client", "agency", "vendor", "amount",
                      "period_start", "period_end", "project_name", "side")})
@@ -2689,6 +2772,7 @@ def handle(method, path, body, ctx):
             os.makedirs(_contracts_dir(user), exist_ok=True)
             with open(_contract_file_path(user, rec), "wb") as fp:
                 fp.write(content)
+            _store_contract_text(user, rec, text)
         except OSError:
             return ("redirect", "/sow")
         data.setdefault("contracts", []).append(rec)
@@ -2700,12 +2784,12 @@ def handle(method, path, body, ctx):
         c = _contract_by_id(data, _f(body, "id"))
         if c:
             # re-read the ORIGINAL file so extractor improvements reach already
-            # uploaded contracts (stored raw_text may be an old under-read)
-            text = c.get("raw_text") or ""
+            # uploaded contracts (the stored text may be an old under-read)
+            text = _contract_text(user, c)
             try:
                 with open(_contract_file_path(user, c), "rb") as fp:
                     text = _extract_text(fp.read(), c.get("ext", "bin"))
-                c["raw_text"] = text[:200000]
+                _store_contract_text(user, c, text)
             except OSError:
                 pass
             fields = _extract_fields_best(text)
@@ -2719,10 +2803,16 @@ def handle(method, path, body, ctx):
         data = _load(user)
         c = _contract_by_id(data, _f(body, "id"))
         if c:
-            for k in ("client", "agency", "vendor", "amount",
+            # only fields the (side-aware) form actually submitted — the other
+            # side's party box isn't rendered and must not be wiped
+            for k in ("client", "vendor", "amount",
                       "period_start", "period_end", "project_name"):
-                c[k] = _f(body, k)
+                if k in body:
+                    c[k] = _f(body, k)
             c["side"] = "vendor" if _f(body, "side") == "vendor" else "sea"
+            c["agency"] = CHEIL_ENTITY
+            if c["side"] == "vendor":
+                c["client"] = CHEIL_ENTITY
             _save(user, data)
         return ("redirect", "/sow")
 
@@ -2758,10 +2848,11 @@ def handle(method, path, body, ctx):
             for other in data["contracts"]:
                 if other.get("linked_id") == c["id"]:
                     other["linked_id"] = None
-            try:
-                os.remove(_contract_file_path(user, c))
-            except OSError:
-                pass
+            for p in (_contract_file_path(user, c), _contract_text_path(user, c)):
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
             data["contracts"] = [x for x in data["contracts"] if x["id"] != c["id"]]
             _save(user, data)
         return ("redirect", "/sow")

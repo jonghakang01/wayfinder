@@ -17,7 +17,7 @@ def test_meta_is_valid():
 def test_get_renders_html():
     kind, html = _mod().handle("GET", "/sow", {}, {"user": "__testuser__"})
     assert kind == "html"
-    assert "SOW Assistant" in html
+    assert "Deal Desk" in html
 
 
 def test_schedule_matches_executed_data_engineer_sow():

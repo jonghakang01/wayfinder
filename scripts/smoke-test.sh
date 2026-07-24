@@ -50,7 +50,7 @@ check "Terminals (auth required)" "$BASE/terminals"        "302"
 check "Design System (auth required)"    "$BASE/design"    "302"
 check "Matter Tracker (auth required)"    "$BASE/matters"   "302"
 check "Notebot (auth required)"    "$BASE/notebot"    "302"
-check "SOW Assistant (auth required)"    "$BASE/sow"    "302"
+check "Deal Desk (auth required)"    "$BASE/sow"    "302"
 echo ""
 echo "Result: $PASS passed, $FAIL failed"
 if [ $FAIL -gt 0 ]; then
