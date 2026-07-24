@@ -23,7 +23,8 @@ APP_LABELS = {
 }
 
 
-def _notify_admin_signup(email: str, services_list: list):
+def _notify_admin_signup(email: str, services_list: list,
+                         office: str = "", google_account: str = ""):
     """Best-effort admin alert on a new signup — sent from a daemon thread so
     the signup response never waits on the network. Telegram (bridge bot,
     TELEGRAM_TOKEN + TG_ADMIN_CHAT_ID) is the primary channel; Gmail SMTP
@@ -32,6 +33,10 @@ def _notify_admin_signup(email: str, services_list: list):
     def _send():
         svcs = ", ".join(services_list) or "(none)"
         when = datetime.now().strftime("%Y-%m-%d %H:%M")
+        extra_tg = (f"\n소속: {office or '(미선택)'}"
+                    f"\nGoogle 계정: {google_account or '(미기입)'}")
+        extra_mail = (f"<li><b>Office:</b> {office or '(not selected)'}</li>"
+                      f"<li><b>Google account:</b> {google_account or '(not given)'}</li>")
         try:
             tok  = os.environ.get("TELEGRAM_TOKEN", "")
             chat = os.environ.get("TG_ADMIN_CHAT_ID", "")
@@ -40,7 +45,7 @@ def _notify_admin_signup(email: str, services_list: list):
                 data = urllib.parse.urlencode({
                     "chat_id": chat,
                     "text": (f"👤 Wayfinder 신규 가입\n"
-                             f"이메일: {email}\n서비스: {svcs}\n{when} (server)"),
+                             f"이메일: {email}\n서비스: {svcs}{extra_tg}\n{when} (server)"),
                 }).encode()
                 urllib.request.urlopen(
                     f"https://api.telegram.org/bot{tok}/sendMessage",
@@ -54,7 +59,7 @@ def _notify_admin_signup(email: str, services_list: list):
                 f"[Wayfinder] New signup: {email}",
                 f"<h3>New user signed up</h3>"
                 f"<ul><li><b>Email:</b> {email}</li>"
-                f"<li><b>Services:</b> {svcs}</li>"
+                f"<li><b>Services:</b> {svcs}</li>{extra_mail}"
                 f"<li><b>At:</b> {when} (server time)</li></ul>"
                 f"<p><a href='http://134.209.62.57:8080/admin'>Open admin</a></p>")
         except Exception:
@@ -235,6 +240,10 @@ def save_users(users):
         json.dump(users, f, ensure_ascii=False, indent=2)
 
 
+# 소속(오피스) preset — admin 지정·가입 폼 공용 (강프로 2026-07-24)
+OFFICES = ["Dallas", "New York", "Mountain View", "Canada"]
+
+
 def hash_pw(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
@@ -351,6 +360,12 @@ def handle(method, path, body, ctx=None):
                 return ("html", render_login(
                     register_error="이미 가입된 이메일입니다. 로그인하세요.", app=app))
             role = "admin" if email == ADMIN_EMAIL else "user"
+            office = body.get("company", [""])[0].strip()
+            if office not in OFFICES:
+                office = ""
+            google_acct = body.get("google_account", [""])[0].strip()
+            if google_acct and "@" not in google_acct:
+                google_acct = ""
             # All signups are auto-approved (open). An app link fixes the one
             # service; a bare signup grants whichever live services were ticked.
             if app:
@@ -362,9 +377,10 @@ def handle(method, path, body, ctx=None):
             users[key] = {
                 "pw": pw_hash, "role": role,
                 "email": email, "services": services_list, "blocked": False,
+                "company": office, "drive_account": google_acct,
             }
             save_users(users)
-            _notify_admin_signup(email, services_list)
+            _notify_admin_signup(email, services_list, office, google_acct)
         else:
             key = _resolve_login(email)
             if not key:
@@ -428,6 +444,19 @@ def render_login(error="", register_error="", app=""):
         signup_title = "새 계정 만들기"
         app_hidden = ""
 
+    office_label = "Office" if t["lang"] == "en" else "소속 (오피스)"
+    office_default = "— Select office —" if t["lang"] == "en" else "— 소속 선택 —"
+    office_opts = f'<option value="">{office_default}</option>' + "".join(
+        f'<option value="{o}">{o}</option>' for o in OFFICES)
+    office_html = (f'<div class="field"><label>{office_label}</label>'
+                   f'<select name="company" class="office-sel">{office_opts}</select></div>')
+    if t["lang"] == "en":
+        g_label, g_ph = "Google account (for Drive sync, optional)", "you@gmail.com"
+    else:
+        g_label, g_ph = "Google 계정 (Drive 연동용, 선택)", "you@gmail.com"
+    office_html += (f'<div class="field"><label>{g_label}</label>'
+                    f'<input type="email" name="google_account" placeholder="{g_ph}"></div>')
+
     err = f'<div class="error">{error}</div>' if error else ""
     reg_err = f'<div class="error">{register_error}</div>' if register_error else ""
 
@@ -447,6 +476,8 @@ h2{{font-size:15px;font-weight:600;color:#8b949e;margin-bottom:20px}}
 label{{display:block;font-size:13px;color:#8b949e;margin-bottom:6px}}
 input[type=text],input[type=password],input[type=email]{{width:100%;padding:10px 14px;background:#0d1117;border:1px solid #30363d;border-radius:8px;color:#e6edf3;font-size:14px;outline:none;transition:border-color .15s}}
 input[type=text]:focus,input[type=password]:focus,input[type=email]:focus{{border-color:#58a6ff}}
+select.office-sel{{width:100%;padding:10px 14px;background:#0d1117;border:1px solid #30363d;border-radius:8px;color:#e6edf3;font-size:14px;outline:none}}
+select.office-sel:focus{{border-color:#58a6ff}}
 .btn-login{{width:100%;padding:11px;background:linear-gradient(135deg,#1f6feb,#388bfd);color:#fff;border:none;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;margin-top:4px;transition:filter .15s}}
 .btn-register{{width:100%;padding:11px;background:#21262d;color:#e6edf3;border:1px solid #30363d;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;margin-top:4px;transition:filter .15s}}
 .btn-login:hover,.btn-register:hover{{filter:brightness(1.15)}}
@@ -480,6 +511,7 @@ input[type=text]:focus,input[type=password]:focus,input[type=email]:focus{{borde
       <input type="hidden" name="action" value="register">
       <div class="field"><label>{t["email"]}</label><input type="email" name="email" autocomplete="email" placeholder="you@example.com"></div>
       <div class="field"><label>{t["pw"]}</label><input type="password" name="password" autocomplete="new-password" placeholder="••••••••"></div>
+      {office_html}
       {svc_html}
       <button class="btn-register" type="submit">{t["signup"]}</button>
     </form>

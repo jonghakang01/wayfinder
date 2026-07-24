@@ -38,6 +38,8 @@ def handle(method, path, body, ctx=None):
         if target in users:
             for k in ("company", "department", "drive_account"):
                 users[target][k] = body.get(k, [""])[0].strip()
+            if users[target]["company"] not in auth.OFFICES:
+                users[target]["company"] = ""
             auth.save_users(users)
         return ("redirect", "/admin")
 
@@ -173,9 +175,13 @@ def render_admin(current_user, notify_result=""):
         drive_guess = ""
         if not drive and _drive_token_exists(username):
             drive_guess = email_raw if "@" in email_raw else (username if "@" in username else "")
+        cur_office = info.get("company", "")
+        office_opts = '<option value="">— 소속 —</option>' + "".join(
+            f'<option value="{o}"{" selected" if o == cur_office else ""}>{o}</option>'
+            for o in auth.OFFICES)
         profile_col = f'''<form method="POST" action="/admin/set_profile" class="prof-form">
           <input type="hidden" name="username" value="{username}">
-          <input name="company" value="{info.get("company", "")}" placeholder="소속 (예: Cheil USA)">
+          <select name="company">{office_opts}</select>
           <input name="department" value="{info.get("department", "")}" placeholder="부서">
           <input name="drive_account" value="{drive or drive_guess}" placeholder="Drive 연동 Google 계정"
             {'style="color:#94a3b8" title="추정값(미저장) — 저장을 눌러 확정"' if (not drive and drive_guess) else 'title="Google Drive를 연동한 Google 계정"'}>
@@ -327,7 +333,7 @@ def render_admin(current_user, notify_result=""):
 <title>⚙️ 관리자 페이지</title>
 <link rel="stylesheet" href="/static/style.css">
 <style>
-.container{{ max-width: 980px; }}
+.container{{ max-width: 1500px; }}
 h1{{ margin-top: 0; padding-top: 40px; }}
 h2{{ font-size:16px;font-weight:700;color:#1e293b;margin-bottom:14px }}
 .summary{{display:flex;gap:12px;margin-bottom:24px;flex-wrap:wrap}}
@@ -337,8 +343,8 @@ h2{{ font-size:16px;font-weight:700;color:#1e293b;margin-bottom:14px }}
 .tbl-wrap{{background:white;border:1px solid #e2e8f0;border-radius:12px;overflow:auto;margin-bottom:32px}}
 table{{width:100%;border-collapse:collapse;min-width:900px}}
 .prof-form{{display:flex;flex-direction:column;gap:4px;min-width:170px}}
-.prof-form input{{padding:4px 8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;outline:none}}
-.prof-form input:focus{{border-color:#3b82f6}}
+.prof-form input,.prof-form select{{padding:4px 8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;outline:none;background:white;color:#1e293b}}
+.prof-form input:focus,.prof-form select:focus{{border-color:#3b82f6}}
 .prof-form .svc-save-btn{{align-self:flex-start}}
 thead tr{{background:#f8fafc}}
 th{{text-align:left;padding:12px 16px;font-size:12px;color:#64748b;text-transform:uppercase;letter-spacing:.5px;font-weight:600;border-bottom:1px solid #e2e8f0;white-space:nowrap}}
