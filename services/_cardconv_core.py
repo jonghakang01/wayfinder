@@ -694,6 +694,18 @@ def _handle_ocr_staging_confirm(username: str, body: dict):
         entry["ocr_final_amount"] = hw if hw is not None else pr
         confirmed.append(entry)
 
+    # Server-side guard (강프로 2026-07-24): a cash receipt cannot enter the
+    # ledger without its Reason for Cash — it feeds SAP column S at export.
+    no_reason = [e for e in confirmed
+                 if e.get("card_brand") == "other"
+                 and not (e.get("cash_reason") or "").strip()]
+    if no_reason:
+        if is_ajax:
+            return ("json", {"ok": False, "error":
+                             f"Reason for Cash is required for cash receipts "
+                             f"({len(no_reason)} missing)."})
+        return ("redirect", "/cardconv/receipts/review?need_reason=1")
+
     if confirmed:
         receipts = _load_receipts(username)
         receipts.extend(confirmed)
@@ -817,7 +829,11 @@ def _key_norm(k) -> tuple:
     a different account across exports — and merchant whitespace is collapsed
     (the Master xlsx pads fields with space runs that the Posted CSV doesn't).
     """
-    k = tuple(k)
+    k = tuple(k or ())
+    if len(k) < 2:
+        # keyless pool rows (e.g. synthetic cash mirrors) can never dedupe a
+        # real statement row — return a sentinel no CSV row will produce
+        return ("", "", "")
     date, amt = k[0], k[1]
     merchant = re.sub(r"\s+", " ", k[3] if len(k) > 3 else "").strip().upper()
     return (date, amt, merchant)
@@ -1329,7 +1345,8 @@ def _ingest_csv(username: str, csv_bytes: bytes, filename: str) -> dict:
     """Merge a CSV into the pool. Returns {"added", "dup_skipped", "matched"}."""
     pool = _load_tx_pool(username)
     rows = _parse_member_rows(csv_bytes, username)
-    existing = Counter(tuple(e.get("key", [])) for e in pool["entries"])
+    existing = Counter(k for k in (tuple(e.get("key") or ()) for e in pool["entries"])
+                       if len(k) >= 2)
     fresh, dup_skipped = _dedup_rows(rows, existing)
 
     rules = _load_kw()

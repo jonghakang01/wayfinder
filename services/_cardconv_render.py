@@ -2179,6 +2179,21 @@ def _render_ocr_staging_review(user: str) -> str:
   </form>
 </div>
 <script>
+// Cash rows must carry a Reason for Cash before confirm (fills SAP col S).
+document.getElementById('stgForm').addEventListener('submit', function(ev) {{
+  var missing = [];
+  document.querySelectorAll('input[name^="cash_reason_"]').forEach(function(inp) {{
+    var id = inp.name.slice('cash_reason_'.length);
+    var cb = document.querySelector('input[name="confirmed"][value="' + id + '"]');
+    if (cb && cb.checked && !inp.value.trim()) {{ missing.push(inp); inp.style.borderColor = '#ef4444'; }}
+  }});
+  if (missing.length) {{
+    ev.preventDefault();
+    missing[0].scrollIntoView({{behavior: 'smooth', block: 'center'}});
+    missing[0].focus();
+    alert('Reason for Cash is required for the checked cash receipts (' + missing.length + ' missing).');
+  }}
+}});
 // A failed thumbnail shows a visible fallback (never a silent black box).
 function stgImgFail(img) {{
   const drive = img.dataset.drive;
@@ -3991,11 +4006,30 @@ function _imgLbKey(e){ if(e.key==='Escape') closeImgLb(); }
       acc.push(item);
       return acc;
     }, []);
+    // Cash receipts must carry a Reason for Cash (SAP col S) before confirm.
+    var missing = confirmed.filter(function(it) {
+      return it.card_brand === 'other' && !(it.cash_reason || '').trim();
+    });
+    if (missing.length) {
+      missing.forEach(function(it) {
+        var card = document.querySelector('.ocr-card[data-id="' + it.id + '"]');
+        var inp = card && card.querySelector('.ocr-field[data-field="cash_reason"]');
+        if (inp) { inp.style.borderColor = '#ef4444'; }
+      });
+      var first = document.querySelector('.ocr-card[data-id="' + missing[0].id + '"] .ocr-field[data-field="cash_reason"]');
+      if (first) first.focus();
+      alert('Reason for Cash is required for cash receipts (' + missing.length + ' missing) — it fills the SAP upload column.');
+      return;
+    }
     fetch('/cardconv/receipts/review/confirm', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({confirmed: confirmed})
-    }).then(function() { closeOcrModal(); clearOcrBadge(); load(); });
+    }).then(function(r) { return r.json().catch(function() { return {}; }); })
+      .then(function(d) {
+        if (d && d.ok === false) { alert(d.error || 'Confirm failed.'); return; }
+        closeOcrModal(); clearOcrBadge(); load();
+      });
   };
 
   overlay.addEventListener('click', function(e) { if (e.target === overlay) closeOcrModal(); });
