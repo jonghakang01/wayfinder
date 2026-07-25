@@ -1523,25 +1523,31 @@ def _render_person_detail(user, person, saved=False):
             f'<span style="color:var(--text-muted);font-size:.72rem">{_esc(c.get("vendor") or c.get("client") or "")}</span>'
             f'{act}</label>')
 
-    # 투입 프로젝트 = contract-driven dropdown (강프로 2026-07-24): options are
-    # the contracts' project names; picking one auto-links that contract (and
-    # its SEA parent for vendor deals) via the checkboxes below.
+    # 투입 프로젝트 = contract-driven dropdown (강프로 2026-07-24): one option
+    # per CONTRACT (several vendor deals can share a project name — the party
+    # tells them apart). Picking one auto-links that contract (and its SEA
+    # parent) via the checkboxes below; the server mirrors the same rule.
     cur_proj = (p.get("project") or "").strip()
-    seen_proj, proj_items = set(), []
+    linked_now = set(p.get("linked_contracts") or [])
+    sel_val, proj_items = None, []
     for c in data.get("contracts", []):
         pn = (c.get("project_name") or "").strip()
-        if not pn or pn.lower() in seen_proj:
+        if not pn:
             continue
-        seen_proj.add(pn.lower())
         _, _, _, icon2 = _SIDE_META.get(c.get("side"), _SIDE_META["sea"])
+        party = c.get("vendor") or c.get("client") or ""
+        val = "ctr:" + c["id"]
+        if sel_val is None and pn == cur_proj and (not linked_now or c["id"] in linked_now):
+            sel_val = val
         proj_items.append(
-            f'<option value="{_esc(pn)}" data-cid="{c["id"]}" '
-            f'data-parent="{_esc(c.get("linked_id") or "")}"'
-            f'{" selected" if pn == cur_proj else ""}>{icon2} {_esc(pn)}</option>')
+            f'<option value="{val}" data-cid="{c["id"]}" '
+            f'data-parent="{_esc(c.get("linked_id") or "")}">'
+            f'{icon2} {(_esc(party) + " — ") if party else ""}{_esc(pn)}</option>')
     custom = ""
-    if cur_proj and cur_proj.lower() not in seen_proj:
-        custom = f'<option value="{_esc(cur_proj)}" selected>{_esc(cur_proj)}</option>'
-    proj_opts = '<option value="">— none —</option>' + custom + "".join(proj_items)
+    if cur_proj and sel_val is None:
+        custom = f'<option value="__keep__">{_esc(cur_proj)} (manual)</option>'
+        sel_val = "__keep__"
+    proj_opts = ('<option value="">— none —</option>' + custom + "".join(proj_items))         .replace(f'value="{sel_val}"', f'value="{sel_val}" selected', 1)         if sel_val else '<option value="" selected>— none —</option>' + "".join(proj_items)
 
     saved_banner = ('<div style="color:var(--success);font-size:.85rem;margin-bottom:12px">✓ Saved</div>'
                     if saved else "")
@@ -1563,7 +1569,7 @@ def _render_person_detail(user, person, saved=False):
       <select class="slot" style="width:100%" name="affiliation">{aff_sel}</select></div>
     {fld('Role / Title', 'role_title', 'e.g. Sr. Developer')}
     <div class="f-cell f-wide"><div style="font-size:.64rem;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:3px">투입 프로젝트 / SOW</div>
-      <select class="slot" style="width:100%" name="project" onchange="projPick(this)">{proj_opts}</select>
+      <select class="slot" style="width:100%" name="project_pick" onchange="projPick(this)">{proj_opts}</select>
       <div style="font-size:.68rem;color:var(--text-muted);margin-top:3px">Picking a contract project also ticks it under Linked contracts below (a vendor contract links its SEA deal too).</div></div>
     {fld('Location', 'location', 'US / India')}
   </div>
@@ -3725,6 +3731,18 @@ def handle(method, path, body, ctx):
             pid0 = (c0 or {}).get("linked_id")
             if pid0 and pid0 not in expanded:
                 expanded.append(pid0)
+        pick = _f(body, "project_pick")
+        if pick.startswith("ctr:"):
+            c0 = _contract_by_id(data, pick[4:])
+            if c0:
+                rec["project"] = (c0.get("project_name") or "").strip()
+                for cid2 in (c0["id"], c0.get("linked_id")):
+                    if cid2 and cid2 not in expanded:
+                        expanded.append(cid2)
+        elif pick == "__keep__":
+            rec["project"] = (cur or {}).get("project") or ""
+        else:
+            rec["project"] = ""
         rec["linked_contracts"] = expanded
         if not rec.get("project") and expanded:
             first = _contract_by_id(data, expanded[0])
