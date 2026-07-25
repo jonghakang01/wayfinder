@@ -1106,6 +1106,30 @@ def _dd_cashflow_section(data, year):
                 'light up the cashflow view.</div>')
     net = [b - p - s for b, p, s in zip(bill, pay, sal)]
 
+    # scope datasets: 전체 + active SEA 그룹별 (salaries are company-wide, so
+    # per-contract scopes show Net(margin) without the salary row)
+    def _year_slice(mmap):
+        out = [0.0] * 12
+        for (y, mo), v in (mmap or {}).items():
+            if y == year:
+                out[mo - 1] += v
+        return out
+
+    scopes = [("all", "All contracts", bill, pay, sal, True)]
+    for sea, kids in _contract_groups(data)[0]:
+        if _lifecycle(data, sea) != "active":
+            continue
+        b = _year_slice(_contract_month_amounts(sea))
+        p12 = [0.0] * 12
+        for k in kids:
+            if _lifecycle(data, k) == "active":
+                kb = _year_slice(_contract_month_amounts(k))
+                p12 = [a + x for a, x in zip(p12, kb)]
+        if any(b) or any(p12):
+            scopes.append((sea["id"],
+                           sea.get("project_name") or sea.get("filename") or sea["id"],
+                           b, p12, [0.0] * 12, False))
+
     def tile(lb, v, cls=""):
         return (f'<div class="dd-stat" style="cursor:default">'
                 f'<span class="lb">{lb}</span>'
@@ -1126,13 +1150,13 @@ def _dd_cashflow_section(data, year):
         return (f'<tr><td class="pin">{lb}</td>{cells}'
                 f'<td class="num tot {tot_cls}">{_money(sum(vals))}</td></tr>')
 
-    def net_row(vals):
+    def net_row(vals, label="Net after salaries"):
         cells = "".join(
             f'<td class="num {"pos" if v >= 0 else "neg"}">{_money(v)}</td>' for v in vals)
-        return (f'<tr class="net"><td class="pin">Net after salaries</td>{cells}'
+        return (f'<tr class="net"><td class="pin">{label}</td>{cells}'
                 f'<td class="num tot {"pos" if sum(vals) >= 0 else "neg"}">{_money(sum(vals))}</td></tr>')
 
-    def table(headers, b, p, s):
+    def table(headers, b, p, s, with_sal):
         n = [x - y - z for x, y, z in zip(b, p, s)]
         head = ('<tr><th class="pin"></th>'
                 + "".join(f'<th>{h}</th>' for h in headers)
@@ -1140,37 +1164,46 @@ def _dd_cashflow_section(data, year):
         return (f'<div class="cf-wrap"><table class="cf-table"><thead>{head}</thead><tbody>'
                 + row("🔵 Billed to SEA", b, "bill")
                 + row("🟠 Vendor payouts", p, "pay")
-                + row("💼 Salaries", s)
-                + net_row(n)
+                + (row("💼 Salaries", s) if with_sal else "")
+                + net_row(n, "Net after salaries" if with_sal else "Net (margin)")
                 + '</tbody></table></div>')
 
     q = lambda arr, i: sum(arr[i * 3:(i + 1) * 3])
-    q_table = table(["Q1", "Q2", "Q3", "Q4"],
-                    [q(bill, i) for i in range(4)],
-                    [q(pay, i) for i in range(4)],
-                    [q(sal, i) for i in range(4)])
-    m_table = table([date(year, m, 1).strftime("%b") for m in range(1, 13)],
-                    bill, pay, sal)
+    panes, opts = [], []
+    qh = ["Q1", "Q2", "Q3", "Q4"]
+    mh = [date(year, m, 1).strftime("%b") for m in range(1, 13)]
+    for sid, label, b, p12, s12, with_sal in scopes:
+        opts.append(f'<option value="{sid}">{_esc(label)}</option>')
+        panes.append(
+            f'<div class="cf-pane" data-scope="{sid}" data-freq="q">'
+            + table(qh, [q(b, i) for i in range(4)], [q(p12, i) for i in range(4)],
+                    [q(s12, i) for i in range(4)], with_sal) + '</div>'
+            f'<div class="cf-pane" data-scope="{sid}" data-freq="m" style="display:none">'
+            + table(mh, b, p12, s12, with_sal) + '</div>')
     return f"""
 {tiles}
-<div style="display:flex;align-items:center;gap:10px;margin:18px 0 10px">
+<div style="display:flex;align-items:center;gap:10px;margin:18px 0 10px;flex-wrap:wrap">
   <h2 style="font-size:1rem;font-weight:800;margin:0">📅 {year} Billing vs payout</h2>
+  <select id="cfScope" class="slot" style="max-width:340px" onchange="cfRender()">{''.join(opts)}</select>
   <span style="flex:1"></span>
   <span class="dd-tabs" style="padding:2px">
-    <button class="dd-tab active" id="cfQBtn" onclick="cfView('q')">Quarterly</button>
-    <button class="dd-tab" id="cfMBtn" onclick="cfView('m')">Monthly</button>
+    <button class="dd-tab active" id="cfQBtn" onclick="cfFreq='q';cfRender()">Quarterly</button>
+    <button class="dd-tab" id="cfMBtn" onclick="cfFreq='m';cfRender()">Monthly</button>
   </span>
 </div>
-<div id="cfQ">{q_table}</div>
-<div id="cfM" style="display:none">{m_table}</div>
-<div class="sow-meta" style="margin-top:8px">Contract totals spread evenly across each term (days/30 partial months) · salaries = roster monthly salary+OH held constant · documents without a parsed period or amount are omitted.</div>
+{''.join(panes)}
+<div class="sow-meta" style="margin-top:8px">Contract totals spread evenly across each term (days/30 partial months) · salaries = roster monthly salary+OH, shown in the All-contracts scope only · cancelled/superseded versions excluded.</div>
 <script>
-function cfView(v){{
-  document.getElementById('cfQ').style.display = v==='q' ? '' : 'none';
-  document.getElementById('cfM').style.display = v==='m' ? '' : 'none';
-  document.getElementById('cfQBtn').classList.toggle('active', v==='q');
-  document.getElementById('cfMBtn').classList.toggle('active', v==='m');
+var cfFreq='q';
+function cfRender(){{
+  var scope=document.getElementById('cfScope').value;
+  document.querySelectorAll('.cf-pane').forEach(function(el){{
+    el.style.display=(el.dataset.scope===scope&&el.dataset.freq===cfFreq)?'':'none';
+  }});
+  document.getElementById('cfQBtn').classList.toggle('active',cfFreq==='q');
+  document.getElementById('cfMBtn').classList.toggle('active',cfFreq==='m');
 }}
+cfRender();
 </script>"""
 
 
