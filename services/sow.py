@@ -1049,8 +1049,8 @@ def _landing_stats(data):
     contracts = data.get("contracts", [])
     active = 0
     for c in contracts:
-        if _lifecycle(data, c) != "active":
-            continue
+        if _lifecycle(data, c) != "active" or c.get("amends_id"):
+            continue  # amendments merge into their base contract
         s = _parse_any_date(c.get("period_start"))
         e = _parse_any_date(c.get("period_end"))
         if s and e and s <= today <= e:
@@ -1120,6 +1120,9 @@ def _dd_cashflow_section(data, year):
         if _lifecycle(data, sea) != "active":
             continue
         b = _year_slice(_contract_month_amounts(sea))
+        for a in _amendments_of(data, sea):
+            ab = _year_slice(_contract_month_amounts(a))
+            b = [x + y for x, y in zip(b, ab)]
         p12 = [0.0] * 12
         for k in kids:
             if _lifecycle(data, k) == "active":
@@ -1303,7 +1306,8 @@ def _render_people_by_contract(data):
         e = _parse_any_date(c.get("period_end"))
         return bool(s and e and s <= today <= e)
 
-    contracts = sorted(data.get("contracts", []),
+    contracts = sorted([c for c in data.get("contracts", [])
+                        if not c.get("amends_id")],
                        key=lambda c: (not is_active(c),
                                       (c.get("project_name") or "").lower()))
     assigned = set()
@@ -1565,7 +1569,7 @@ def _render_person_detail(user, person, saved=False):
     sel_val, proj_items = None, []
     for c in data.get("contracts", []):
         pn = (c.get("project_name") or "").strip()
-        if not pn:
+        if not pn or c.get("amends_id"):
             continue
         _, _, _, icon2 = _SIDE_META.get(c.get("side"), _SIDE_META["sea"])
         party = c.get("vendor") or c.get("client") or ""
@@ -2858,15 +2862,30 @@ def _contract_by_id(data, cid):
 
 
 def _lifecycle(data, c):
-    """Contract lifecycle: cancelled (manual) > superseded (derived — a live
-    amendment points at it via amends_id) > active. Only active versions count
-    toward cashflow, margins, Active tallies and To Dos (강프로 2026-07-24)."""
-    if c.get("cancelled"):
-        return "cancelled"
-    if any(o.get("amends_id") == c["id"] and not o.get("cancelled")
-           for o in data.get("contracts", [])):
-        return "superseded"
-    return "active"
+    """Contract lifecycle: cancelled (manual) or active. Amendments MERGE with
+    their base contract (강프로 2026-07-24): the original keeps its own period
+    and amount, and each amendment adds the period/amount stated in its own
+    document — so both stay active and the chain sums to the effective deal.
+    Full replacement = Cancel the old contract."""
+    return "cancelled" if c.get("cancelled") else "active"
+
+
+def _base_contract(data, c):
+    """Follow the amends chain down to the base (original) document."""
+    by_id = {x["id"]: x for x in data.get("contracts", [])}
+    seen = set()
+    while c.get("amends_id") in by_id and c["id"] not in seen:
+        seen.add(c["id"])
+        c = by_id[c["amends_id"]]
+    return c
+
+
+def _amendments_of(data, c):
+    """Live amendment documents pointing (directly or via chain) at base c."""
+    return [o for o in data.get("contracts", [])
+            if o.get("amends_id") and o["id"] != c["id"]
+            and _base_contract(data, o)["id"] == c["id"]
+            and not o.get("cancelled")]
 
 
 def _auto_register_vendor(data, name):
@@ -2896,7 +2915,10 @@ def _contract_groups(data):
       orphans = vendor contracts with no valid SEA parent
     A vendor's `linked_id` points to its SEA parent."""
     cs = data.get("contracts", [])
-    seas = [c for c in cs if c.get("side") == "sea"]
+    by_id = {c["id"]: c for c in cs}
+    # amendments attach to their base's group instead of forming their own
+    seas = [c for c in cs if c.get("side") == "sea"
+            and not (c.get("amends_id") in by_id)]
     sea_ids = {s["id"] for s in seas}
     children = {s["id"]: [] for s in seas}
     orphans = []
@@ -2904,6 +2926,10 @@ def _contract_groups(data):
         if c.get("side") == "sea":
             continue
         pid = c.get("linked_id")
+        if not pid and c.get("amends_id"):
+            pid = _base_contract(data, c).get("linked_id")
+        if pid in by_id and by_id[pid].get("side") == "sea" and pid not in sea_ids:
+            pid = _base_contract(data, by_id[pid])["id"]  # parent is a SEA amendment
         if pid in sea_ids:
             children[pid].append(c)
         else:
@@ -2936,9 +2962,10 @@ def _contract_card(c, draggable=False, show_title=True, status="active"):
         f'onclick="openContract(\'{c["id"]}\')" style="cursor:pointer">'
         + ('<span class="ctr-grip">⠿</span>' if draggable else '')
         + f'<div class="ctr-top"><span class="dir-chip {chip}">{icon} {label}</span>'
-        + ({"cancelled": '<span class="dir-chip" style="color:var(--danger);background:rgba(248,113,113,.12)">❌ Cancelled</span>',
-            "superseded": '<span class="dir-chip" style="color:#a78bfa;background:rgba(167,139,250,.14)">♻️ Superseded</span>'}
-           .get(status, ''))
+        + ('<span class="dir-chip" style="color:var(--danger);background:rgba(248,113,113,.12)">❌ Cancelled</span>'
+           if status == "cancelled" else '')
+        + ('<span class="dir-chip" style="color:#a78bfa;background:rgba(167,139,250,.14)" title="Adds its stated amount/period on top of the base contract">↺ Amendment</span>'
+           if c.get("amends_id") else '')
         + ('' if c.get("confirmed") or status != "active" else
            '<span title="Needs review & confirmation" style="font-size:.8rem">⚠️</span>')
         + '</div>'
@@ -3011,11 +3038,18 @@ def _group_cashflow_table(sea, kids, data=None):
     """Per-group monthly cashflow: what Cheil bills SEA vs what it pays each
     vendor, month by month over the contract duration (강프로 2026-07-24).
     Only active contract versions are counted."""
+    sea_m = _contract_month_amounts(sea)
     if data is not None:
         if _lifecycle(data, sea) != "active":
-            sea = dict(sea, amount=None)
+            sea_m = None
+        else:
+            for a in _amendments_of(data, sea):
+                am = _contract_month_amounts(a)
+                if am:
+                    sea_m = sea_m or {}
+                    for ym, v in am.items():
+                        sea_m[ym] = sea_m.get(ym, 0.0) + v
         kids = [k for k in kids if _lifecycle(data, k) == "active"]
-    sea_m = _contract_month_amounts(sea)
     kid_ms = [(k, _contract_month_amounts(k)) for k in kids]
     kid_ms = [(k, m) for k, m in kid_ms if m]
     months = set(sea_m or {})
@@ -3068,11 +3102,19 @@ def _group_cashflow_table(sea, kids, data=None):
 
 
 def _group_rollup(sea, kids, data=None):
-    """SEA amount vs the sum of aligned vendor amounts → margin chips.
-    Cancelled/superseded versions are excluded from the math."""
+    """SEA effective amount (base + live amendments) vs the sum of aligned
+    vendor amounts (each doc's own stated amount) → margin chips. Cancelled
+    versions are excluded."""
+    sea_amt = _num_or_none(sea.get("amount"))
     if data is not None:
         kids = [k for k in kids if _lifecycle(data, k) == "active"]
-    sea_amt = _num_or_none(sea.get("amount"))
+        if _lifecycle(data, sea) != "active":
+            sea_amt = None
+        else:
+            for a in _amendments_of(data, sea):
+                v = _num_or_none(a.get("amount"))
+                if v is not None:
+                    sea_amt = (sea_amt or 0.0) + v
     kid_amts = [a for a in (_num_or_none(k.get("amount")) for k in kids)
                 if a is not None]
     parts = []
@@ -3104,7 +3146,10 @@ def _render_contracts_section(user, data):
             f'<div class="ctr-group-hd"><span class="ctr-group-name">{gname}</span>'
             f'{_group_rollup(sea, kids, data)}</div>'
             f'<div class="ctr-group-body">'
-            f'<div class="ctr-sea-col">{_contract_card(sea, show_title=False, status=_lifecycle(data, sea))}</div>'
+            f'<div class="ctr-sea-col">{_contract_card(sea, show_title=False, status=_lifecycle(data, sea))}'
+            + "".join(_contract_card(a, show_title=False, status=_lifecycle(data, a))
+                      for a in _amendments_of(data, sea) if a.get("side") == "sea")
+            + '</div>'
             f'<div class="ctr-ven-col" data-seadrop data-sea="{sea["id"]}">'
             f'{kid_cards}{empty}</div>'
             f'</div>'
@@ -3221,40 +3266,58 @@ def _render_contract_frag(user, data, cid):
         confirm_btn = (f'<button class="btn btn-primary btn-sm" type="button" '
                        f'title="Mark the fields and SEA↔vendor mapping as reviewed" '
                        f'onclick="ctrPost(\'/sow/contract/confirm\',{{id:\'{c["id"]}\'}})">✅ Confirm contract</button>')
-    # lifecycle: amendments / cancellation / re-contract (강프로 2026-07-24)
+    # lifecycle: amendments merge with the base contract; Cancel excludes a
+    # doc from every total (강프로 2026-07-24 — 원계약 유지 + 증분 반영)
     lc = _lifecycle(data, c)
-    succ = next((o for o in data.get("contracts", [])
-                 if o.get("amends_id") == c["id"] and not o.get("cancelled")), None)
+    amds = _amendments_of(data, c) if not c.get("amends_id") else []
     prev = _contract_by_id(data, c.get("amends_id")) if c.get("amends_id") else None
     amend_cands = [o for o in data.get("contracts", [])
                    if o["id"] != c["id"] and o.get("side") == c.get("side")
                    and o.get("amends_id") != c["id"]]
-    amend_opts = '<option value="">— none (original contract) —</option>' + "".join(
+    amend_opts = '<option value="">— none (standalone / original contract) —</option>' + "".join(
         f'<option value="{o["id"]}"{" selected" if c.get("amends_id") == o["id"] else ""}>'
         f'{_esc(o.get("project_name") or o.get("filename") or o["id"])}</option>'
         for o in amend_cands)
-    lc_chip = {"active": '<span class="ctr-chip pos">● Active version</span>',
-               "cancelled": '<span class="ctr-chip neg">❌ Cancelled — excluded from totals</span>',
-               "superseded": '<span class="ctr-chip" style="color:#a78bfa;border-color:rgba(167,139,250,.4)">♻️ Superseded — excluded from totals</span>'}[lc]
-    succ_html = (f'<div class="sow-meta">♻️ Superseded by <b>{_esc(succ.get("project_name") or succ.get("filename"))}</b> '
-                 f'<a href="#" onclick="openContract(\'{succ["id"]}\');return false" style="color:var(--accent)">open →</a></div>'
-                 if succ else "")
-    prev_html = (f'<div class="sow-meta">↺ Amends <b>{_esc(prev.get("project_name") or prev.get("filename"))}</b> '
-                 f'<a href="#" onclick="openContract(\'{prev["id"]}\');return false" style="color:var(--accent)">open →</a></div>'
+    lc_chip = ('<span class="ctr-chip neg">❌ Cancelled — excluded from totals</span>'
+               if lc == "cancelled" else
+               ('<span class="ctr-chip" style="color:#a78bfa;border-color:rgba(167,139,250,.4)">↺ Amendment — adds onto the base contract</span>'
+                if c.get("amends_id") else '<span class="ctr-chip pos">● Active</span>'))
+    eff_html = ""
+    if amds:
+        eff_amt = _num_or_none(c.get("amount")) or 0.0
+        dates = [d for d in (_parse_any_date(c.get("period_start")),
+                             _parse_any_date(c.get("period_end"))) if d]
+        for a in amds:
+            v = _num_or_none(a.get("amount"))
+            if v is not None:
+                eff_amt += v
+            dates += [d for d in (_parse_any_date(a.get("period_start")),
+                                  _parse_any_date(a.get("period_end"))) if d]
+        span = (f'{min(dates).isoformat()} ~ {max(dates).isoformat()}' if dates else "")
+        amd_list = "".join(
+            f'<li><span>↺ {_esc(a.get("project_name") or a.get("filename"))}'
+            f' <a href="#" onclick="openContract(\'{a["id"]}\');return false" style="color:var(--accent)">open →</a></span>'
+            f'<b>{_esc(a.get("amount") or "—")}</b></li>' for a in amds)
+        eff_html = (f'<div class="sow-meta"><b>Effective with {len(amds)} amendment(s):</b> '
+                    f'{_money(eff_amt)}{(" · " + span) if span else ""}</div>'
+                    f'<ul class="ctr-kidlist">{amd_list}</ul>')
+    prev_html = (f'<div class="sow-meta">↺ This document amends <b>{_esc(prev.get("project_name") or prev.get("filename"))}</b> '
+                 f'<a href="#" onclick="openContract(\'{prev["id"]}\');return false" style="color:var(--accent)">open →</a>'
+                 f' — the base keeps its own period &amp; amount; this one adds what it states.</div>'
                  if prev else "")
     cancel_btn = (f'<button class="btn btn-secondary btn-sm" type="button" '
                   f'onclick="ctrPost(\'/sow/contract/cancel\',{{id:\'{c["id"]}\'}})">↩ Reactivate</button>'
                   if c.get("cancelled") else
                   f'<button class="btn btn-danger btn-sm" type="button" '
-                  f'onclick="if(confirm(\'Cancel this contract? It stays on file but drops out of all totals. Upload the re-contract and point its Amends field here.\'))ctrPost(\'/sow/contract/cancel\',{{id:\'{c["id"]}\'}})">❌ Cancel contract</button>')
+                  f'onclick="if(confirm(\'Cancel this contract? It stays on file but drops out of all totals. For a re-contract, upload the new document (as a fresh contract, or as an Amendment if it only adds to a live one).\'))ctrPost(\'/sow/contract/cancel\',{{id:\'{c["id"]}\'}})">❌ Cancel contract</button>')
     lifecycle_html = (
         f'<div class="ctr-linkbox"><b>Lifecycle</b>'
         f'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">{lc_chip}{cancel_btn}</div>'
-        f'{succ_html}{prev_html}'
-        f'<label style="display:flex;gap:8px;align-items:center;font-size:.8rem;flex-wrap:wrap">Amends (previous version):'
+        f'{eff_html}{prev_html}'
+        f'<label style="display:flex;gap:8px;align-items:center;font-size:.8rem;flex-wrap:wrap">Amendment of (base contract):'
         f'<select class="slot" style="flex:1;min-width:200px" '
         f'onchange="ctrPost(\'/sow/contract/amends\',{{id:\'{c["id"]}\',prev:this.value}})">{amend_opts}</select></label>'
-        f'<div class="sow-meta">Amendment / re-contract flow: upload the new version, open it, and set "Amends" to the old one — the old version is auto-marked superseded and leaves the totals.</div>'
+        f'<div class="sow-meta">Amendment flow: upload the amendment document as a new contract, open it, and set "Amendment of" to the base — the base keeps its own period/amount and this document adds the amount over the period stated in it. Full replacement/취소 후 재계약 = Cancel the old contract instead.</div>'
         f'</div>')
 
     if c.get("side") != "vendor":
