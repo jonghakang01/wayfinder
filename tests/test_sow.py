@@ -189,3 +189,67 @@ def test_person_migration_and_ebita():
     assert v == 25000 and auto is False
     v, auto = m._person_ebita({"client_budget": "100"})
     assert v is None
+
+
+def test_month_only_period_resolves_to_month_edges():
+    m = _mod()
+    assert m._parse_any_date("June 2025").isoformat() == "2025-06-01"
+    assert m._parse_any_date("October 2026", end=True).isoformat() == "2026-10-31"
+    # a day-precise term is unaffected by the end flag
+    assert m._parse_any_date("1-May-2026", end=True).isoformat() == "2026-05-01"
+
+
+def _accenture_chain():
+    """The executed Cheil↔Accenture AEM chain: base SOW + Amendment #3 + #4,
+    each one revising the fee schedule of the one before it."""
+    return {"contracts": [
+        {"id": "base", "side": "vendor", "amount": "$9,126,000",
+         "period_start": "November 15, 2023", "period_end": "November 14, 2026",
+         "amends_id": None, "uploaded": "2026-07-23T17:56:35"},
+        {"id": "a3", "side": "vendor", "amount": "$2,220,000",
+         "period_start": "June 2025", "period_end": "October 2026",
+         "amends_id": "base", "uploaded": "2026-07-24T18:13:28"},
+        {"id": "a4", "side": "vendor", "amount": "$171,468",
+         "period_start": "1-May-2026", "period_end": "31-Jul-2026",
+         "amends_id": "a3", "uploaded": "2026-07-24T18:15:26"},
+    ]}
+
+
+def test_amendment_overrides_earlier_document_from_its_effective_date():
+    m = _mod()
+    d = _accenture_chain()
+    by = {c["id"]: c for c in d["contracts"]}
+    # each document bills only up to the day before the next one starts
+    assert m._effective_end(d, by["base"]).isoformat() == "2025-05-31"
+    assert m._effective_end(d, by["a3"]).isoformat() == "2026-04-30"
+    assert m._effective_end(d, by["a4"]).isoformat() == "2026-07-31"
+    # the latest document ends the deal — Amendment #4 terminates it 31 Jul 2026
+    total, start, end = m._chain_effective(d, by["base"])
+    assert start.isoformat() == "2023-11-15" and end.isoformat() == "2026-07-31"
+    # override, not merge: the stacked total ($11,517,468) is never reached
+    assert total < 11_517_468
+    assert round(total) == 6_305_294
+    assert round(m._effective_amount(d, by["a4"])) == 171_468  # last doc counts in full
+
+
+def test_override_leaves_no_month_billed_by_two_documents():
+    m = _mod()
+    d = _accenture_chain()
+    seen = {}
+    for c in d["contracts"]:
+        for ym in m._contract_month_amounts(c, d):
+            assert ym not in seen, f"{ym} billed by both {seen.get(ym)} and {c['id']}"
+            seen[ym] = c["id"]
+    assert seen[(2025, 5)] == "base" and seen[(2025, 6)] == "a3"
+    assert seen[(2026, 4)] == "a3" and seen[(2026, 5)] == "a4"
+    assert (2026, 8) not in seen  # terminated — no billing past Jul 2026
+
+
+def test_cancelled_amendment_does_not_override():
+    m = _mod()
+    d = _accenture_chain()
+    by = {c["id"]: c for c in d["contracts"]}
+    by["a4"]["cancelled"] = True
+    # with #4 struck off, #3 runs to its own stated end again
+    assert m._effective_end(d, by["a3"]).isoformat() == "2026-10-31"
+    assert m._chain_effective(d, by["base"])[2].isoformat() == "2026-10-31"

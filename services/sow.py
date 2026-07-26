@@ -6,7 +6,7 @@ import re
 import urllib.error
 import urllib.request
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from ._paths import DATA_ROOT
 
@@ -1050,9 +1050,8 @@ def _landing_stats(data):
     active = 0
     for c in contracts:
         if _lifecycle(data, c) != "active" or c.get("amends_id"):
-            continue  # amendments merge into their base contract
-        s = _parse_any_date(c.get("period_start"))
-        e = _parse_any_date(c.get("period_end"))
+            continue  # a chain counts once, under its base contract
+        _, s, e = _chain_effective(data, c)
         if s and e and s <= today <= e:
             active += 1
     n_vendor_ppl = sum(1 for p in data.get("people", [])
@@ -1081,7 +1080,7 @@ def _dd_year_cashflow(data, year):
     for c in data.get("contracts", []):
         if _lifecycle(data, c) != "active":
             continue
-        m = _contract_month_amounts(c)
+        m = _contract_month_amounts(c, data)
         if not m:
             continue
         tgt = bill if c.get("side") == "sea" else pay
@@ -1119,14 +1118,14 @@ def _dd_cashflow_section(data, year):
     for sea, kids in _contract_groups(data)[0]:
         if _lifecycle(data, sea) != "active":
             continue
-        b = _year_slice(_contract_month_amounts(sea))
+        b = _year_slice(_contract_month_amounts(sea, data))
         for a in _amendments_of(data, sea):
-            ab = _year_slice(_contract_month_amounts(a))
+            ab = _year_slice(_contract_month_amounts(a, data))
             b = [x + y for x, y in zip(b, ab)]
         p12 = [0.0] * 12
         for k in kids:
             if _lifecycle(data, k) == "active":
-                kb = _year_slice(_contract_month_amounts(k))
+                kb = _year_slice(_contract_month_amounts(k, data))
                 p12 = [a + x for a, x in zip(p12, kb)]
         if any(b) or any(p12):
             scopes.append((sea["id"],
@@ -1195,7 +1194,7 @@ def _dd_cashflow_section(data, year):
   </span>
 </div>
 {''.join(panes)}
-<div class="sow-meta" style="margin-top:8px">Contract totals spread evenly across each term (days/30 partial months) · salaries = roster monthly salary+OH, shown in the All-contracts scope only · cancelled/superseded versions excluded.</div>
+<div class="sow-meta" style="margin-top:8px">Contract totals spread evenly across each term (days/30 partial months) · salaries = roster monthly salary+OH, shown in the All-contracts scope only · an amended document stops where its amendment takes effect; cancelled ones are excluded.</div>
 <script>
 var cfFreq='q';
 function cfRender(){{
@@ -1303,7 +1302,7 @@ def _render_people_by_contract(data):
         if _lifecycle(data, c) != "active":
             return False
         s = _parse_any_date(c.get("period_start"))
-        e = _parse_any_date(c.get("period_end"))
+        e = _effective_end(data, c)
         return bool(s and e and s <= today <= e)
 
     contracts = sorted([c for c in data.get("contracts", [])
@@ -1547,7 +1546,7 @@ def _render_person_detail(user, person, saved=False):
     _today = date.today()
     for c in data.get("contracts", []):
         s0 = _parse_any_date(c.get("period_start"))
-        e0 = _parse_any_date(c.get("period_end"))
+        e0 = _effective_end(data, c)
         act = ('<span style="font-size:.64rem;color:var(--success)">● Active</span>'
                if (s0 and e0 and s0 <= _today <= e0) else
                '<span style="font-size:.64rem;color:var(--text-muted)">○ Inactive</span>')
@@ -1916,7 +1915,7 @@ def _render_vendors(user, saved=False):
         map_bits = []
         for c in v_ctrs:
             s0 = _parse_any_date(c.get("period_start"))
-            e0 = _parse_any_date(c.get("period_end"))
+            e0 = _effective_end(data, c)
             act = ' <span style="color:var(--success)">●</span>' if (s0 and e0 and s0 <= today <= e0) else ''
             map_bits.append(
                 f'<a href="/sow/contracts?newc={c["id"]}" class="ctr-chip" '
@@ -2862,11 +2861,11 @@ def _contract_by_id(data, cid):
 
 
 def _lifecycle(data, c):
-    """Contract lifecycle: cancelled (manual) or active. Amendments MERGE with
-    their base contract (강프로 2026-07-24): the original keeps its own period
-    and amount, and each amendment adds the period/amount stated in its own
-    document — so both stay active and the chain sums to the effective deal.
-    Full replacement = Cancel the old contract."""
+    """Contract lifecycle: cancelled (manual) or active. Amendments OVERRIDE by
+    effective date (강프로 2026-07-25): every document in a chain stays on file
+    and bills at its own rate, but only until the next document takes effect —
+    executed amendments revise the fee section going forward rather than adding
+    a second parallel schedule. Full removal = Cancel the old contract."""
     return "cancelled" if c.get("cancelled") else "active"
 
 
@@ -2886,6 +2885,39 @@ def _amendments_of(data, c):
             if o.get("amends_id") and o["id"] != c["id"]
             and _base_contract(data, o)["id"] == c["id"]
             and not o.get("cancelled")]
+
+
+def _chain_docs(data, c):
+    """The whole live amend chain c belongs to, ordered by effective date
+    (period_start, falling back to upload order). Undated docs sort last so a
+    half-extracted upload never silently truncates a dated one."""
+    base = _base_contract(data, c)
+    docs = [base] + _amendments_of(data, base)
+    docs = [d for d in docs if not d.get("cancelled")]
+    return sorted(docs, key=lambda d: (_parse_any_date(d.get("period_start")) or date.max,
+                                       d.get("uploaded") or ""))
+
+
+def _effective_end(data, c):
+    """Where c actually stops billing: its own period_end, or the day before
+    the next document in its chain takes effect — whichever comes first
+    (강프로 2026-07-25, later document overrides earlier). None when c has no
+    parseable end date."""
+    own_end = _parse_any_date(c.get("period_end"), end=True)
+    if own_end is None:
+        return None
+    nxt = None
+    for d in _chain_docs(data, c):
+        if d["id"] == c["id"]:
+            continue
+        s = _parse_any_date(d.get("period_start"))
+        if s is None or s <= (_parse_any_date(c.get("period_start")) or date.min):
+            continue
+        if nxt is None or s < nxt:
+            nxt = s
+    if nxt is None:
+        return own_end
+    return min(own_end, nxt - timedelta(days=1))
 
 
 def _auto_register_vendor(data, name):
@@ -2977,9 +3009,11 @@ def _contract_card(c, draggable=False, show_title=True, status="active"):
         f'</div></div>')
 
 
-def _parse_any_date(s):
+def _parse_any_date(s, end=False):
     """Contract dates are stored verbatim ('November 15, 2023',
-    '5-September-2023', '2023-11-15') — try the shapes we actually see."""
+    '5-September-2023', '2023-11-15') — try the shapes we actually see.
+    Month-only terms ('June 2025', seen in executed amendments) resolve to the
+    first of the month, or the last day of it when `end` is set."""
     s = (s or "").strip()
     if not s:
         return None
@@ -2994,15 +3028,26 @@ def _parse_any_date(s):
             return datetime.strptime(s2, fmt).date()
         except ValueError:
             pass
+    for fmt in ("%B %Y", "%b %Y", "%Y %m"):
+        try:
+            d = datetime.strptime(s2, fmt).date()
+        except ValueError:
+            continue
+        return d.replace(day=calendar.monthrange(d.year, d.month)[1]) if end else d
     return None
 
 
-def _contract_month_amounts(c):
+def _contract_month_amounts(c, data=None):
     """{(y,m): amount} — the contract total spread across its term with the
     same days/30 partial-month convention the SOW schedules use. None when
-    period or amount is missing/unparseable."""
+    period or amount is missing/unparseable.
+
+    With `data`, the schedule is cut off where the next document in the amend
+    chain takes over (강프로 2026-07-25): the monthly rate still comes from this
+    document's own amount over its own full term, but months already governed by
+    a later amendment are dropped instead of double-counted."""
     s = _parse_any_date(c.get("period_start"))
-    e = _parse_any_date(c.get("period_end"))
+    e = _parse_any_date(c.get("period_end"), end=True)
     amt = _num_or_none(c.get("amount"))
     if not s or not e or amt is None:
         return None
@@ -3011,7 +3056,40 @@ def _contract_month_amounts(c):
     if not spans or tot <= 0:
         return None
     per = amt / tot
+    if data is not None:
+        eff_e = _effective_end(data, c)
+        if eff_e is not None and eff_e < e:
+            spans = _month_spans(s, eff_e)
     return {(y, m): per * f for y, m, f in spans}
+
+
+def _effective_amount(data, c):
+    """What c actually contributes once later amendments override its tail.
+    Falls back to the stated amount when the document has no usable period."""
+    m = _contract_month_amounts(c, data)
+    if m is None:
+        return _num_or_none(c.get("amount"))
+    return sum(m.values())
+
+
+def _chain_effective(data, c):
+    """(amount, start, end) for a whole amend chain after override — the sum of
+    each live document's effective contribution, spanning from the base's start
+    to the last document's end."""
+    docs = _chain_docs(data, c)
+    total, dates = 0.0, []
+    got = False
+    for d in docs:
+        v = _effective_amount(data, d)
+        if v is not None:
+            total += v
+            got = True
+        s = _parse_any_date(d.get("period_start"))
+        e = _effective_end(data, d)
+        dates += [x for x in (s, e) if x]
+    return (total if got else None,
+            min(dates) if dates else None,
+            max(dates) if dates else None)
 
 
 def _contract_todos(data):
@@ -3038,19 +3116,19 @@ def _group_cashflow_table(sea, kids, data=None):
     """Per-group monthly cashflow: what Cheil bills SEA vs what it pays each
     vendor, month by month over the contract duration (강프로 2026-07-24).
     Only active contract versions are counted."""
-    sea_m = _contract_month_amounts(sea)
+    sea_m = _contract_month_amounts(sea, data)
     if data is not None:
         if _lifecycle(data, sea) != "active":
             sea_m = None
         else:
             for a in _amendments_of(data, sea):
-                am = _contract_month_amounts(a)
+                am = _contract_month_amounts(a, data)
                 if am:
                     sea_m = sea_m or {}
                     for ym, v in am.items():
                         sea_m[ym] = sea_m.get(ym, 0.0) + v
         kids = [k for k in kids if _lifecycle(data, k) == "active"]
-    kid_ms = [(k, _contract_month_amounts(k)) for k in kids]
+    kid_ms = [(k, _contract_month_amounts(k, data)) for k in kids]
     kid_ms = [(k, m) for k, m in kid_ms if m]
     months = set(sea_m or {})
     for _, m in kid_ms:
@@ -3093,7 +3171,8 @@ def _group_cashflow_table(sea, kids, data=None):
         tot = sum(net.values())
         net_cells.append(f'<td class="num tot {"pos" if tot >= 0 else "neg"}">{_money(tot)}</td>')
         rows.append('<tr class="net"><td class="pin">Net (margin)</td>' + "".join(net_cells) + '</tr>')
-    note = ("Contract totals spread evenly across each term (days/30 partial months). "
+    note = ("Contract totals spread evenly across each term (days/30 partial months); "
+            "an amended document stops at the month its amendment takes effect. "
             "Documents without a parsed period or amount are omitted.")
     return (f'<details class="cf-details" open><summary>📅 Monthly billing &amp; payouts</summary>'
             f'<div class="cf-wrap"><table class="cf-table"><thead>{head}</thead>'
@@ -3102,20 +3181,22 @@ def _group_cashflow_table(sea, kids, data=None):
 
 
 def _group_rollup(sea, kids, data=None):
-    """SEA effective amount (base + live amendments) vs the sum of aligned
-    vendor amounts (each doc's own stated amount) → margin chips. Cancelled
-    versions are excluded."""
+    """SEA effective amount (base + live amendments, each cut off where the
+    next one takes over) vs the sum of aligned vendor amounts on the same
+    basis → margin chips. Cancelled versions are excluded."""
     sea_amt = _num_or_none(sea.get("amount"))
     if data is not None:
         kids = [k for k in kids if _lifecycle(data, k) == "active"]
         if _lifecycle(data, sea) != "active":
             sea_amt = None
         else:
+            sea_amt = _effective_amount(data, sea)
             for a in _amendments_of(data, sea):
-                v = _num_or_none(a.get("amount"))
+                v = _effective_amount(data, a)
                 if v is not None:
                     sea_amt = (sea_amt or 0.0) + v
-    kid_amts = [a for a in (_num_or_none(k.get("amount")) for k in kids)
+    kid_amts = [a for a in ((_effective_amount(data, k) if data is not None
+                             else _num_or_none(k.get("amount"))) for k in kids)
                 if a is not None]
     parts = []
     if kid_amts:
@@ -3266,8 +3347,8 @@ def _render_contract_frag(user, data, cid):
         confirm_btn = (f'<button class="btn btn-primary btn-sm" type="button" '
                        f'title="Mark the fields and SEA↔vendor mapping as reviewed" '
                        f'onclick="ctrPost(\'/sow/contract/confirm\',{{id:\'{c["id"]}\'}})">✅ Confirm contract</button>')
-    # lifecycle: amendments merge with the base contract; Cancel excludes a
-    # doc from every total (강프로 2026-07-24 — 원계약 유지 + 증분 반영)
+    # lifecycle: a later document overrides the earlier one from its effective
+    # date; Cancel drops a doc from every total (강프로 2026-07-25)
     lc = _lifecycle(data, c)
     amds = _amendments_of(data, c) if not c.get("amends_id") else []
     prev = _contract_by_id(data, c.get("amends_id")) if c.get("amends_id") else None
@@ -3280,30 +3361,35 @@ def _render_contract_frag(user, data, cid):
         for o in amend_cands)
     lc_chip = ('<span class="ctr-chip neg">❌ Cancelled — excluded from totals</span>'
                if lc == "cancelled" else
-               ('<span class="ctr-chip" style="color:#a78bfa;border-color:rgba(167,139,250,.4)">↺ Amendment — adds onto the base contract</span>'
+               ('<span class="ctr-chip" style="color:#a78bfa;border-color:rgba(167,139,250,.4)">↺ Amendment — overrides the earlier document</span>'
                 if c.get("amends_id") else '<span class="ctr-chip pos">● Active</span>'))
     eff_html = ""
     if amds:
-        eff_amt = _num_or_none(c.get("amount")) or 0.0
-        dates = [d for d in (_parse_any_date(c.get("period_start")),
-                             _parse_any_date(c.get("period_end"))) if d]
-        for a in amds:
-            v = _num_or_none(a.get("amount"))
-            if v is not None:
-                eff_amt += v
-            dates += [d for d in (_parse_any_date(a.get("period_start")),
-                                  _parse_any_date(a.get("period_end"))) if d]
-        span = (f'{min(dates).isoformat()} ~ {max(dates).isoformat()}' if dates else "")
-        amd_list = "".join(
-            f'<li><span>↺ {_esc(a.get("project_name") or a.get("filename"))}'
-            f' <a href="#" onclick="openContract(\'{a["id"]}\');return false" style="color:var(--accent)">open →</a></span>'
-            f'<b>{_esc(a.get("amount") or "—")}</b></li>' for a in amds)
-        eff_html = (f'<div class="sow-meta"><b>Effective with {len(amds)} amendment(s):</b> '
-                    f'{_money(eff_amt)}{(" · " + span) if span else ""}</div>'
+        eff_amt, cs, ce = _chain_effective(data, c)
+        span = (f'{cs.isoformat()} ~ {ce.isoformat()}' if cs and ce else "")
+        amd_list = ""
+        for d in _chain_docs(data, c):
+            own_e = _parse_any_date(d.get("period_end"), end=True)
+            de = _effective_end(data, d)
+            cut = de is not None and own_e is not None and de < own_e
+            note = (f' <span style="color:var(--muted)">— superseded from '
+                    f'{(de + timedelta(days=1)).isoformat()}, counts '
+                    f'{_money(_effective_amount(data, d) or 0)}</span>' if cut else "")
+            link = ("" if d["id"] == c["id"] else
+                    f' <a href="#" onclick="openContract(\'{d["id"]}\');return false"'
+                    f' style="color:var(--accent)">open →</a>')
+            amd_list += (
+                f'<li><span>{"↺" if d.get("amends_id") else "📄"} '
+                f'{_esc(d.get("project_name") or d.get("filename"))}{link}{note}</span>'
+                f'<b>{_esc(d.get("amount") or "—")}</b></li>')
+        eff_html = (f'<div class="sow-meta"><b>Effective after {len(amds)} amendment(s):</b> '
+                    f'{_money(eff_amt or 0)}{(" · " + span) if span else ""}'
+                    f' <span style="color:var(--muted)">— each document bills until the '
+                    f'next one takes effect</span></div>'
                     f'<ul class="ctr-kidlist">{amd_list}</ul>')
     prev_html = (f'<div class="sow-meta">↺ This document amends <b>{_esc(prev.get("project_name") or prev.get("filename"))}</b> '
                  f'<a href="#" onclick="openContract(\'{prev["id"]}\');return false" style="color:var(--accent)">open →</a>'
-                 f' — the base keeps its own period &amp; amount; this one adds what it states.</div>'
+                 f' — that document bills up to this one&rsquo;s start date, then this one governs.</div>'
                  if prev else "")
     cancel_btn = (f'<button class="btn btn-secondary btn-sm" type="button" '
                   f'onclick="ctrPost(\'/sow/contract/cancel\',{{id:\'{c["id"]}\'}})">↩ Reactivate</button>'
@@ -3317,7 +3403,7 @@ def _render_contract_frag(user, data, cid):
         f'<label style="display:flex;gap:8px;align-items:center;font-size:.8rem;flex-wrap:wrap">Amendment of (base contract):'
         f'<select class="slot" style="flex:1;min-width:200px" '
         f'onchange="ctrPost(\'/sow/contract/amends\',{{id:\'{c["id"]}\',prev:this.value}})">{amend_opts}</select></label>'
-        f'<div class="sow-meta">Amendment flow: upload the amendment document as a new contract, open it, and set "Amendment of" to the base — the base keeps its own period/amount and this document adds the amount over the period stated in it. Full replacement/취소 후 재계약 = Cancel the old contract instead.</div>'
+        f'<div class="sow-meta">Amendment flow: upload the amendment document as a new contract, open it, and set "Amendment of" to the base — documents are then ordered by effective date and each one bills at its own rate only until the next takes over, so a revised fee schedule replaces the old one instead of stacking on top of it. Dropping a document from every total entirely = Cancel it instead.</div>'
         f'</div>')
 
     if c.get("side") != "vendor":
