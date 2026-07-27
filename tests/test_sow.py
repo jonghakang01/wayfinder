@@ -253,3 +253,139 @@ def test_cancelled_amendment_does_not_override():
     # with #4 struck off, #3 runs to its own stated end again
     assert m._effective_end(d, by["a3"]).isoformat() == "2026-10-31"
     assert m._chain_effective(d, by["base"])[2].isoformat() == "2026-10-31"
+
+
+# ── email-sourced changes (강프로 2026-07-27) ────────────────────────────────
+
+_EML = b"""From: Jane Park <jane.park@partner.com>
+To: Jongha Kang <jongha.kang@cheil.com>
+Subject: RE: AEM Support - fee revision
+Date: Mon, 3 Aug 2026 09:12:00 +0900
+Content-Type: text/html; charset="utf-8"
+
+<html><body><p>Hi Jongha,</p>
+<p>As agreed, the monthly fee drops to <b>$120,000</b> effective
+August 1, 2026 through the end of the term.</p></body></html>
+"""
+
+
+def test_eml_upload_yields_headers_and_body_text():
+    m = _mod()
+    meta, body = m._email_parts(_EML, "eml")
+    assert "jane.park@partner.com" in meta["from"]
+    assert meta["subject"] == "RE: AEM Support - fee revision"
+    assert "$120,000" in body and "<b>" not in body      # html stripped
+    text = m._email_as_text(meta, body)
+    assert text.startswith("From:") and "Subject:" in text and "$120,000" in text
+
+
+def test_html_mail_tables_survive_as_text():
+    m = _mod()
+    out = m._html_to_text("<table><tr><td>Q3</td><td>$5,000</td></tr></table>")
+    assert "Q3" in out and "$5,000" in out
+
+
+def test_msg_without_extract_msg_degrades_to_a_readable_message(monkeypatch):
+    m = _mod()
+    import builtins
+    real = builtins.__import__
+
+    def no_extract_msg(name, *a, **k):
+        if name == "extract_msg":
+            raise ImportError("not installed")
+        return real(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "__import__", no_extract_msg)
+    meta, body = m._email_parts(b"\xd0\xcf\x11\xe0junk", "msg")
+    assert meta == {} and "paste the email body" in body
+
+
+def _email_change_chain():
+    """Base contract + a change that arrived by email, not by amendment."""
+    return {"contracts": [
+        {"id": "base", "side": "sea", "client": "Samsung Electronics America",
+         "project_name": "AEM Support", "amount": "$2,400,000",
+         "period_start": "January 1, 2026", "period_end": "December 31, 2026",
+         "confirmed": True, "uploaded": "2026-01-02T09:00:00"},
+        {"id": "eml1", "side": "sea", "source": "email", "amends_id": "base",
+         "project_name": "AEM Support", "amount": "$500,000",
+         "period_start": "August 1, 2026", "period_end": "December 31, 2026",
+         "change_note": "Monthly fee revised down.", "confirmed": True,
+         "email_meta": {"from": "jane.park@partner.com"},
+         "uploaded": "2026-08-03T09:12:00"},
+    ]}
+
+
+def test_email_change_overrides_the_base_from_its_effective_date():
+    m = _mod()
+    d = _email_change_chain()
+    by = {c["id"]: c for c in d["contracts"]}
+    # identical treatment to a signed amendment: base stops the day before
+    assert m._effective_end(d, by["base"]).isoformat() == "2026-07-31"
+    total, start, end = m._chain_effective(d, by["base"])
+    assert start.isoformat() == "2026-01-01" and end.isoformat() == "2026-12-31"
+    assert round(total) == 1_900_000          # 7/12 of 2.4M + 500k, not 2.9M
+
+
+def test_email_change_bills_no_month_twice():
+    m = _mod()
+    d = _email_change_chain()
+    seen = {}
+    for c in d["contracts"]:
+        for ym in m._contract_month_amounts(c, d):
+            assert ym not in seen, f"{ym} billed twice"
+            seen[ym] = c["id"]
+    assert seen[(2026, 7)] == "base" and seen[(2026, 8)] == "eml1"
+
+
+def test_email_change_joins_its_base_group_and_shows_its_source():
+    m = _mod()
+    d = _email_change_chain()
+    groups, orphans = m._contract_groups(d)
+    assert len(groups) == 1 and not orphans          # no group of its own
+    card = m._contract_card(d["contracts"][1])
+    assert "✉️ Email change" in card and "↺ Amendment" not in card
+
+
+def test_confirmed_change_without_amount_or_date_is_flagged_as_a_todo():
+    m = _mod()
+    d = _email_change_chain()
+    d["contracts"][1]["amount"] = ""
+    d["contracts"][1]["period_start"] = ""
+    notes = [n for c, n in m._contract_todos(d) if c["id"] == "eml1"]
+    assert notes and "an amount and an effective date" in notes[0]
+    assert "not in the cashflow" in notes[0]
+
+
+def test_email_intake_lists_live_contracts_and_posts_to_the_email_route():
+    m = _mod()
+    html = m._email_intake(_email_change_chain())
+    assert "Log a change from email" in html
+    assert 'value="base"' in html
+    assert 'accept=".msg,.eml,.pdf,.docx,.doc,.txt"' in html
+
+
+def test_multipart_reader_returns_fields_and_files():
+    m = _mod()
+    boundary = "----X"
+    parts = (
+        f"--{boundary}\r\nContent-Disposition: form-data; name=\"target\"\r\n\r\nbase\r\n"
+        f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.eml\"\r\n"
+        f"Content-Type: message/rfc822\r\n\r\nSubject: hi\r\n\r\nbody\r\n"
+        f"--{boundary}--\r\n").encode()
+
+    class _RF:
+        def __init__(self, b):
+            self._b = b
+
+        def read(self, n):
+            return self._b[:n]
+
+    class _H:
+        headers = {"Content-Type": f"multipart/form-data; boundary={boundary}",
+                   "Content-Length": str(len(parts))}
+        rfile = _RF(parts)
+
+    fields, files = m._read_multipart(_H())
+    assert fields["target"] == "base"
+    assert files and files[0][0] == "a.eml" and b"Subject: hi" in files[0][1]

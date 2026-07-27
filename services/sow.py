@@ -3,6 +3,7 @@ import io
 import json
 import os
 import re
+import tempfile
 import urllib.error
 import urllib.request
 import uuid
@@ -2592,7 +2593,7 @@ def _migrate_contract_texts(user, data):
         _save(user, data)
 
 
-_ALLOWED_EXT = {"pdf", "docx", "doc", "txt"}
+_ALLOWED_EXT = {"pdf", "docx", "doc", "txt", "eml", "msg"}
 
 
 def _safe_filename(fn):
@@ -2610,35 +2611,44 @@ def _safe_ext(fn):
     return ext if ext in _ALLOWED_EXT else "bin"
 
 
-def _read_uploaded_files(raw_handler):
-    """Parse a multipart body; return list of (filename, bytes, mime)."""
+def _read_multipart(raw_handler):
+    """Parse a multipart body once; return (fields, files) where fields is
+    {name: str} for the plain parts and files is [(filename, bytes, mime)]."""
     try:
         ct = raw_handler.headers.get("Content-Type", "")
         m = re.search(r"boundary=([^\s;]+)", ct)
         if not m:
-            return []
+            return {}, []
         boundary = ("--" + m.group(1).strip('"')).encode()
         length = int(raw_handler.headers.get("Content-Length", 0))
         data = raw_handler.rfile.read(length)
     except Exception:
-        return []
-    files = []
+        return {}, []
+    fields, files = {}, []
     for part in data.split(boundary):
-        if b'filename="' not in part:
-            continue
-        fn_m = re.search(rb'filename="([^"]*)"', part)
-        if not fn_m or not fn_m.group(1):
-            continue
-        filename = fn_m.group(1).decode("utf-8", errors="replace")
         hdr_end = part.find(b"\r\n\r\n")
         if hdr_end == -1:
             continue
+        head = part[:hdr_end]
         content = part[hdr_end + 4:]
         if content.endswith(b"\r\n"):
             content = content[:-2]
-        if content:
-            files.append((filename, content, "application/octet-stream"))
-    return files
+        fn_m = re.search(rb'filename="([^"]*)"', head)
+        if fn_m and fn_m.group(1):
+            if content:
+                files.append((fn_m.group(1).decode("utf-8", errors="replace"),
+                              content, "application/octet-stream"))
+            continue
+        nm = re.search(rb'name="([^"]*)"', head)
+        if nm:
+            fields[nm.group(1).decode("utf-8", errors="replace")] = \
+                content.decode("utf-8", errors="replace")
+    return fields, files
+
+
+def _read_uploaded_files(raw_handler):
+    """Parse a multipart body; return list of (filename, bytes, mime)."""
+    return _read_multipart(raw_handler)[1]
 
 
 def _docx_text(content):
@@ -2670,8 +2680,110 @@ def _docx_text(content):
     return "".join(out)
 
 
+def _html_to_text(html_src):
+    """Readable text out of an HTML mail body — Outlook sends HTML far more
+    often than plain text, and the fee numbers live in its tables."""
+    import html as _html
+    s = re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", html_src or "")
+    s = re.sub(r"(?i)<(br|/tr|/p|/div|/h[1-6])[^>]*>", "\n", s)
+    s = re.sub(r"(?i)</t[dh]>", " | ", s)
+    s = re.sub(r"(?s)<[^>]+>", "", s)
+    s = _html.unescape(s).replace(" ", " ")
+    s = re.sub(r"[ \t]+", " ", s)
+    return re.sub(r"\n\s*\n\s*\n+", "\n\n", s).strip()
+
+
+def _eml_parts(content):
+    """(meta, body) from a saved RFC-822 message (.eml)."""
+    import email
+    from email import policy
+    msg = email.message_from_bytes(content, policy=policy.default)
+    meta = {k: str(msg.get(h) or "") for k, h in
+            (("from", "From"), ("to", "To"), ("sent", "Date"), ("subject", "Subject"))}
+    body = ""
+    try:
+        part = msg.get_body(preferencelist=("plain", "html"))
+        if part is not None:
+            body = part.get_content()
+            if part.get_content_type() == "text/html":
+                body = _html_to_text(body)
+    except Exception:
+        body = ""
+    if not body.strip():
+        body = _html_to_text(content.decode("utf-8", errors="replace"))
+    return meta, body
+
+
+def _msg_parts(content):
+    """(meta, body) from an Outlook .msg. Needs extract-msg; without it the
+    caller still gets a usable message telling the user to paste the body."""
+    try:
+        import extract_msg
+    except ImportError:
+        return {}, ("[.msg needs the extract-msg package on this host — "
+                    "paste the email body instead]")
+    try:
+        m = extract_msg.openMsg(io.BytesIO(content))
+    except Exception:
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".msg", delete=False) as tf:
+                tf.write(content)
+                tmp = tf.name
+            m = extract_msg.openMsg(tmp)
+        except Exception as e:
+            return {}, f"[could not read .msg: {e}]"
+    try:
+        meta = {"from": str(m.sender or ""), "to": str(m.to or ""),
+                "sent": str(m.date or ""), "subject": str(m.subject or "")}
+        body = m.body or ""
+        if not (body or "").strip():
+            body = _html_to_text((m.htmlBody or b"").decode("utf-8", "replace")
+                                 if isinstance(m.htmlBody, bytes) else (m.htmlBody or ""))
+        return meta, body
+    finally:
+        try:
+            m.close()
+        except Exception:
+            pass
+
+
+def _email_parts(content, ext):
+    """(meta, body) for any email-ish upload. Non-mail formats (a printed PDF
+    or a pasted Word note) carry no headers — the body is all we get."""
+    if ext == "eml":
+        return _eml_parts(content)
+    if ext == "msg":
+        return _msg_parts(content)
+    return {}, _extract_text(content, ext)
+
+
+def _sniff_mail_headers(text):
+    """From/Sent/Subject out of a PASTED mail — Outlook copies them as plain
+    lines, and they are the provenance of the change, so keep them."""
+    meta = {}
+    for line in (text or "").splitlines()[:20]:
+        m = re.match(r"\s*(from|to|sent|date|subject)\s*:\s*(.+?)\s*$", line, re.I)
+        if not m:
+            continue
+        k = m.group(1).lower()
+        meta.setdefault("sent" if k == "date" else k, m.group(2))
+    return meta
+
+
+def _email_as_text(meta, body):
+    """Header block + body — what both the AI extractor and the on-screen
+    preview read, so what the user reviews is what the model saw."""
+    head = "\n".join(f"{k.capitalize()}: {v}" for k, v in
+                     (("from", meta.get("from")), ("to", meta.get("to")),
+                      ("sent", meta.get("sent")), ("subject", meta.get("subject")))
+                     if v)
+    return (head + "\n\n" + (body or "")).strip()
+
+
 def _extract_text(content, ext):
-    """Best-effort plain text from an uploaded contract (docx/pdf/txt)."""
+    """Best-effort plain text from an uploaded contract (docx/pdf/txt/eml/msg)."""
+    if ext in ("eml", "msg"):
+        return _email_as_text(*_email_parts(content, ext))
     try:
         if ext == "docx":
             text = _docx_text(content)
@@ -2780,9 +2892,34 @@ _EXTRACT_SYSTEM = (
     "Use an empty string '' for anything not present. Do not invent values.")
 
 
-def _extract_fields_llm(text):
-    """Structured extraction via Claude. Returns the same dict shape as
-    _extract_fields, or None if unavailable/failed (caller falls back to regex)."""
+_EMAIL_SYSTEM = (
+    "You read an email in which a client or vendor communicates a change to an "
+    "existing contract or Statement of Work — a fee revision, an extension, a "
+    "scope cut, an early termination. Contract changes are often agreed over "
+    "email before (or instead of) a signed amendment.\n"
+    "Return ONLY a JSON object (no prose, no code fences) with exactly these keys:\n"
+    '{"is_change":true|false,"amount":str,"period_start":str,"period_end":str,'
+    '"project_name":str,"change_summary":str}\n'
+    "Definitions:\n"
+    "- is_change = false when the email agrees no contractual change (a status "
+    "update, a meeting request, an invoice reminder). Everything else stays ''.\n"
+    "- amount = the value this change is worth, with its currency symbol, e.g. "
+    "'$120,000'. If the email states a NEW TOTAL for the contract, return that "
+    "total. '' when the money does not change.\n"
+    "- period_start = the date the change takes effect (the effective date). If "
+    "the email states no date, use the date the email was sent.\n"
+    "- period_end = the end of the service period AFTER this change, '' when "
+    "the end date does not move.\n"
+    "- project_name = the project/SOW the email is about, '' if not stated.\n"
+    "- change_summary = one or two sentences, in English, saying exactly what "
+    "changed and who agreed to it. Quote the figures.\n"
+    "Copy dates verbatim as written in the email. Use '' for anything not "
+    "present. Do not invent values.")
+
+
+def _claude_json(system, text, max_tokens=1200):
+    """POST text to Claude with a JSON-only system prompt; return the parsed
+    object, or None when the key is missing / the call or the JSON fails."""
     key = None
     for p in (os.path.join(os.path.dirname(__file__), os.pardir, ".env"),
               os.path.expanduser("~/.claude/env")):
@@ -2802,8 +2939,8 @@ def _extract_fields_llm(text):
         headers={"x-api-key": key, "anthropic-version": "2023-06-01",
                  "content-type": "application/json"},
         data=json.dumps({
-            "model": _EXTRACT_MODEL, "max_tokens": 1200,
-            "system": _EXTRACT_SYSTEM,
+            "model": _EXTRACT_MODEL, "max_tokens": max_tokens,
+            "system": system,
             "messages": [{"role": "user", "content": (text or "")[:24000]}],
         }).encode())
     try:
@@ -2816,8 +2953,16 @@ def _extract_fields_llm(text):
     if not m:
         return None
     try:
-        d = json.loads(m.group(0))
+        return json.loads(m.group(0))
     except Exception:
+        return None
+
+
+def _extract_fields_llm(text):
+    """Structured extraction via Claude. Returns the same dict shape as
+    _extract_fields, or None if unavailable/failed (caller falls back to regex)."""
+    d = _claude_json(_EXTRACT_SYSTEM, text)
+    if not isinstance(d, dict):
         return None
     people = []
     for p in (d.get("people") or [])[:40]:
@@ -2834,6 +2979,22 @@ def _extract_fields_llm(text):
         "period_end": str(d.get("period_end") or ""),
         "project_name": str(d.get("project_name") or ""),
         "people": people,
+    }
+
+
+def _extract_email_change(text):
+    """What an email changes about a contract. Empty dict when the AI is
+    unavailable — the user then types the figures in the same form."""
+    d = _claude_json(_EMAIL_SYSTEM, text)
+    if not isinstance(d, dict):
+        return {}
+    return {
+        "is_change": bool(d.get("is_change", True)),
+        "amount": str(d.get("amount") or ""),
+        "period_start": str(d.get("period_start") or ""),
+        "period_end": str(d.get("period_end") or ""),
+        "project_name": str(d.get("project_name") or ""),
+        "change_summary": str(d.get("change_summary") or "")[:600],
     }
 
 
@@ -3010,7 +3171,11 @@ def _contract_card(c, draggable=False, show_title=True, status="active"):
         + f'<div class="ctr-top"><span class="dir-chip {chip}">{icon} {label}</span>'
         + ('<span class="dir-chip" style="color:var(--danger);background:rgba(248,113,113,.12)">❌ Cancelled</span>'
            if status == "cancelled" else '')
-        + ('<span class="dir-chip" style="color:var(--info);background:rgba(129,140,248,.14)" title="Adds its stated amount/period on top of the base contract">↺ Amendment</span>'
+        + (('<span class="dir-chip" style="color:var(--info);background:rgba(129,140,248,.14)" '
+            'title="Change agreed by email — counts from its effective date, no signed amendment on file">'
+            '✉️ Email change</span>' if c.get("source") == "email" else
+            '<span class="dir-chip" style="color:var(--info);background:rgba(129,140,248,.14)" '
+            'title="Adds its stated amount/period on top of the base contract">↺ Amendment</span>')
            if c.get("amends_id") else '')
         + ('' if c.get("confirmed") or status != "active" else
            '<span title="Needs review & confirmation" style="font-size:.8rem">⚠️</span>')
@@ -3117,6 +3282,15 @@ def _contract_todos(data):
     for c in data.get("contracts", []):
         if live(c) and not c.get("confirmed"):
             todos.append((c, "Not confirmed yet — review the extracted fields & mapping, then Confirm"))
+        elif live(c) and c.get("amends_id") and not (
+                c.get("amount") and c.get("period_start")):
+            # a change with no figure or no effective date moves no money —
+            # say so instead of letting it look reflected (강프로 2026-07-27)
+            missing = " and ".join(
+                x for x in ("an amount" if not c.get("amount") else "",
+                            "an effective date" if not c.get("period_start") else "") if x)
+            todos.append((c, f"Change is missing {missing} — it is not in the "
+                             f"cashflow until you fill it in"))
     for o in orphans:
         if live(o):
             todos.append((o, "Vendor contract with no SEA deal — drag it under its SEA contract"))
@@ -3265,8 +3439,54 @@ def _render_contracts_section(user, data):
   <input type="file" id="ctrFile" accept=".pdf,.docx,.doc,.txt" hidden>
   <b>⬆ Drop a contract here</b> or click to upload — PDF/Word, parsed automatically.
 </div>
+{_email_intake(data)}
 <div class="ctr-groups">{groups_html}</div>
 {orphan_html}"""
+
+
+def _email_intake(data):
+    """Log a change that arrived by email instead of a signed amendment
+    (강프로 2026-07-27). Collapsed by default — the standard intake pattern."""
+    live = [c for c in data.get("contracts", []) if _lifecycle(data, c) == "active"]
+    if not live:
+        return ""
+    opts = []
+    for c in sorted(live, key=lambda x: (x.get("side") != "sea",
+                                         (x.get("project_name") or "").lower())):
+        _lb, _chip, _col, icon = _SIDE_META.get(c.get("side"), _SIDE_META["sea"])
+        party = c.get("vendor") or c.get("client") or ""
+        name = c.get("project_name") or c.get("filename") or "(untitled contract)"
+        tail = f" · {_esc(party)}" if party else ""
+        amd = " ↺" if c.get("amends_id") else ""
+        opts.append(f'<option value="{c["id"]}">{icon} {_esc(name)}{amd}{tail}</option>')
+    return f"""
+<details class="eml-intake" id="emlIntake">
+  <summary>✉️ Log a change from email <span class="eml-hint">— fee revision, extension
+    or scope change agreed by mail instead of a signed amendment</span></summary>
+  <form class="eml-form" id="emlForm" onsubmit="return emlSubmit(event)">
+    <label class="eml-field eml-wide"><span>Which contract does this change?</span>
+      <select class="slot" name="target" required>{"".join(opts)}</select></label>
+    <label class="eml-field eml-wide"><span>Paste the email — headers and body</span>
+      <textarea class="slot" name="text" rows="5" placeholder="From: … / Sent: … / Subject: …
+
+Paste the mail here and the fields below fill themselves."></textarea></label>
+    <label class="eml-field eml-wide"><span>…or attach the mail</span>
+      <input class="slot" type="file" name="file" accept=".msg,.eml,.pdf,.docx,.doc,.txt"></label>
+    <label class="eml-field"><span>New amount</span>
+      <input class="slot" name="amount" placeholder="$120,000 — blank = no money change"></label>
+    <label class="eml-field"><span>Effective date</span>
+      <input class="slot" name="effective" placeholder="August 1, 2026"></label>
+    <label class="eml-field"><span>New end date</span>
+      <input class="slot" name="end" placeholder="blank = end date unchanged"></label>
+    <label class="eml-field eml-wide"><span>What changed</span>
+      <input class="slot" name="note" placeholder="Left blank, the AI writes this from the mail"></label>
+    <div class="eml-actions">
+      <span class="eml-note">Typed values win over the AI read. You review and
+        Confirm it on the next screen before it counts.</span>
+      <button type="submit" class="btn btn-primary btn-sm" id="emlBtn">✉️ Log change</button>
+    </div>
+  </form>
+</details>"""
 
 
 def _render_contract_frag(user, data, cid):
@@ -3373,9 +3593,12 @@ def _render_contract_frag(user, data, cid):
         f'<option value="{o["id"]}"{" selected" if c.get("amends_id") == o["id"] else ""}>'
         f'{_esc(o.get("project_name") or o.get("filename") or o["id"])}</option>'
         for o in amend_cands)
+    amend_chip = ('✉️ Email change — overrides the earlier document, no signed '
+                  'amendment on file' if c.get("source") == "email" else
+                  '↺ Amendment — overrides the earlier document')
     lc_chip = ('<span class="ctr-chip neg">❌ Cancelled — excluded from totals</span>'
                if lc == "cancelled" else
-               ('<span class="ctr-chip" style="color:var(--info);border-color:rgba(129,140,248,.4)">↺ Amendment — overrides the earlier document</span>'
+               (f'<span class="ctr-chip" style="color:var(--info);border-color:rgba(129,140,248,.4)">{amend_chip}</span>'
                 if c.get("amends_id") else '<span class="ctr-chip pos">● Active</span>'))
     eff_html = ""
     if amds:
@@ -3451,6 +3674,21 @@ def _render_contract_frag(user, data, cid):
         viewer_html = ""
     uploaded = (c.get("uploaded") or "")[:10]
     preview = _esc(_contract_text(user, c)[:6000])
+    is_email = c.get("source") == "email"
+    em = c.get("email_meta") or {}
+    email_html = ""
+    if is_email:
+        rows = "".join(
+            f'<span class="lb">{k.capitalize()}</span><span>{_esc(v)}</span>'
+            for k, v in (("from", em.get("from")), ("sent", em.get("sent")),
+                         ("subject", em.get("subject"))) if v)
+        email_html = (f'<div class="eml-meta">{rows}</div>' if rows else "")
+        if c.get("change_note"):
+            email_html += (f'<div class="eml-note-box"><b>✉️ What changed</b><br>'
+                           f'{_esc(c.get("change_note"))}</div>')
+    prev_label = "✉️ Email text" if is_email else "🔤 Extracted text"
+    orig_btn = ("" if is_email and not c.get("has_file") else
+                f'<a class="btn btn-secondary btn-sm" href="/sow/contract/file?id={c["id"]}" target="_blank">⬇ Original</a>')
     return f"""
 <div class="cmodal-head">
   <span class="dir-chip {chip}">{icon} {label}</span>
@@ -3459,6 +3697,7 @@ def _render_contract_frag(user, data, cid):
 </div>
 <div class="cmodal-body">
   <div class="ctr-parties">{_esc(parties_note)}</div>
+  {email_html}
   <form onsubmit="ctrSave('{c['id']}');return false" class="ctr-form">
     <div class="ctr-grid">
       {fld("Project name", "project_name", c.get("project_name"))}
@@ -3469,14 +3708,14 @@ def _render_contract_frag(user, data, cid):
           <option value="sea"{' selected' if c.get('side')=='sea' else ''}>SEA ↔ Cheil</option>
           <option value="vendor"{' selected' if c.get('side')=='vendor' else ''}>Cheil ↔ Vendor</option>
         </select></label>
-      {fld("Period start", "period_start", c.get("period_start"))}
+      {fld("Effective date" if is_email else "Period start", "period_start", c.get("period_start"))}
       {fld("Period end", "period_end", c.get("period_end"))}
     </div>
     <div class="ctr-actions">
       <button class="btn btn-primary btn-sm" type="submit">💾 Save fields</button>
       {confirm_btn}
       <button class="btn btn-secondary btn-sm" type="button" onclick="ctrReparse('{c['id']}',this)">🪄 Re-read with AI</button>
-      <a class="btn btn-secondary btn-sm" href="/sow/contract/file?id={c['id']}" target="_blank">⬇ Original</a>
+      {orig_btn}
       <button class="btn btn-danger btn-sm" type="button" onclick="ctrPost('/sow/contract/delete',{{id:'{c['id']}'}})">🗑 Delete</button>
     </div>
   </form>
@@ -3484,7 +3723,7 @@ def _render_contract_frag(user, data, cid):
   {lifecycle_html}
   {people_html}
   {viewer_html}
-  <details class="ctr-prev"><summary>🔤 Extracted text</summary><pre>{preview}</pre></details>
+  <details class="ctr-prev"><summary>{prev_label}</summary><pre>{preview}</pre></details>
 </div>"""
 
 
@@ -3493,6 +3732,23 @@ _CTR_CSS = """
 .ctr-dropzone:hover{border-color:var(--accent);color:var(--text)}
 .ctr-dropzone b{color:var(--text)}
 .ctr-dropzone.drag-over{border-color:var(--accent);background:rgba(56,189,248,.10);color:var(--text)}
+/* ── email-sourced change intake ── */
+.eml-intake{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:12px 16px;margin-bottom:16px}
+.eml-intake>summary{cursor:pointer;list-style:none;font-size:.84rem;font-weight:700;color:var(--text)}
+.eml-intake>summary::-webkit-details-marker{display:none}
+.eml-intake>summary::before{content:"▸ ";color:var(--text-muted)}
+.eml-intake[open]>summary::before{content:"▾ "}
+.eml-hint{font-weight:500;color:var(--text-muted);font-size:.78rem}
+.eml-form{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:12px}
+.eml-field{display:flex;flex-direction:column;gap:4px;min-width:0}
+.eml-field>span{font-size:.64rem;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted)}
+.eml-field.eml-wide{grid-column:1/-1}
+.eml-form textarea.slot{width:100%;font-size:.82rem}
+.eml-actions{grid-column:1/-1;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.eml-note{flex:1;min-width:200px;font-size:.7rem;color:var(--text-muted)}
+.eml-meta{display:grid;grid-template-columns:auto minmax(0,1fr);gap:3px 10px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md);padding:10px 12px;margin-bottom:12px;font-size:.76rem}
+.eml-meta .lb{color:var(--text-muted);text-transform:uppercase;font-size:.64rem;letter-spacing:.05em}
+.eml-note-box{background:rgba(129,140,248,.10);border:1px solid rgba(129,140,248,.35);border-radius:var(--radius-md);padding:10px 12px;margin-bottom:12px;font-size:.8rem;line-height:1.5}
 .ctr-groups{display:flex;flex-direction:column;gap:16px}
 .ctr-group{background:var(--surface-2,var(--surface));border:1px solid var(--border);border-radius:var(--radius-xl);padding:14px 16px}
 .ctr-group-hd{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
@@ -3562,7 +3818,11 @@ _CTR_CSS = """
 .ctr-prev{margin-top:14px}
 .ctr-prev summary{cursor:pointer;font-size:.8rem;color:var(--text-muted)}
 .ctr-prev pre{white-space:pre-wrap;font-size:.72rem;max-height:300px;overflow:auto;background:var(--surface-2,var(--surface));border:1px solid var(--border);border-radius:8px;padding:10px;margin-top:8px}
-@media(max-width:768px){.ctr-group-body{grid-template-columns:1fr}.ctr-grid{grid-template-columns:1fr}}
+@media(max-width:768px){
+  .ctr-group-body{grid-template-columns:1fr}.ctr-grid{grid-template-columns:1fr}
+  .eml-form{grid-template-columns:1fr}
+  .eml-actions .btn{width:100%;min-height:44px}
+}
 """
 
 _CTR_JS = """<script>
@@ -3602,6 +3862,20 @@ function ctrReparse(id,btn){
   if(btn){btn.disabled=true;btn.textContent='🪄 Reading…';}
   fetch('/sow/contract/reparse',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'id='+encodeURIComponent(id)})
     .then(function(){location.href='/sow/contracts?newc='+encodeURIComponent(id);});
+}
+function emlSubmit(e){
+  e.preventDefault();
+  var f=document.getElementById('emlForm'), b=document.getElementById('emlBtn');
+  var fd=new FormData(f);
+  if(!(fd.get('text')||'').trim() && !(fd.get('file')&&fd.get('file').name)
+     && !(fd.get('amount')||'').trim() && !(fd.get('note')||'').trim()){
+    alert('Paste the email, attach it, or type what changed.'); return false;
+  }
+  if(b){b.disabled=true;b.textContent='✉️ Reading…';}
+  fetch('/sow/contract/email',{method:'POST',body:fd})
+    .then(function(r){ location.href = r.url || '/sow/contracts'; })
+    .catch(function(){ if(b){b.disabled=false;b.textContent='✉️ Log change';} });
+  return false;
 }
 function ctrUpload(files){
   if(!files||!files.length)return;
@@ -3706,6 +3980,68 @@ def handle(method, path, body, ctx):
         _save(user, data)
         return ("redirect", f"/sow/contracts?newc={cid}")
 
+    if method == "POST" and path == "/sow/contract/email":
+        # A change agreed over email, not in a signed amendment (강프로
+        # 2026-07-27). Stored as a normal amendment record so the effective-date
+        # override and the cashflow treat it exactly like a papered one — the
+        # ✉️ source stays visible on the card.
+        raw = body.get("__raw__") or body.get("__raw_handler__")
+        fields, files = _read_multipart(raw) if raw else ({}, [])
+        if not fields and not files:
+            fields = {k: _f(body, k) for k in
+                      ("target", "text", "amount", "effective", "end", "note")}
+        data = _load(user)
+        target = _contract_by_id(data, (fields.get("target") or "").strip())
+        if not target:
+            return ("redirect", "/sow/contracts")
+        meta, fn, ext, content = {}, "", "", None
+        body_text = (fields.get("text") or "").strip()
+        if files:
+            fn, content, _mime = files[0]
+            fn = _safe_filename(fn)
+            ext = _safe_ext(fn)
+            meta, file_body = _email_parts(content, ext)
+            body_text = "\n\n".join(x for x in (body_text, file_body) if x.strip())
+        if not meta:
+            meta = _sniff_mail_headers(body_text)
+        text = _email_as_text(meta, body_text)
+        ai = _extract_email_change(text) if text.strip() else {}
+        cid = uuid.uuid4().hex[:8]
+        rec = {"id": cid, "source": "email", "amends_id": target["id"],
+               "side": target.get("side") or "sea",
+               "client": target.get("client") or "",
+               "agency": target.get("agency") or "",
+               "vendor": target.get("vendor") or "",
+               "filename": fn or (meta.get("subject") or "Email change"),
+               "ext": ext or "txt", "linked_id": None,
+               "has_file": bool(content),
+               "uploaded": datetime.now().isoformat(timespec="seconds"),
+               "confirmed": False,
+               "email_meta": {k: v for k, v in meta.items() if v},
+               # typed values win over the AI read — the user is looking at the
+               # mail, the model is looking at a forward chain
+               "project_name": (fields.get("project") or ai.get("project_name")
+                                or target.get("project_name") or ""),
+               "amount": (fields.get("amount") or ai.get("amount") or "").strip(),
+               "period_start": (fields.get("effective") or ai.get("period_start") or "").strip(),
+               "period_end": (fields.get("end") or ai.get("period_end") or "").strip(),
+               "change_note": (fields.get("note") or ai.get("change_summary") or "").strip()}
+        if ai and ai.get("is_change") is False and not fields.get("amount"):
+            rec["change_note"] = (rec["change_note"] or
+                                  "No contractual change found in this email — "
+                                  "check before confirming.")
+        try:
+            os.makedirs(_contracts_dir(user), exist_ok=True)
+            if content:
+                with open(_contract_file_path(user, rec), "wb") as fp:
+                    fp.write(content)
+            _store_contract_text(user, rec, text)
+        except OSError:
+            pass
+        data.setdefault("contracts", []).append(rec)
+        _save(user, data)
+        return ("redirect", f"/sow/contracts?newc={cid}")
+
     if method == "POST" and path == "/sow/contract/reparse":
         data = _load(user)
         c = _contract_by_id(data, _f(body, "id"))
@@ -3719,6 +4055,17 @@ def handle(method, path, body, ctx):
                 _store_contract_text(user, c, text)
             except OSError:
                 pass
+            if c.get("source") == "email":
+                # an email is read by the change extractor, not the contract one
+                ai = _extract_email_change(text)
+                for k in ("amount", "period_start", "period_end", "project_name"):
+                    if ai.get(k):
+                        c[k] = ai[k]
+                if ai.get("change_summary"):
+                    c["change_note"] = ai["change_summary"]
+                c["confirmed"] = False
+                _save(user, data)
+                return ("redirect", f"/sow/contracts?newc={_f(body, 'id')}")
             fields = _extract_fields_best(text)
             for k in ("client", "agency", "vendor", "amount",
                       "period_start", "period_end", "project_name", "side"):
