@@ -528,3 +528,86 @@ def test_only_whitelisted_roster_cells_are_inline_editable():
     for locked in ("name", "id", "affiliation", "linked_contracts", "linked_sows"):
         assert locked not in m._PP_EDITABLE
     assert m._PP_MONEY <= m._PP_EDITABLE
+
+
+# ── per-contract team sheet upload (강프로 2026-07-27) ──────────────────────
+
+def _est_like_xlsx():
+    """The executed Cost Estimation layout: a blank first row and a blank
+    leading column, then Resource | Function | Email ID | Location | Rate |
+    Monthly | Allocation | Monthly Cost | period — plus a totals row."""
+    import io, openpyxl
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append([])
+    ws.append(["", "Resource", "Function", "Email ID", "Location", "Rate",
+               "Monthly", "Allocation", "Monthly Cost", "From Aug til Dec (Total)"])
+    ws.append(["", "Woosuk Jang", "Delivery", "w@cheil.com", "US", 227,
+               38136, 0.1, 3813.6, 19068])
+    ws.append(["", "Anuj Patel", "Dev", "a@x.com", "India", 40, 6720, 1, 6720, 33600])
+    ws.append(["", "", "", "", "", "", "", "", 10533.6, 52668])
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def test_xlsx_team_sheet_reads_through_blank_rows_and_columns():
+    m = _mod()
+    rows = m._sheet_rows(_est_like_xlsx(), "xlsx")
+    people, note = m._people_from_table(rows)
+    assert [p["name"] for p in people] == ["Woosuk Jang", "Anuj Patel"]
+    w = people[0]
+    assert w["role"] == "Delivery" and w["location"] == "US"
+    assert w["email"] == "w@cheil.com"
+    # the hourly "Rate" column wins over the derived "Monthly" one
+    assert w["rate"] == "$227" and w["rate_basis"] == "hour"
+    assert "name" in note and "rate" in note
+
+
+def test_totals_row_is_not_a_person():
+    m = _mod()
+    people, _ = m._people_from_table(m._sheet_rows(_est_like_xlsx(), "xlsx"))
+    assert all(p["name"].lower() not in ("total", "") for p in people)
+    assert len(people) == 2
+
+
+def test_pasted_excel_range_is_tab_separated():
+    m = _mod()
+    pasted = ("Name\tRole\tLocation\tMonthly Rate\n"
+              "Chinmayee R\tQA Engineer\tIndia\t20496\n"
+              "Sai Tharun\tDev\tIndia\t6720\n")
+    people, _ = m._people_from_table(m._text_rows(pasted))
+    assert len(people) == 2
+    assert people[0]["rate"] == "$20,496" and people[0]["rate_basis"] == "month"
+    assert people[1]["role"] == "Dev"
+
+
+def test_csv_and_header_synonyms():
+    m = _mod()
+    csv_text = ("Team Member,Job Title,Region,Hourly Rate\n"
+                "Pranav V,Sr. Data Analyst,India,$25\n")
+    people, _ = m._people_from_table(m._text_rows(csv_text))
+    assert people[0]["name"] == "Pranav V"
+    assert people[0]["role"] == "Sr. Data Analyst"
+    assert people[0]["location"] == "India"
+    assert people[0]["rate"] == "$25" and people[0]["rate_basis"] == "hour"
+
+
+def test_sheet_without_a_name_column_is_rejected_not_guessed():
+    m = _mod()
+    people, note = m._people_from_table(m._text_rows("Item,Qty,Price\nDesk,2,300\n"))
+    assert people == [] and note == ""
+
+
+def test_sheet_rows_merge_with_what_the_contract_already_found():
+    m = _mod()
+    from_text = [{"name": "Anuj Patel", "role": "Dev", "rate": "", "location": ""}]
+    from_sheet = [{"name": "anuj patel", "role": "", "rate": "$40",
+                   "rate_basis": "hour", "location": "India"},
+                  {"name": "Sai Tharun", "role": "QA"}]
+    merged = m._merge_pending(from_text, from_sheet)
+    assert len(merged) == 2                      # matched on name, case-insensitive
+    assert merged[0]["role"] == "Dev"            # first read kept
+    assert merged[0]["rate"] == "$40"            # blank filled from the sheet
+    assert merged[0]["location"] == "India"
+    assert merged[1]["name"] == "Sai Tharun"

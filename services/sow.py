@@ -379,6 +379,131 @@ _PP_MONEY = {"sell_hr", "sell_mo", "client_budget", "cost_hr", "cost_mo",
              "partner_cost", "salary_mo", "salary_oh"}
 
 
+_PEOPLE_HEADERS = {
+    "name": ("resource", "resource name", "name", "person", "employee",
+             "team member", "member", "이름", "성명"),
+    "role": ("function", "role", "title", "profile", "position", "job title",
+             "role · title", "직무", "역할"),
+    "email": ("email", "email id", "e-mail", "mail", "email address"),
+    "location": ("location", "region", "country", "site", "base", "지역"),
+}
+# rate columns, most specific first — a sheet often carries an hourly rate AND
+# a derived monthly one, and the hourly is the figure worth keeping
+_RATE_HEADERS = (
+    ("hour", ("hourly rate", "rate/hr", "rate / hr", "hourly", "rate per hour",
+              "unit rate", "rate", "시급")),
+    ("month", ("monthly rate", "rate/month", "rate / month", "rate/mo",
+               "monthly", "per month", "월단가", "salary")),
+)
+_RATE_SKIP = ("monthly cost", "total", "allocation", "alloc", "qty", "quantity",
+              "hrs", "hours", "months")
+
+
+def _norm_header(v):
+    return re.sub(r"\s+", " ", str(v or "").strip().lower()).strip(" :·|")
+
+
+def _sheet_rows(content, ext):
+    """Rows of strings out of an uploaded table — xlsx, csv or a pasted range.
+    Everything downstream works on text, so numbers become plain strings."""
+    ext = (ext or "").lower()
+    if ext in ("xlsx", "xlsm"):
+        import openpyxl
+        wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+        out = []
+        for row in wb.active.iter_rows(values_only=True):
+            out.append(["" if c is None else
+                        (f"{c:g}" if isinstance(c, float) else str(c)) for c in row])
+        wb.close()
+        return out
+    text = content.decode("utf-8-sig", errors="replace") if isinstance(content, bytes) else content
+    return _text_rows(text)
+
+
+def _text_rows(text):
+    """A pasted Excel range arrives tab-separated; a saved export, comma."""
+    import csv as _csv
+    sample = "\n".join((text or "").splitlines()[:5])
+    delim = "\t" if sample.count("\t") >= sample.count(",") and "\t" in sample else ","
+    return [list(r) for r in _csv.reader((text or "").splitlines(), delimiter=delim)]
+
+
+def _find_header_row(rows):
+    """(index, {field: column}) for the first row that reads like a header.
+    Sheets in the wild start with a title row and a blank column, so the header
+    is found by content, never by position."""
+    best = None
+    for i, row in enumerate(rows[:15]):
+        cols, rate_col, rate_basis = {}, None, ""
+        for j, cell in enumerate(row):
+            h = _norm_header(cell)
+            if not h:
+                continue
+            for field, names in _PEOPLE_HEADERS.items():
+                if field not in cols and h in names:
+                    cols[field] = j
+            if rate_col is None and not any(s in h for s in _RATE_SKIP):
+                for basis, names in _RATE_HEADERS:
+                    if h in names:
+                        rate_col, rate_basis = j, basis
+                        break
+        if "name" not in cols:
+            continue
+        score = len(cols) + (1 if rate_col is not None else 0)
+        if best is None or score > best[2]:
+            if rate_col is not None:
+                cols["rate"] = rate_col
+            best = (i, cols, score, rate_basis)
+    if best is None:
+        return None, {}, ""
+    return best[0], best[1], best[3]
+
+
+def _people_from_table(rows):
+    """[{name, role, location, rate, rate_basis, email}] from a team sheet.
+    Same shape the contract extractor produces, so both feed one review list."""
+    hdr_i, cols, basis = _find_header_row(rows)
+    if hdr_i is None:
+        return [], ""
+    out = []
+    for row in rows[hdr_i + 1:]:
+        def cell(field):
+            j = cols.get(field)
+            return str(row[j]).strip() if j is not None and j < len(row) else ""
+        name = cell("name")
+        if not name or _norm_header(name) in ("total", "totals", "sum", "합계", "계"):
+            continue
+        rate = cell("rate")
+        n = _num_or_none(rate)
+        out.append({"name": name[:80], "role": cell("role")[:80],
+                    "location": cell("location")[:60],
+                    "email": cell("email")[:120],
+                    "rate": (_money(n) if n is not None else rate[:40]),
+                    "rate_basis": _rate_basis(rate, basis)})
+    note = ", ".join(k for k in ("name", "role", "rate", "location", "email") if k in cols)
+    return out, note
+
+
+def _merge_pending(existing, found):
+    """Fold a fresh read into what is already staged — one entry per person,
+    new values filling blanks rather than replacing the earlier read."""
+    by_name = {}
+    order = []
+    for e in list(existing or []) + list(found or []):
+        key = (e.get("name") or "").strip().lower()
+        if not key:
+            continue
+        if key not in by_name:
+            by_name[key] = dict(e)
+            order.append(key)
+            continue
+        cur = by_name[key]
+        for k, v in e.items():
+            if v and not cur.get(k):
+                cur[k] = v
+    return [by_name[k] for k in order]
+
+
 def _rate_basis(rate, stated=""):
     """hour | month. The document usually says; when it doesn't, magnitude
     decides — nobody bills $12,000 an hour or $25 a month."""
@@ -3687,6 +3812,37 @@ Paste the mail here and the fields below fill themselves."></textarea></label>
 </details>"""
 
 
+def _people_sheet_box(c):
+    """Per-contract team sheet intake (강프로 2026-07-27). The parsed rows land
+    in the SAME review list as the ones read out of the contract text, so the
+    rate axis, the roster merge and the contract link all stay in one path."""
+    axis = "Contract rate (what Cheil pays)" if c.get("side") == "vendor" else \
+           "Selling rate (what Cheil bills)"
+    err = c.get("people_sheet_error")
+    note = c.get("people_sheet_note")
+    status = ""
+    if err:
+        status = f'<div class="ppl-sheet-err">⚠ {_esc(err)}</div>'
+    elif note:
+        status = f'<div class="sow-meta">Last sheet read: <b>{_esc(note)}</b></div>'
+    return f"""
+<details class="ctr-linkbox ppl-sheet">
+  <summary><b>📊 Upload this contract's team sheet</b>
+    <span class="sow-meta">— Excel/CSV, or paste the range</span></summary>
+  {status}
+  <div class="sow-meta" style="margin:6px 0 8px">One row per person with a header
+    row: <b>Resource/Name</b> plus any of Role/Function, Rate, Location, Email.
+    Rates land as the <b>{axis}</b>; hourly vs monthly is taken from the column
+    heading. Nothing is saved until you review the list above.</div>
+  <form class="ppl-sheet-form" onsubmit="return pplSheet(event,'{c["id"]}')">
+    <input class="slot" type="file" name="file" accept=".xlsx,.xlsm,.csv,.txt,.tsv">
+    <textarea class="slot" name="text" rows="3"
+      placeholder="…or paste the rows straight from Excel (header row included)"></textarea>
+    <button class="btn btn-primary btn-sm" type="submit">📥 Read sheet</button>
+  </form>
+</details>"""
+
+
 def _render_contract_frag(user, data, cid):
     """Popup body for one contract: extracted fields (editable) + text preview
     + original download + link controls."""
@@ -3783,6 +3939,7 @@ def _render_contract_frag(user, data, cid):
             f'<button class="btn btn-primary btn-sm" type="button" onclick="ctrPeopleSave(\'{c["id"]}\')">💾 Save selected to People</button>'
             f'<button class="btn btn-secondary btn-sm" type="button" onclick="ctrPost(\'/sow/contract/people_dismiss\',{{id:\'{c["id"]}\'}})">Dismiss</button>'
             '</div></div>')
+    people_html += _people_sheet_box(c)
     if c.get("confirmed"):
         confirm_btn = (f'<button class="btn btn-secondary btn-sm" type="button" '
                        f'title="Confirmed {_esc((c.get("confirmed_at") or "")[:10])} — click to un-confirm" '
@@ -4036,6 +4193,15 @@ _CTR_CSS = """
 .ctr-linkbox,.ctr-linked{margin-top:16px;padding-top:14px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px;font-size:.82rem}
 .ppl-row{display:flex;gap:8px;align-items:flex-start;font-size:.82rem;padding:2px 0;cursor:pointer}
 .ppl-row input{margin-top:3px}
+.ppl-sheet>summary{cursor:pointer;list-style:none;font-size:.82rem}
+.ppl-sheet>summary::-webkit-details-marker{display:none}
+.ppl-sheet>summary::before{content:"▸ ";color:var(--text-muted)}
+.ppl-sheet[open]>summary::before{content:"▾ "}
+.ppl-sheet-form{display:flex;flex-direction:column;gap:8px}
+.ppl-sheet-form textarea.slot{width:100%;font-size:.8rem}
+.ppl-sheet-form .btn{align-self:flex-start}
+.ppl-sheet-err{font-size:.78rem;color:var(--danger);background:rgba(248,113,113,.10);
+  border:1px solid rgba(248,113,113,.35);border-radius:var(--radius-md);padding:8px 10px;margin:6px 0}
 .ppl-extra{font-size:.72rem;color:var(--accent);background:var(--accent-glow);border-radius:var(--radius-full);padding:1px 8px;white-space:nowrap}
 .ctr-linked{flex-direction:row;align-items:center;gap:10px}
 .ctr-prev{margin-top:14px}
@@ -4071,6 +4237,20 @@ function ctrSave(id){
   f.querySelectorAll('input,select').forEach(function(el){b+='&'+el.name+'='+encodeURIComponent(el.value);});
   fetch('/sow/contract/save',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:b})
     .then(function(){closeContract();location.href='/sow/contracts';});
+}
+function pplSheet(e,id){
+  e.preventDefault();
+  var f=e.target, fd=new FormData(f);
+  if(!(fd.get('text')||'').trim() && !(fd.get('file')&&fd.get('file').name)){
+    alert('Attach a sheet or paste the rows.'); return false;
+  }
+  fd.append('id', id);
+  var b=f.querySelector('button[type=submit]');
+  if(b){b.disabled=true;b.textContent='📥 Reading…';}
+  fetch('/sow/contract/people_upload',{method:'POST',body:fd})
+    .then(function(r){ location.href = r.url || '/sow/contracts?newc='+id; })
+    .catch(function(){ if(b){b.disabled=false;b.textContent='📥 Read sheet';} });
+  return false;
 }
 function ctrPeopleSave(id){
   var box=document.getElementById('pplBox');if(!box)return;
@@ -4376,6 +4556,39 @@ def handle(method, path, body, ctx):
                 c["amends_id"] = None
             _save(user, data)
         return ("redirect", "/sow/contracts")
+
+    if method == "POST" and path == "/sow/contract/people_upload":
+        # the team for a deal usually arrives as a sheet, not inside the
+        # contract text (강프로 2026-07-27) — same review list either way
+        raw = body.get("__raw__") or body.get("__raw_handler__")
+        fields, files = _read_multipart(raw) if raw else ({}, [])
+        if not fields and not files:
+            fields = {k: _f(body, k) for k in ("id", "text")}
+        data = _load(user)
+        c = _contract_by_id(data, (fields.get("id") or "").strip())
+        if not c:
+            return ("redirect", "/sow/contracts")
+        rows = []
+        if files:
+            fn, content, _mime = files[0]
+            ext = fn.rsplit(".", 1)[-1].lower() if "." in fn else ""
+            try:
+                rows = _sheet_rows(content, ext)
+            except Exception:
+                rows = []
+        elif (fields.get("text") or "").strip():
+            rows = _text_rows(fields["text"])
+        found, note = _people_from_table(rows) if rows else ([], "")
+        if found:
+            c["people_pending"] = _merge_pending(c.get("people_pending"), found)
+            c["people_sheet_note"] = note
+            c.pop("people_sheet_error", None)
+        else:
+            c["people_sheet_error"] = (
+                "No name column found — the sheet needs a header row with "
+                "Resource/Name, and ideally Role, Rate and Location.")
+        _save(user, data)
+        return ("redirect", f"/sow/contracts?newc={c['id']}")
 
     if method == "POST" and path == "/sow/contract/people_save":
         data = _load(user)
