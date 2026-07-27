@@ -3095,6 +3095,47 @@ def _effective_end(data, c):
     return min(own_end, nxt - timedelta(days=1))
 
 
+def _display_state(data, c):
+    """What to emphasise on screen (강프로 2026-07-27): the document that
+    governs TODAY reads normally, everything behind it tones down.
+      current    — in effect right now
+      superseded — a later document in the chain has already taken over
+      ended      — its own term ran out
+      upcoming   — signed, but its effective date has not arrived
+      cancelled  — struck off entirely
+    """
+    if c.get("cancelled"):
+        return "cancelled"
+    today = date.today()
+    start = _parse_any_date(c.get("period_start"))
+    own_end = _parse_any_date(c.get("period_end"), end=True)
+    eff_end = _effective_end(data, c)
+    if eff_end is not None and eff_end < today:
+        # cut short by the next document, or simply over
+        cut = own_end is not None and eff_end < own_end
+        return "superseded" if cut else "ended"
+    if start is not None and start > today:
+        return "upcoming"
+    return "current"
+
+
+_STATE_CHIP = {
+    "superseded": ("↺ Superseded", "A later document took over from this date — "
+                                   "kept on file, no longer billing"),
+    "ended": ("⏳ Ended", "Its term is over — kept on file for the record"),
+    "upcoming": ("🕓 Not started", "Signed, but its effective date has not arrived yet"),
+}
+
+
+def _state_chip(state, eff_end=None, start=None):
+    if state not in _STATE_CHIP:
+        return ""
+    label, tip = _STATE_CHIP[state]
+    when = eff_end if state in ("superseded", "ended") else start
+    tail = f" {when.isoformat()}" if when else ""
+    return (f'<span class="dir-chip ctr-state" title="{tip}">{label}{tail}</span>')
+
+
 def _auto_register_vendor(data, name):
     """Register the extracted vendor entity right away (강프로 2026-07-24)
     unless a vendor already matches by normalized name."""
@@ -3151,10 +3192,17 @@ _SIDE_META = {
 }
 
 
-def _contract_card(c, draggable=False, show_title=True, status="active"):
+def _contract_card(c, draggable=False, show_title=True, status="active", data=None):
     """Contract box: counterparty, period, total amount as labeled rows
-    (강프로 2026-07-24) — the group header above carries the contract name."""
+    (강프로 2026-07-24) — the group header above carries the contract name.
+    Anything that no longer governs (superseded, ended, cancelled) is toned
+    down so the live document is the one that reads (강프로 2026-07-27)."""
     label, chip, color, icon = _SIDE_META.get(c.get("side"), _SIDE_META["sea"])
+    state = _display_state(data, c) if data is not None else (
+        "cancelled" if status == "cancelled" else "current")
+    state_chip = _state_chip(state, _effective_end(data, c) if data is not None else None,
+                             _parse_any_date(c.get("period_start")))
+    dim = " is-dim" if state in ("superseded", "ended", "cancelled") else ""
     party = c.get("vendor") or c.get("client") or "—"
     period = "—"
     if c.get("period_start") or c.get("period_end"):
@@ -3165,12 +3213,12 @@ def _contract_card(c, draggable=False, show_title=True, status="active"):
         title = (f'<div class="ctr-title">'
                  f'{_esc(c.get("project_name") or c.get("filename") or "(untitled contract)")}</div>')
     return (
-        f'<div class="ctr-card" data-cid="{c["id"]}"{drag} '
+        f'<div class="ctr-card{dim}" data-cid="{c["id"]}"{drag} '
         f'onclick="openContract(\'{c["id"]}\')" style="cursor:pointer">'
         + ('<span class="ctr-grip">⠿</span>' if draggable else '')
         + f'<div class="ctr-top"><span class="dir-chip {chip}">{icon} {label}</span>'
         + ('<span class="dir-chip" style="color:var(--danger);background:rgba(248,113,113,.12)">❌ Cancelled</span>'
-           if status == "cancelled" else '')
+           if status == "cancelled" else state_chip)
         + (('<span class="dir-chip" style="color:var(--info);background:rgba(129,140,248,.14)" '
             'title="Change agreed by email — counts from its effective date, no signed amendment on file">'
             '✉️ Email change</span>' if c.get("source") == "email" else
@@ -3398,25 +3446,35 @@ def _group_rollup(sea, kids, data=None):
     return "".join(parts)
 
 
+def _group_is_live(data, sea, kids):
+    """A group still going: its SEA chain, or any vendor card under it, is in
+    effect today. Finished deals sink to the bottom (강프로 2026-07-27)."""
+    return any(_display_state(data, c) in ("current", "upcoming")
+               for c in [sea] + list(kids))
+
+
 def _render_contracts_section(user, data):
     groups, orphans = _contract_groups(data)
+    # live groups first, finished ones after — order is stable within each half
+    groups = sorted(groups, key=lambda g: not _group_is_live(data, g[0], g[1]))
     gblocks = []
     for sea, kids in groups:
         # no title on grouped vendor cards — the group header already says
         # which deal this is (강프로 2026-07-24); unlinked pool keeps titles
         kid_cards = "".join(
             _contract_card(v, draggable=True, show_title=False,
-                           status=_lifecycle(data, v)) for v in kids)
+                           status=_lifecycle(data, v), data=data) for v in kids)
         empty = ('<div class="ctr-drop-hint">Drag vendor contracts here</div>'
                  if not kids else "")
         gname = _esc(sea.get("project_name") or sea.get("filename") or "(untitled contract)")
+        gdim = "" if _group_is_live(data, sea, kids) else " is-dim"
         gblocks.append(
-            f'<div class="ctr-group">'
+            f'<div class="ctr-group{gdim}">'
             f'<div class="ctr-group-hd"><span class="ctr-group-name">{gname}</span>'
             f'{_group_rollup(sea, kids, data)}</div>'
             f'<div class="ctr-group-body">'
-            f'<div class="ctr-sea-col">{_contract_card(sea, show_title=False, status=_lifecycle(data, sea))}'
-            + "".join(_contract_card(a, show_title=False, status=_lifecycle(data, a))
+            f'<div class="ctr-sea-col">{_contract_card(sea, show_title=False, status=_lifecycle(data, sea), data=data)}'
+            + "".join(_contract_card(a, show_title=False, status=_lifecycle(data, a), data=data)
                       for a in _amendments_of(data, sea) if a.get("side") == "sea")
             + '</div>'
             f'<div class="ctr-ven-col" data-seadrop data-sea="{sea["id"]}">'
@@ -3430,7 +3488,7 @@ def _render_contracts_section(user, data):
         '<div class="ctr-orphans" data-seadrop data-sea="">'
         '<div class="ctr-orphan-hd">Unlinked vendor contracts '
         '<span>· drag onto a group above to align them</span></div>'
-        + ("".join(_contract_card(c, draggable=True, status=_lifecycle(data, c))
+        + ("".join(_contract_card(c, draggable=True, status=_lifecycle(data, c), data=data)
                    for c in orphans)
            if orphans else '<div class="ctr-drop-hint">None — drop a vendor card here to unlink it</div>')
         + '</div>')
@@ -3458,7 +3516,9 @@ def _email_intake(data):
         name = c.get("project_name") or c.get("filename") or "(untitled contract)"
         tail = f" · {_esc(party)}" if party else ""
         amd = " ↺" if c.get("amends_id") else ""
-        opts.append(f'<option value="{c["id"]}">{icon} {_esc(name)}{amd}{tail}</option>')
+        st = _display_state(data, c)
+        mark = {"superseded": " · superseded", "ended": " · ended"}.get(st, "")
+        opts.append(f'<option value="{c["id"]}">{icon} {_esc(name)}{amd}{tail}{mark}</option>')
     return f"""
 <details class="eml-intake" id="emlIntake">
   <summary>✉️ Log a change from email <span class="eml-hint">— fee revision, extension
@@ -3732,6 +3792,18 @@ _CTR_CSS = """
 .ctr-dropzone:hover{border-color:var(--accent);color:var(--text)}
 .ctr-dropzone b{color:var(--text)}
 .ctr-dropzone.drag-over{border-color:var(--accent);background:rgba(56,189,248,.10);color:var(--text)}
+/* ── tone-down: superseded / ended / cancelled documents step back so the
+   document governing today is the one that reads (강프로 2026-07-27) ── */
+.ctr-card.is-dim{opacity:.5;filter:saturate(.55)}
+.ctr-card.is-dim:hover,.ctr-card.is-dim:focus-within{opacity:1;filter:none}
+.ctr-card.is-dim .ctr-amt{color:var(--text-muted);font-weight:600}
+.ctr-group.is-dim>.ctr-group-hd,.ctr-group.is-dim>.ctr-group-body,
+.ctr-group.is-dim .cf-wrap,.ctr-group.is-dim .cf-details{opacity:.62}
+.ctr-group.is-dim:hover>.ctr-group-hd,.ctr-group.is-dim:hover>.ctr-group-body,
+.ctr-group.is-dim:hover .cf-wrap,.ctr-group.is-dim:hover .cf-details{opacity:1}
+.ctr-group.is-dim .ctr-card.is-dim{opacity:.72}
+.dir-chip.ctr-state{color:var(--text-muted);background:var(--surface-3);
+  border:1px solid var(--border);font-weight:600}
 /* ── email-sourced change intake ── */
 .eml-intake{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:12px 16px;margin-bottom:16px}
 .eml-intake>summary{cursor:pointer;list-style:none;font-size:.84rem;font-weight:700;color:var(--text)}
@@ -3770,7 +3842,7 @@ _CTR_CSS = """
 .ctr-card[draggable="true"]{padding-left:30px}
 .ctr-card.dragging{opacity:.45}
 .ctr-grip{position:absolute;left:9px;top:50%;transform:translateY(-50%);color:var(--text-muted);cursor:grab;font-size:1rem;letter-spacing:-2px}
-.ctr-top{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}
+.ctr-top{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;flex-wrap:wrap;min-width:0}
 .ctr-amt{font-weight:800;color:var(--success);font-variant-numeric:tabular-nums;font-size:.86rem}
 .ctr-title{font-weight:700;font-size:.9rem;color:var(--text);margin-bottom:6px}
 .ctr-rows{display:grid;grid-template-columns:52px 1fr;gap:3px 10px;font-size:.78rem;color:var(--text);align-items:baseline}
@@ -3820,6 +3892,10 @@ _CTR_CSS = """
 .ctr-prev pre{white-space:pre-wrap;font-size:.72rem;max-height:300px;overflow:auto;background:var(--surface-2,var(--surface));border:1px solid var(--border);border-radius:8px;padding:10px;margin-top:8px}
 @media(max-width:768px){
   .ctr-group-body{grid-template-columns:1fr}.ctr-grid{grid-template-columns:1fr}
+  /* grid items default to min-width:auto — long parties and the state
+     chips would otherwise widen the column past the viewport */
+  .ctr-sea-col,.ctr-ven-col,.ctr-card{min-width:0}
+  .ctr-rows>span{overflow-wrap:anywhere}
   .eml-form{grid-template-columns:1fr}
   .eml-actions .btn{width:100%;min-height:44px}
 }

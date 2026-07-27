@@ -389,3 +389,76 @@ def test_multipart_reader_returns_fields_and_files():
     fields, files = m._read_multipart(_H())
     assert fields["target"] == "base"
     assert files and files[0][0] == "a.eml" and b"Subject: hi" in files[0][1]
+
+
+# ── tone-down: only the governing document reads at full strength ───────────
+
+def _rel(years=0, days=0):
+    """A date offset from today, formatted the way contracts store them."""
+    from datetime import date, timedelta
+    d = date.today() + timedelta(days=days + int(years * 365.25))
+    return d.strftime("%B %-d, %Y")
+
+
+def _states_fixture():
+    return {"contracts": [
+        # base, already handed over to its amendment a year ago
+        {"id": "base", "side": "sea", "project_name": "Live deal",
+         "amount": "$1,200,000", "period_start": _rel(years=-2),
+         "period_end": _rel(years=1), "confirmed": True, "uploaded": "2024-01-01"},
+        {"id": "amd", "side": "sea", "amends_id": "base", "project_name": "Live deal",
+         "amount": "$600,000", "period_start": _rel(years=-1),
+         "period_end": _rel(years=1), "confirmed": True, "uploaded": "2025-01-01"},
+        # a deal whose term simply ran out
+        {"id": "old", "side": "sea", "project_name": "Finished deal",
+         "amount": "$300,000", "period_start": _rel(years=-3),
+         "period_end": _rel(years=-2), "confirmed": True, "uploaded": "2023-01-01"},
+        # signed, starts next year
+        {"id": "future", "side": "sea", "project_name": "Next year",
+         "amount": "$90,000", "period_start": _rel(years=1),
+         "period_end": _rel(years=2), "confirmed": True, "uploaded": "2026-01-01"},
+    ]}
+
+
+def test_display_state_marks_who_governs_today():
+    m = _mod()
+    d = _states_fixture()
+    by = {c["id"]: c for c in d["contracts"]}
+    assert m._display_state(d, by["base"]) == "superseded"   # amendment took over
+    assert m._display_state(d, by["amd"]) == "current"
+    assert m._display_state(d, by["old"]) == "ended"
+    assert m._display_state(d, by["future"]) == "upcoming"
+    by["amd"]["cancelled"] = True
+    assert m._display_state(d, by["amd"]) == "cancelled"
+
+
+def test_superseded_and_ended_cards_are_toned_down_the_live_one_is_not():
+    m = _mod()
+    d = _states_fixture()
+    by = {c["id"]: c for c in d["contracts"]}
+    dim = m._contract_card(by["base"], data=d)
+    live = m._contract_card(by["amd"], data=d)
+    over = m._contract_card(by["old"], data=d)
+    soon = m._contract_card(by["future"], data=d)
+    assert "ctr-card is-dim" in dim and "↺ Superseded" in dim
+    assert "is-dim" not in live and "ctr-state" not in live
+    assert "ctr-card is-dim" in over and "⏳ Ended" in over
+    assert "is-dim" not in soon and "🕓 Not started" in soon   # marked, not dimmed
+
+
+def test_card_without_data_keeps_its_old_behaviour():
+    m = _mod()
+    c = _states_fixture()["contracts"][2]
+    assert "is-dim" not in m._contract_card(c)
+
+
+def test_finished_groups_sort_below_live_ones():
+    m = _mod()
+    d = _states_fixture()
+    by = {c["id"]: c for c in d["contracts"]}
+    assert m._group_is_live(d, by["amd"], []) is True
+    assert m._group_is_live(d, by["old"], []) is False
+    # a finished SEA contract with a live vendor card under it still counts live
+    live_kid = {"id": "k", "side": "vendor", "period_start": _rel(years=-1),
+                "period_end": _rel(years=1)}
+    assert m._group_is_live(d, by["old"], [live_kid]) is True
