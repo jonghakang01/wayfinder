@@ -462,3 +462,69 @@ def test_finished_groups_sort_below_live_ones():
     live_kid = {"id": "k", "side": "vendor", "period_start": _rel(years=-1),
                 "period_end": _rel(years=1)}
     assert m._group_is_live(d, by["old"], [live_kid]) is True
+
+
+# ── people extraction & entry helpers (강프로 2026-07-27) ───────────────────
+
+def test_rate_basis_falls_back_to_magnitude():
+    m = _mod()
+    assert m._rate_basis("$25", "hour") == "hour"
+    assert m._rate_basis("$25", "") == "hour"          # nobody bills $25/month
+    assert m._rate_basis("$12,000", "") == "month"
+    assert m._rate_basis("$12,000", "hour") == "hour"  # the document wins
+    assert m._rate_basis("", "") == ""
+
+
+def test_extracted_rate_lands_on_the_axis_the_contract_direction_dictates():
+    m = _mod()
+    vendor_c = {"id": "v1", "side": "vendor", "project_name": "AEM",
+                "period_start": "January 1, 2026", "period_end": "June 30, 2026"}
+    sea_c = {"id": "s1", "side": "sea", "project_name": "AEM",
+             "period_start": "January 1, 2026", "period_end": "June 30, 2026"}
+    ext = {"name": "Anuj", "role": "Dev", "location": "India",
+           "rate": "$25", "rate_basis": "hour"}
+    v = m._apply_extracted_person(m._migrate_person({"id": "p", "name": "Anuj"}), ext, vendor_c)
+    assert v["cost_hr"] == "$25" and not v["sell_hr"]      # vendor deal = what Cheil pays
+    assert v["partner_duration"] == "January 1, 2026 ~ June 30, 2026"
+    s = m._apply_extracted_person(m._migrate_person({"id": "p", "name": "Anuj"}), ext, sea_c)
+    assert s["sell_hr"] == "$25" and not s["cost_hr"]      # SEA deal = what Cheil bills
+    assert s["client_duration"] == "January 1, 2026 ~ June 30, 2026"
+    assert s["location"] == "India" and s["role_title"] == "Dev"
+
+
+def test_monthly_rate_lands_in_the_monthly_column():
+    m = _mod()
+    c = {"id": "v1", "side": "vendor"}
+    p = m._apply_extracted_person(m._migrate_person({"id": "p", "name": "X"}),
+                                  {"name": "X", "rate": "$12,000", "rate_basis": "month"}, c)
+    assert p["cost_mo"] == "$12,000" and not p["cost_hr"]
+
+
+def test_extraction_never_overwrites_what_the_user_typed():
+    m = _mod()
+    # sell_hr present = already on the current schema, so _migrate_person
+    # leaves the typed values alone
+    p = m._migrate_person({"id": "p", "name": "Anuj", "sell_hr": "",
+                           "role_title": "Lead QA", "cost_hr": "$40"})
+    m._apply_extracted_person(p, {"name": "Anuj", "role": "Dev", "rate": "$25",
+                                  "rate_basis": "hour", "location": "India"},
+                              {"id": "v1", "side": "vendor"})
+    assert p["role_title"] == "Lead QA" and p["cost_hr"] == "$40"   # kept
+    assert p["location"] == "India"                                 # blank got filled
+
+
+def test_money_input_keeps_blanks_blank():
+    m = _mod()
+    assert m._money_input("") == "" and m._money_input(None) == ""
+    assert m._money_input("6720") == "$6,720"
+    assert m._money_input("$6,720") == "$6,720"
+    assert m._money_input("TBD") == "TBD"
+
+
+def test_only_whitelisted_roster_cells_are_inline_editable():
+    m = _mod()
+    assert "sell_hr" in m._PP_EDITABLE and "salary_oh" in m._PP_EDITABLE
+    # identity and linkage stay in the form, out of reach of the cell endpoint
+    for locked in ("name", "id", "affiliation", "linked_contracts", "linked_sows"):
+        assert locked not in m._PP_EDITABLE
+    assert m._PP_MONEY <= m._PP_EDITABLE

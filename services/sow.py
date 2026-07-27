@@ -360,12 +360,55 @@ def _migrate_person(p):
         em = p.pop("email", "") or ""
         p["email_samsung"] = em if "samsung" in em else ""
         p["email_cheil"] = em if "cheil" in em else ""
-    for k in ("project", "sell_mo", "client_duration", "client_budget", "client_po",
-              "cost_mo", "partner_duration", "partner_cost", "partner_po",
-              "cheil_since", "salary_oh", "pc", "svpn", "ebita", "location"):
+    for k in ("project", "sell_hr", "sell_mo", "client_duration", "client_budget",
+              "client_po", "cost_hr", "cost_mo", "partner_duration", "partner_cost",
+              "partner_po", "role_title", "salary_mo", "cheil_since", "salary_oh",
+              "email_cheil", "email_samsung", "pc", "svpn", "ebita", "location"):
         p.setdefault(k, "")
     p.setdefault("linked_sows", [])
     p.setdefault("linked_contracts", [])
+    return p
+
+
+# Roster columns worth editing in place — the ones retyped most often.
+# Anything structural (name, affiliation, links) still goes through the form.
+_PP_EDITABLE = {"role_title", "project", "sell_hr", "sell_mo", "client_budget",
+                "client_po", "cost_hr", "cost_mo", "partner_cost", "partner_po",
+                "salary_mo", "salary_oh", "location"}
+_PP_MONEY = {"sell_hr", "sell_mo", "client_budget", "cost_hr", "cost_mo",
+             "partner_cost", "salary_mo", "salary_oh"}
+
+
+def _rate_basis(rate, stated=""):
+    """hour | month. The document usually says; when it doesn't, magnitude
+    decides — nobody bills $12,000 an hour or $25 a month."""
+    if stated in ("hour", "month"):
+        return stated
+    n = _num_or_none(rate)
+    if n is None:
+        return ""
+    return "hour" if n < 1000 else "month"
+
+
+def _apply_extracted_person(p, ext, c):
+    """Fold a resource row read out of a contract into a roster person
+    (강프로 2026-07-27). Never overwrites a value that is already there — the
+    user's own typing outranks the extractor — and the rate lands on the axis
+    the contract direction dictates: a vendor contract states what Cheil PAYS,
+    a SEA contract what Cheil BILLS."""
+    axis = "cost" if c.get("side") == "vendor" else "sell"
+    fill = {"role_title": (ext.get("role") or "").strip(),
+            "location": (ext.get("location") or "").strip(),
+            "project": (c.get("project_name") or "").strip()}
+    basis = _rate_basis(ext.get("rate"), ext.get("rate_basis") or "")
+    if basis:
+        fill[f"{axis}_{'hr' if basis == 'hour' else 'mo'}"] = (ext.get("rate") or "").strip()
+    period = " ~ ".join(x for x in (c.get("period_start"), c.get("period_end")) if x)
+    if period:
+        fill["partner_duration" if axis == "cost" else "client_duration"] = period
+    for k, v in fill.items():
+        if v and not (p.get(k) or "").strip():
+            p[k] = v
     return p
 
 
@@ -1307,6 +1350,13 @@ def _fmt_money_cell(v):
     return _money(n) if n is not None else (_esc(v) if v else "–")
 
 
+def _money_input(v):
+    """Same figure, formatted for an editable cell — money stays scannable
+    while it is being edited; blank stays blank (no em dash to delete)."""
+    n = _num_or_none(v)
+    return _money(n) if n is not None else (str(v or ""))
+
+
 def _render_people_by_contract(data):
     """People grouped per contract (active first) with each person's monthly
     money and a totals row — the contract-level cost breakdown (강프로
@@ -1428,6 +1478,15 @@ def _render_people(user, saved=False, view="roster"):
         n = _num_or_none(hr_v)
         return f"${n * 168:,.0f}" if n is not None else "–"
 
+    def cell(person, key, num=False, ph=""):
+        """An editable roster cell — saves on blur, no page reload. Typing must
+        never rebuild the input, so nothing here re-renders on input."""
+        return (f'<input class="pp-cell{" num" if num else ""}" '
+                f'data-pid="{person["id"]}" data-field="{key}" '
+                f'value="{_esc(_money_input(person.get(key)) if num else person.get(key))}" '
+                f'placeholder="{_esc(ph if ph and ph != "–" else "–")}"'
+                f'{" inputmode=decimal" if num else ""}>')
+
     rows = []
     for p in data["people"]:
         docs, _ = _person_docs(data, p)
@@ -1446,21 +1505,21 @@ def _render_people(user, saved=False, view="roster"):
         rows.append(
             '<tr>'
             f'<td class="pp-pin"><a href="/sow/person?id={p["id"]}" style="font-weight:700;color:var(--text);text-decoration:none">{_esc(p.get("name"))}</a><br>{aff_chip}</td>'
-            f'<td>{_esc(p.get("project") or "–")}</td>'
-            f'<td>{_esc(p.get("role_title") or "–")}</td>'
-            f'<td class="num">{_fmt_money_cell(p.get("sell_hr"))}</td>'
-            f'<td class="num">{mo_auto(p.get("sell_hr"), p.get("sell_mo"))}</td>'
+            f'<td>{cell(p, "project")}</td>'
+            f'<td>{cell(p, "role_title")}</td>'
+            f'<td class="num">{cell(p, "sell_hr", num=True)}</td>'
+            f'<td class="num">{cell(p, "sell_mo", num=True, ph=mo_auto(p.get("sell_hr"), p.get("sell_mo")))}</td>'
             f'<td>{_esc(p.get("client_duration") or "–")}</td>'
-            f'<td class="num">{_fmt_money_cell(p.get("client_budget"))}</td>'
-            f'<td>{_esc(p.get("client_po") or "–")}</td>'
-            f'<td class="num">{_fmt_money_cell(p.get("cost_hr"))}</td>'
-            f'<td class="num">{mo_auto(p.get("cost_hr"), p.get("cost_mo"))}</td>'
+            f'<td class="num">{cell(p, "client_budget", num=True)}</td>'
+            f'<td>{cell(p, "client_po")}</td>'
+            f'<td class="num">{cell(p, "cost_hr", num=True)}</td>'
+            f'<td class="num">{cell(p, "cost_mo", num=True, ph=mo_auto(p.get("cost_hr"), p.get("cost_mo")))}</td>'
             f'<td>{_esc(p.get("partner_duration") or "–")}</td>'
-            f'<td class="num">{_fmt_money_cell(p.get("partner_cost"))}</td>'
-            f'<td>{_esc(p.get("partner_po") or "–")}</td>'
-            f'<td class="num">{_fmt_money_cell(p.get("salary_mo"))}</td>'
+            f'<td class="num">{cell(p, "partner_cost", num=True)}</td>'
+            f'<td>{cell(p, "partner_po")}</td>'
+            f'<td class="num">{cell(p, "salary_mo", num=True)}</td>'
             f'<td>{_esc(p.get("cheil_since") or "–")}</td>'
-            f'<td class="num">{_fmt_money_cell(p.get("salary_oh"))}</td>'
+            f'<td class="num">{cell(p, "salary_oh", num=True)}</td>'
             f'<td class="num">{ebita_html}</td>'
             f'<td style="text-align:center">{doc_html}</td>'
             '</tr>')
@@ -1483,6 +1542,15 @@ def _render_people(user, saved=False, view="roster"):
 .pp-table thead th:first-child{{background:var(--surface-2);z-index:3}}
 .pp-table tbody tr:hover td{{background:var(--surface-2)}}
 .pp-table tbody tr:hover td.pp-pin{{background:var(--surface-2)}}
+.pp-table td:has(.pp-cell){{padding:0}}
+.pp-cell{{width:100%;min-width:70px;background:transparent;border:1px solid transparent;
+  border-radius:var(--radius-sm);color:var(--text);font:inherit;padding:7px 9px}}
+.pp-cell::placeholder{{color:var(--text-dim)}}
+.pp-cell.num{{text-align:right;font-variant-numeric:tabular-nums}}
+.pp-cell:hover{{border-color:var(--border-bright)}}
+.pp-cell:focus{{outline:none;border-color:var(--accent);background:var(--bg-deep)}}
+.pp-cell.saving{{border-color:var(--warn)}}
+.pp-cell.saved{{border-color:var(--success)}}
 </style>
 <div style="display:flex;align-items:center;gap:12px;margin:8px 0 4px;flex-wrap:wrap">
   <h1 style="margin:0">👥 People</h1>
@@ -1512,7 +1580,38 @@ def _render_people(user, saved=False, view="roster"):
     </tr>
   </thead>
   <tbody>{''.join(rows) or '<tr><td colspan="19" style="text-align:center;padding:30px;color:var(--text-muted)">No people yet.</td></tr>'}</tbody>
-</table></div>"""
+</table></div>
+<script>
+// Inline roster edit: save the cell that changed, nothing else. No re-render,
+// so the caret never jumps out from under the user.
+document.addEventListener('change', function(e){{
+  var c = e.target.closest('.pp-cell'); if(!c) return;
+  c.classList.remove('saved'); c.classList.add('saving');
+  var b = 'id='+encodeURIComponent(c.dataset.pid)
+        + '&field='+encodeURIComponent(c.dataset.field)
+        + '&value='+encodeURIComponent(c.value);
+  fetch('/sow/person/cell',{{method:'POST',
+      headers:{{'Content-Type':'application/x-www-form-urlencoded'}},body:b}})
+    .then(function(r){{ return r.json(); }})
+    .then(function(j){{
+      c.classList.remove('saving');
+      if(!j.ok){{ c.style.borderColor='var(--danger)'; return; }}
+      if(typeof j.display === 'string' && j.display !== c.value) c.value = j.display;
+      c.classList.add('saved');
+      setTimeout(function(){{ c.classList.remove('saved'); }}, 1200);
+    }})
+    .catch(function(){{ c.classList.remove('saving'); c.style.borderColor='var(--danger)'; }});
+}});
+// Enter commits and moves down the column — the way a spreadsheet behaves
+document.addEventListener('keydown', function(e){{
+  if(e.key !== 'Enter') return;
+  var c = e.target.closest('.pp-cell'); if(!c) return;
+  e.preventDefault(); c.blur();
+  var col = [].slice.call(document.querySelectorAll(
+    '.pp-cell[data-field="'+c.dataset.field+'"]'));
+  var nx = col[col.indexOf(c)+1]; if(nx) nx.focus();
+}});
+</script>"""
     return _shell(user, "People", body, wide=True, tab="people")
 
 
@@ -1527,10 +1626,20 @@ def _render_person_detail(user, person, saved=False):
         aff_opts.append(cur_aff)
     aff_sel = "".join(f'<option{" selected" if a == cur_aff else ""}>{_esc(a)}</option>' for a in aff_opts)
 
-    def fld(label, name, ph="", typ="text", wide=False):
+    def fld(label, name, ph="", typ="text", wide=False, dl=""):
         return (f'<div class="f-cell{" f-wide" if wide else ""}">'
                 f'<div style="font-size:.64rem;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:3px">{label}</div>'
-                f'<input class="slot" style="width:100%" type="{typ}" name="{name}" value="{_esc(p.get(name))}" placeholder="{_esc(ph)}"></div>')
+                f'<input class="slot" style="width:100%" type="{typ}" name="{name}" '
+                f'value="{_esc(p.get(name))}" placeholder="{_esc(ph)}"'
+                f'{f" list={dl}" if dl else ""}></div>')
+
+    def _datalist(dl_id, key):
+        """Values already in the roster — typing the 13th person should be
+        picking, not retyping (강프로 2026-07-27)."""
+        vals = sorted({(x.get(key) or "").strip() for x in data.get("people", [])
+                       if (x.get(key) or "").strip()})
+        return (f'<datalist id="{dl_id}">'
+                + "".join(f'<option value="{_esc(v)}">' for v in vals) + '</datalist>')
 
     ebita, ebita_auto = _person_ebita(p)
     ebita_hint = (f'auto = Client budget − Partner cost = {_money(ebita)}'
@@ -1590,9 +1699,11 @@ def _render_person_detail(user, person, saved=False):
         val = "ctr:" + c["id"]
         if sel_val is None and pn == cur_proj and (not linked_now or c["id"] in linked_now):
             sel_val = val
+        period = " ~ ".join(x for x in (c.get("period_start"), c.get("period_end")) if x)
         proj_items.append(
             f'<option value="{val}" data-cid="{c["id"]}" '
-            f'data-parent="{_esc(c.get("linked_id") or "")}">'
+            f'data-parent="{_esc(c.get("linked_id") or "")}" '
+            f'data-period="{_esc(period)}" data-side="{_esc(c.get("side") or "sea")}">'
             f'{icon2} {(_esc(party) + " — ") if party else ""}{_esc(pn)}</option>')
     custom = ""
     if cur_proj and sel_val is None:
@@ -1618,11 +1729,12 @@ def _render_person_detail(user, person, saved=False):
     {fld('Name', 'name', 'required')}
     <div class="f-cell"><div style="font-size:.64rem;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:3px">Affiliation</div>
       <select class="slot" style="width:100%" name="affiliation">{aff_sel}</select></div>
-    {fld('Role / Title', 'role_title', 'e.g. Sr. Developer')}
+    {fld('Role / Title', 'role_title', 'e.g. Sr. Developer', dl='dlRole')}
     <div class="f-cell f-wide"><div style="font-size:.64rem;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:3px">Assigned project / SOW</div>
       <select class="slot" style="width:100%" name="project_pick" onchange="projPick(this)">{proj_opts}</select>
       <div style="font-size:.68rem;color:var(--text-muted);margin-top:3px">Picking a contract project also ticks it under Linked contracts below (a vendor contract links its SEA deal too).</div></div>
-    {fld('Location', 'location', 'US / India')}
+    {fld('Location', 'location', 'US / India', dl='dlLoc')}
+    {_datalist('dlRole', 'role_title')}{_datalist('dlLoc', 'location')}
   </div>
 </div>
 
@@ -1687,6 +1799,7 @@ def _render_person_detail(user, person, saved=False):
 
 <div style="display:flex;gap:10px;margin:16px 0 40px">
   <button type="submit" class="btn btn-primary btn-lg">💾 Save</button>
+  {f'<button type="button" class="btn btn-secondary" onclick="dupPerson(&quot;{p.get("id")}&quot;)" title="Same rates, project and links — new name, blank personal details">⧉ Duplicate</button>' if p.get('id') else ''}
   {f'<button type="button" class="btn btn-danger" onclick="delPerson()">🗑 Delete</button>' if p.get('id') and not docs else ''}
 </div>
 </form>
@@ -1699,6 +1812,19 @@ function projPick(sel){{
     var cb = document.querySelector('input[name="linked_contracts"][value="'+cid+'"]');
     if(cb) cb.checked = true;
   }});
+  // the contract already states the period — fill the matching duration box
+  // if it is still empty (never overwrite what was typed)
+  var per = o.dataset.period;
+  if(per){{
+    var f = document.querySelector('input[name="'
+      + (o.dataset.side === 'vendor' ? 'partner_duration' : 'client_duration') + '"]');
+    if(f && !f.value.trim()) f.value = per;
+  }}
+}}
+function dupPerson(id){{
+  fetch('/sow/person/duplicate',{{method:'POST',headers:{{'Content-Type':'application/x-www-form-urlencoded'}},
+    body:'id='+encodeURIComponent(id)}})
+    .then(function(r){{ location.href = r.url || '/sow/people'; }});
 }}
 function delPerson(){{
   if(!confirm('Delete this person from the roster?')) return;
@@ -2871,7 +2997,8 @@ _EXTRACT_SYSTEM = (
     "Return ONLY a JSON object (no prose, no code fences) with exactly these keys:\n"
     '{"side":"sea"|"vendor","client":str,"agency":str,"vendor":str,'
     '"amount":str,"period_start":str,"period_end":str,"project_name":str,'
-    '"people":[{"name":str,"role":str}]}\n'
+    '"people":[{"name":str,"role":str,"location":str,"rate":str,'
+    '"rate_basis":"hour"|"month"|""}]}\n'
     "Definitions:\n"
     "- side='sea' when the contract is between Samsung (Samsung Electronics "
     "America / SEA) and Cheil, where Samsung pays Cheil (Cheil is the agency).\n"
@@ -2886,8 +3013,15 @@ _EXTRACT_SYSTEM = (
     "verbatim as written in the document (e.g. 'June 1, 2024').\n"
     "- project_name = the project or SOW name/title.\n"
     "- people = individuals named as project resources/personnel (resource "
-    "tables, staffing sections, key personnel lists) with their role/title. "
-    "EXCLUDE signatories, witnesses and legal representatives who only sign "
+    "tables, staffing sections, key personnel lists). Read the WHOLE resource "
+    "row, not just the name:\n"
+    "    role      = role / title / profile / function as written.\n"
+    "    location  = region / country / office for that person, '' if absent.\n"
+    "    rate      = that person's rate with its currency symbol, e.g. '$25' "
+    "or '$12,000'. Take the per-person rate, never the contract total.\n"
+    "    rate_basis= 'hour' when the rate is hourly, 'month' when it is a "
+    "monthly rate/retainer, '' when the document does not say.\n"
+    "  EXCLUDE signatories, witnesses and legal representatives who only sign "
     "the document. Empty list if none.\n"
     "Use an empty string '' for anything not present. Do not invent values.")
 
@@ -2967,8 +3101,12 @@ def _extract_fields_llm(text):
     people = []
     for p in (d.get("people") or [])[:40]:
         if isinstance(p, dict) and str(p.get("name") or "").strip():
+            basis = str(p.get("rate_basis") or "").lower()
             people.append({"name": str(p.get("name"))[:80].strip(),
-                           "role": str(p.get("role") or "")[:80].strip()})
+                           "role": str(p.get("role") or "")[:80].strip(),
+                           "location": str(p.get("location") or "")[:60].strip(),
+                           "rate": str(p.get("rate") or "")[:40].strip(),
+                           "rate_basis": basis if basis in ("hour", "month") else ""})
     return {
         "side": "vendor" if d.get("side") == "vendor" else "sea",
         "client": str(d.get("client") or ""),
@@ -3615,19 +3753,31 @@ def _render_contract_frag(user, data, cid):
     if pending:
         aff = c.get("vendor") if c.get("side") == "vendor" else "Cheil"
         rows = []
+        rate_axis = "cost" if c.get("side") == "vendor" else "selling"
         for i, p in enumerate(pending):
             known = _find_person(data, p.get("name"))
-            note = (' <span class="sow-meta">already in roster — will link this contract</span>'
+            note = (' <span class="sow-meta">already in roster — fills blanks & links this contract</span>'
                     if known else "")
-            val = _esc(f'{p.get("name", "")}\t{p.get("role", "")}')
+            # what the extractor read beyond the name — shown so the user can
+            # spot a bad rate before it lands in the roster (강프로 2026-07-27)
+            bits = []
+            if p.get("rate"):
+                per = {"hour": "/hr", "month": "/mo"}.get(p.get("rate_basis"), "")
+                bits.append(f'{_esc(p["rate"])}{per} {rate_axis}')
+            if p.get("location"):
+                bits.append(_esc(p["location"]))
+            extra = (f' <span class="ppl-extra">{" · ".join(bits)}</span>' if bits else "")
             rows.append(
-                f'<label class="ppl-row"><input type="checkbox" value="{val}" checked>'
+                f'<label class="ppl-row"><input type="checkbox" value="{i}" checked>'
                 f'<span><b>{_esc(p.get("name"))}</b>'
                 + (f' · {_esc(p.get("role"))}' if p.get("role") else "")
-                + f' <span class="sow-meta">({_esc(aff)})</span>{note}</span></label>')
+                + f'{extra} <span class="sow-meta">({_esc(aff)})</span>{note}</span></label>')
         people_html = (
             f'<div class="ctr-linkbox" id="pplBox"><b>👥 People found in this contract ({len(pending)})</b>'
-            '<div class="sow-meta">Mapped to the vendor and this contract — review, uncheck any noise, then save to the People roster.</div>'
+            f'<div class="sow-meta">Name, role, rate and location as read from the resource table — '
+            f'rates land as the <b>{rate_axis} rate</b> because this is a '
+            f'{"Cheil ↔ Vendor" if c.get("side") == "vendor" else "SEA ↔ Cheil"} contract. '
+            f'Review, uncheck any noise, then save to the People roster.</div>'
             + "".join(rows) +
             '<div style="display:flex;gap:8px;margin-top:4px">'
             f'<button class="btn btn-primary btn-sm" type="button" onclick="ctrPeopleSave(\'{c["id"]}\')">💾 Save selected to People</button>'
@@ -3886,6 +4036,7 @@ _CTR_CSS = """
 .ctr-linkbox,.ctr-linked{margin-top:16px;padding-top:14px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px;font-size:.82rem}
 .ppl-row{display:flex;gap:8px;align-items:flex-start;font-size:.82rem;padding:2px 0;cursor:pointer}
 .ppl-row input{margin-top:3px}
+.ppl-extra{font-size:.72rem;color:var(--accent);background:var(--accent-glow);border-radius:var(--radius-full);padding:1px 8px;white-space:nowrap}
 .ctr-linked{flex-direction:row;align-items:center;gap:10px}
 .ctr-prev{margin-top:14px}
 .ctr-prev summary{cursor:pointer;font-size:.8rem;color:var(--text-muted)}
@@ -4230,10 +4381,14 @@ def handle(method, path, body, ctx):
         data = _load(user)
         c = _contract_by_id(data, _f(body, "id"))
         if c:
+            pending = c.get("people_pending") or []
             aff = (c.get("vendor") if c.get("side") == "vendor" else "Cheil") or "Cheil"
-            for line in _f(body, "sel").split("\n"):
-                name, _, role = line.partition("\t")
-                name = name.strip()
+            for tok in _f(body, "sel").split("\n"):
+                tok = tok.strip()
+                if not tok.isdigit() or int(tok) >= len(pending):
+                    continue
+                ext = pending[int(tok)]
+                name = (ext.get("name") or "").strip()
                 if not name:
                     continue
                 p = _find_person(data, name)
@@ -4241,9 +4396,8 @@ def handle(method, path, body, ctx):
                     p = _migrate_person({"id": uuid.uuid4().hex[:8], "name": name,
                                          "sell_hr": ""})
                     p["affiliation"] = aff
-                    p["role_title"] = role.strip()
-                    p["project"] = c.get("project_name") or ""
                     data.setdefault("people", []).append(p)
+                _apply_extracted_person(p, ext, c)
                 lc = p.setdefault("linked_contracts", [])
                 if c["id"] not in lc:
                     lc.append(c["id"])
@@ -4373,6 +4527,39 @@ def handle(method, path, body, ctx):
             data["people"].append(rec)
         _save(user, data)
         return ("redirect", f"/sow/person?id={rec['id']}&saved=1")
+
+    if method == "POST" and path == "/sow/person/duplicate":
+        # a second developer on the same deal differs by name and login, not by
+        # rate or project — clone the deal side, blank the personal side
+        data = _load(user)
+        src = next((p for p in data["people"] if p["id"] == _f(body, "id")), None)
+        if not src:
+            return ("redirect", "/sow/people")
+        new = dict(src)
+        new["id"] = uuid.uuid4().hex[:8]
+        new["name"] = f'{src.get("name") or "Person"} (copy)'
+        for k in ("email_cheil", "email_samsung", "pc", "svpn", "cheil_since",
+                  "salary_mo", "salary_oh", "ebita"):
+            new[k] = ""
+        new["linked_contracts"] = list(src.get("linked_contracts") or [])
+        new["linked_sows"] = []
+        data["people"].append(_migrate_person(new))
+        _save(user, data)
+        return ("redirect", f"/sow/person?id={new['id']}")
+
+    if method == "POST" and path == "/sow/person/cell":
+        # inline roster edit — one cell, no page reload (강프로 2026-07-27)
+        data = _load(user)
+        person = next((p for p in data["people"] if p["id"] == _f(body, "id")), None)
+        field = _f(body, "field")
+        if not person or field not in _PP_EDITABLE:
+            return ("json", {"ok": False})
+        person[field] = _f(body, "value").strip()
+        _save(user, data)
+        # echo back the canonical rendering so the cell shows "$6,720", not
+        # whatever shape it was typed in
+        disp = (_money_input(person[field]) if field in _PP_MONEY else person[field])
+        return ("json", {"ok": True, "value": person[field], "display": disp})
 
     if method == "POST" and path == "/sow/person/delete":
         data = _load(user)

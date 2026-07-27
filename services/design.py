@@ -102,6 +102,15 @@ details.ds-intake summary::-webkit-details-marker{display:none}
 details.ds-intake summary::before{content:"▸ ";color:var(--text-muted)}
 details.ds-intake[open] summary::before{content:"▾ "}
 details.ds-intake .body{margin-top:10px;color:var(--text-muted);font-size:var(--text-sm)}
+/* inline-editable table cell */
+.ds-inline{border-collapse:collapse;font-size:var(--text-sm)}
+.ds-inline td{border:1px solid var(--border);padding:7px 9px}
+.ds-inline td:has(.ds-cell){padding:0}
+.ds-cell{width:130px;background:transparent;border:1px solid transparent;border-radius:var(--radius-sm);
+  color:var(--text);font:inherit;padding:7px 9px}
+.ds-cell.num{text-align:right;font-variant-numeric:tabular-nums}
+.ds-cell:hover{border-color:var(--border-bright)}
+.ds-cell:focus{outline:none;border-color:var(--accent);background:var(--bg-deep)}
 /* stepper */
 .ds-steps{display:flex;gap:14px;flex-wrap:wrap;background:var(--surface);border:1px solid var(--border);
   border-radius:var(--radius-lg);padding:10px 16px;font-size:var(--text-sm)}
@@ -200,6 +209,17 @@ def render(user):
     when action is required (e.g. Drive not connected).</p>
     <details class="ds-intake"><summary>Register Receipts — Google Drive · Upload</summary>
       <div class="body">Intake body: connect CTA, upload zone. Collapsed by default on return visits.</div></details>
+
+    <h3>Inline table edit</h3>
+    <p>Reference grids people retype into (Deal Desk roster) make the cell itself the
+    input: transparent until hovered, accent on focus, <b>saves on blur</b> to a
+    single-field endpoint, and the border flashes <span style="color:var(--success)">green</span>
+    on success. Enter commits and moves down the column. Two rules that are not optional —
+    <b>typing never re-renders</b> (the caret must not jump), and the server takes a
+    <b>whitelist</b> of editable fields so identity/linkage columns stay in the form.</p>
+    <table class="ds-inline"><tr><td>Sr. Data Analyst</td>
+      <td class="num"><input class="ds-cell num" value="$6,720"></td>
+      <td class="num"><input class="ds-cell num" value="$20,496"></td></tr></table>
 
     <h3>Workflow stepper</h3>
     <p>Shows where the user is in the end-to-end flow; steps are labels, not buttons.</p>
