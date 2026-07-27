@@ -3679,21 +3679,28 @@ def _group_cashflow_table(sea, kids, data=None):
             f'<div class="sow-meta" style="margin-top:6px">{note}</div></details>')
 
 
+def _sea_effective_total(sea, data=None):
+    """What the SEA deal is worth once its amendments are applied — the number
+    that belongs in the group header and drives the margin."""
+    if data is None:
+        return _num_or_none(sea.get("amount"))
+    if _lifecycle(data, sea) != "active":
+        return None
+    total = _effective_amount(data, sea)
+    for a in _amendments_of(data, sea):
+        v = _effective_amount(data, a)
+        if v is not None:
+            total = (total or 0.0) + v
+    return total
+
+
 def _group_rollup(sea, kids, data=None):
     """SEA effective amount (base + live amendments, each cut off where the
     next one takes over) vs the sum of aligned vendor amounts on the same
     basis → margin chips. Cancelled versions are excluded."""
-    sea_amt = _num_or_none(sea.get("amount"))
+    sea_amt = _sea_effective_total(sea, data)
     if data is not None:
         kids = [k for k in kids if _lifecycle(data, k) == "active"]
-        if _lifecycle(data, sea) != "active":
-            sea_amt = None
-        else:
-            sea_amt = _effective_amount(data, sea)
-            for a in _amendments_of(data, sea):
-                v = _effective_amount(data, a)
-                if v is not None:
-                    sea_amt = (sea_amt or 0.0) + v
     kid_amts = [a for a in ((_effective_amount(data, k) if data is not None
                              else _num_or_none(k.get("amount"))) for k in kids)
                 if a is not None]
@@ -3710,10 +3717,12 @@ def _group_rollup(sea, kids, data=None):
 
 
 def _group_is_live(data, sea, kids):
-    """A group still going: its SEA chain, or any vendor card under it, is in
-    effect today. Finished deals sink to the bottom (강프로 2026-07-27)."""
-    return any(_display_state(data, c) in ("current", "upcoming")
-               for c in [sea] + list(kids))
+    """A group still going: its SEA chain — the base OR any of its amendments —
+    or any vendor card under it is in effect today. Checking the base alone
+    would bury a deal the moment an amendment took over from it
+    (강프로 2026-07-27)."""
+    chain = [sea] + _amendments_of(data, sea) + list(kids)
+    return any(_display_state(data, c) in ("current", "upcoming") for c in chain)
 
 
 def _render_contracts_section(user, data):
@@ -3730,11 +3739,18 @@ def _render_contracts_section(user, data):
         empty = ('<div class="ctr-drop-hint">Drag vendor contracts here</div>'
                  if not kids else "")
         gname = _esc(sea.get("project_name") or sea.get("filename") or "(untitled contract)")
-        gdim = "" if _group_is_live(data, sea, kids) else " is-dim"
+        live = _group_is_live(data, sea, kids)
+        gdim = "" if live else " is-dim"
+        # title + value on the summary line so a folded block still says what it
+        # is and what it is worth (강프로 2026-07-27); finished deals start folded
+        sea_amt = _sea_effective_total(sea, data)
+        amt_chip = (f'<span class="ctr-chip ctr-sea-amt">{_money(sea_amt)}</span>'
+                    if sea_amt is not None else
+                    f'<span class="ctr-chip">{_esc(sea.get("amount") or "no amount")}</span>')
         gblocks.append(
-            f'<div class="ctr-group{gdim}">'
-            f'<div class="ctr-group-hd"><span class="ctr-group-name">{gname}</span>'
-            f'{_group_rollup(sea, kids, data)}</div>'
+            f'<details class="ctr-group{gdim}" data-gid="{sea["id"]}"{" open" if live else ""}>'
+            f'<summary class="ctr-group-hd"><span class="ctr-group-name">{gname}</span>'
+            f'{amt_chip}{_group_rollup(sea, kids, data)}</summary>'
             f'<div class="ctr-group-body">'
             f'<div class="ctr-sea-col">{_contract_card(sea, show_title=False, status=_lifecycle(data, sea), data=data)}'
             + "".join(_contract_card(a, show_title=False, status=_lifecycle(data, a), data=data)
@@ -3743,7 +3759,7 @@ def _render_contracts_section(user, data):
             f'<div class="ctr-ven-col" data-seadrop data-sea="{sea["id"]}">'
             f'{kid_cards}{empty}</div>'
             f'</div>'
-            f'{_group_cashflow_table(sea, kids, data)}</div>')
+            f'{_group_cashflow_table(sea, kids, data)}</details>')
     groups_html = "".join(gblocks) or (
         '<div class="sow-meta" style="padding:22px;text-align:center">'
         'No SEA↔Cheil contracts yet — upload one to start a group.</div>')
@@ -3768,20 +3784,28 @@ def _render_contracts_section(user, data):
 def _email_intake(data):
     """Log a change that arrived by email instead of a signed amendment
     (강프로 2026-07-27). Collapsed by default — the standard intake pattern."""
-    live = [c for c in data.get("contracts", []) if _lifecycle(data, c) == "active"]
+    # only what a change can actually attach to (강프로 2026-07-27): the document
+    # governing today, or one that has not started yet. A superseded or ended
+    # document is history — amending it would move no money.
+    live = [c for c in data.get("contracts", [])
+            if _display_state(data, c) in ("current", "upcoming")]
     if not live:
         return ""
-    opts = []
-    for c in sorted(live, key=lambda x: (x.get("side") != "sea",
-                                         (x.get("project_name") or "").lower())):
-        _lb, _chip, _col, icon = _SIDE_META.get(c.get("side"), _SIDE_META["sea"])
-        party = c.get("vendor") or c.get("client") or ""
-        name = c.get("project_name") or c.get("filename") or "(untitled contract)"
-        tail = f" · {_esc(party)}" if party else ""
-        amd = " ↺" if c.get("amends_id") else ""
-        st = _display_state(data, c)
-        mark = {"superseded": " · superseded", "ended": " · ended"}.get(st, "")
-        opts.append(f'<option value="{c["id"]}">{icon} {_esc(name)}{amd}{tail}{mark}</option>')
+    groups = []
+    for side in ("sea", "vendor"):
+        label, _chip, _col, icon = _SIDE_META[side]
+        rows = []
+        for c in sorted((x for x in live if (x.get("side") or "sea") == side),
+                        key=lambda x: (x.get("project_name") or "").lower()):
+            party = c.get("vendor") or c.get("client") or ""
+            name = c.get("project_name") or c.get("filename") or "(untitled contract)"
+            tail = f" · {_esc(party)}" if party else ""
+            amd = " ↺ latest amendment" if c.get("amends_id") else ""
+            soon = " · not started yet" if _display_state(data, c) == "upcoming" else ""
+            rows.append(f'<option value="{c["id"]}">{_esc(name)}{tail}{amd}{soon}</option>')
+        if rows:
+            groups.append(f'<optgroup label="{icon} {label}">{"".join(rows)}</optgroup>')
+    opts = groups
     return f"""
 <details class="eml-intake" id="emlIntake">
   <summary>✉️ Log a change from email <span class="eml-hint">— fee revision, extension
@@ -4130,7 +4154,14 @@ _CTR_CSS = """
 .eml-note-box{background:rgba(129,140,248,.10);border:1px solid rgba(129,140,248,.35);border-radius:var(--radius-md);padding:10px 12px;margin-bottom:12px;font-size:.8rem;line-height:1.5}
 .ctr-groups{display:flex;flex-direction:column;gap:16px}
 .ctr-group{background:var(--surface-2,var(--surface));border:1px solid var(--border);border-radius:var(--radius-xl);padding:14px 16px}
-.ctr-group-hd{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+details.ctr-group>summary{list-style:none;cursor:pointer}
+details.ctr-group>summary::-webkit-details-marker{display:none}
+details.ctr-group>summary::before{content:"▸";color:var(--text-muted);font-size:.8rem;flex-shrink:0}
+details.ctr-group[open]>summary::before{content:"▾"}
+details.ctr-group>summary:hover .ctr-group-name{color:var(--accent)}
+.ctr-group-hd{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:0}
+details.ctr-group[open]>.ctr-group-hd{margin-bottom:12px}
+.ctr-chip.ctr-sea-amt{font-weight:800;color:var(--success);border-color:rgba(52,211,153,.35)}
 .ctr-group-name{font-size:1.02rem;font-weight:800;letter-spacing:-.01em;color:var(--text)}
 .ctr-chip{font-size:.68rem;font-weight:700;padding:3px 10px;border-radius:10px;background:var(--surface);border:1px solid var(--border);color:var(--text-muted);font-variant-numeric:tabular-nums}
 .ctr-chip.pos{color:var(--success);border-color:rgba(52,211,153,.35)}
@@ -4238,6 +4269,29 @@ function ctrSave(id){
   fetch('/sow/contract/save',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:b})
     .then(function(){closeContract();location.href='/sow/contracts';});
 }
+// Fold state is remembered per block. Persist on the CLICK, not on toggle:
+// a <details open> fires a toggle while it is being parsed, which would
+// overwrite what the user chose last time.
+document.addEventListener('click', function(e){
+  var sm = e.target.closest('details.ctr-group > summary'); if(!sm) return;
+  var g = sm.parentElement;
+  setTimeout(function(){
+    try{ localStorage.setItem('ddGroup:' + g.dataset.gid, g.open ? '1' : '0'); }catch(err){}
+  }, 0);
+});
+document.addEventListener('DOMContentLoaded', function(){
+  document.querySelectorAll('details.ctr-group').forEach(function(g){
+    try{
+      var v = localStorage.getItem('ddGroup:' + g.dataset.gid);
+      if(v === '1') g.open = true; else if(v === '0') g.open = false;
+    }catch(err){}
+  });
+});
+// a card dragged onto a folded block opens it instead of falling through
+document.addEventListener('dragover', function(e){
+  var g = e.target.closest('details.ctr-group');
+  if(g && !g.open) g.open = true;
+});
 function pplSheet(e,id){
   e.preventDefault();
   var f=e.target, fd=new FormData(f);

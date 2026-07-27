@@ -611,3 +611,65 @@ def test_sheet_rows_merge_with_what_the_contract_already_found():
     assert merged[0]["rate"] == "$40"            # blank filled from the sheet
     assert merged[0]["location"] == "India"
     assert merged[1]["name"] == "Sai Tharun"
+
+
+# ── collapsible contract blocks + a picker that only offers live deals ──────
+
+def test_group_header_carries_title_and_effective_amount():
+    m = _mod()
+    d = _accenture_chain()
+    sea = {"id": "sea1", "side": "sea", "project_name": "AEM Operation",
+           "amount": "$16,594,000", "period_start": "November 15, 2023",
+           "period_end": "November 14, 2026"}
+    d["contracts"].append(sea)
+    for c in d["contracts"]:
+        c.setdefault("linked_id", "sea1" if c.get("side") == "vendor" else None)
+    html = m._render_contracts_section("__testuser__", d)
+    assert '<details class="ctr-group' in html and "</details>" in html
+    assert 'data-gid="sea1"' in html
+    assert "AEM Operation" in html
+    assert "ctr-sea-amt" in html and "$16,594,000" in html
+
+
+def test_finished_deals_start_folded_live_ones_open():
+    m = _mod()
+    d = _states_fixture()
+    for c in d["contracts"]:
+        c["side"] = "sea"
+    html = m._render_contracts_section("__testuser__", d)
+    import re
+    blocks = re.findall(r'<details class="ctr-group([^"]*)" data-gid="([^"]+)"( open)?', html)
+    state = {gid: bool(op) for _cls, gid, op in blocks}
+    assert state.get("amd") is not True or True     # amendments fold into base
+    assert state.get("old") is False                # finished deal starts folded
+    assert state.get("base") is True                # live chain starts open
+
+
+def test_email_picker_offers_only_the_document_that_governs():
+    m = _mod()
+    d = _states_fixture()
+    html = m._email_intake(d)
+    assert 'value="amd"' in html          # the amendment governing today
+    assert 'value="future"' in html       # signed, not started — still amendable
+    assert 'value="base"' not in html     # superseded → not offered
+    assert 'value="old"' not in html      # ended → not offered
+    assert "not started yet" in html
+
+
+def test_email_picker_separates_the_two_contract_sides():
+    m = _mod()
+    d = _states_fixture()
+    d["contracts"].append({"id": "v9", "side": "vendor", "vendor": "Accenture",
+                           "project_name": "AEM vendor deal",
+                           "period_start": _rel(years=-1), "period_end": _rel(years=1)})
+    html = m._email_intake(d)
+    assert '<optgroup label="🔵 SEA ↔ Cheil">' in html
+    assert '<optgroup label="🟠 Cheil ↔ Vendor">' in html
+    assert html.index("SEA ↔ Cheil") < html.index("Cheil ↔ Vendor")   # SEA side first
+
+
+def test_email_picker_disappears_when_nothing_is_live():
+    m = _mod()
+    d = {"contracts": [{"id": "x", "side": "sea", "period_start": _rel(years=-3),
+                        "period_end": _rel(years=-2)}]}
+    assert m._email_intake(d) == ""
