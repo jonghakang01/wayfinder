@@ -81,6 +81,9 @@ STYLE = """
   --accent:#0269A6; --accent-glow:rgba(2,105,166,0.10);
   --on-accent:#FFFFFF;
   --success:#177E42; --warn:#B45309; --danger:#D33A3A; --info:#4F46E5;
+  /* Group accents keep their hue but darken — the dark-theme values wash out
+     on white (Deal Desk vendor chips, home category bars). */
+  --group-1:#0369A1; --group-2:#4F46E5; --group-3:#177E42; --group-4:#C2410C; --group-5:#BE185D;
   --slate-50:#111827; --slate-100:#1C2430; --slate-200:#334155;
   --slate-300:#475569; --slate-400:#66707E; --slate-500:#5A6472;
   --slate-700:#CBD5E1;

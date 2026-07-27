@@ -28,6 +28,11 @@ COLOR_TOKENS = [
     ("--warn", "Warning / in-progress state"),
     ("--danger", "Error / unmatched state"),
     ("--info", "Informational state"),
+    ("--group-1", "Category / group accent 1 — sky"),
+    ("--group-2", "Category / group accent 2 — indigo"),
+    ("--group-3", "Category / group accent 3 — green"),
+    ("--group-4", "Category / group accent 4 — orange (Deal Desk vendor side)"),
+    ("--group-5", "Category / group accent 5 — pink"),
 ]
 
 DEMO_CSS = """

@@ -762,7 +762,8 @@ _CSS = """
 .dd-tab.active{background:var(--accent);color:var(--on-accent)}
 /* ── landing stat cards ── */
 .dd-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:0 0 8px}
-.dd-stat{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px 18px;text-decoration:none;color:var(--text);transition:.15s;display:flex;flex-direction:column;gap:2px}
+.dd-stat{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px 18px;text-decoration:none;color:var(--text);transition:.15s;display:flex;flex-direction:column;gap:2px;min-width:0}
+.dd-stat .lb,.dd-stat .sub{min-width:0;overflow-wrap:anywhere}
 .dd-stat:hover{border-color:var(--accent);transform:translateY(-2px);box-shadow:var(--shadow-md)}
 .dd-stat b{font-size:1.45rem;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
 .dd-stat .lb{font-size:.72rem;color:var(--text-muted);font-weight:600}
@@ -770,7 +771,7 @@ _CSS = """
 .dd-stat .sub.pos{color:var(--success)}
 .dd-stat .sub.neg{color:var(--danger)}
 .dd-stat .cash-pos{color:var(--success)}
-.dd-stat .cash-pay{color:#fb923c}
+.dd-stat .cash-pay{color:var(--group-4)}
 .dd-stat .cash-neg{color:var(--danger)}
 button.dd-tab{border:none;background:transparent;cursor:pointer;font-family:inherit}
 /* ── Home To Do alert ── */
@@ -799,8 +800,11 @@ button.dd-tab{border:none;background:transparent;cursor:pointer;font-family:inhe
 .sow-meta{font-size:.76rem;color:var(--text-muted)}
 .sow-fee{font-weight:700;color:var(--success);font-variant-numeric:tabular-nums;margin-left:auto}
 .dir-chip{font-size:.64rem;font-weight:700;padding:2px 8px;border-radius:10px;white-space:nowrap}
-.dir-samsung{color:#38bdf8;background:rgba(56,189,248,.12)}
-.dir-agency{color:#fb923c;background:rgba(251,146,60,.12)}
+/* ── vendors registry rows ── */
+.vnd-form{display:grid;grid-template-columns:1fr 2fr 150px auto auto;gap:10px;align-items:center;padding:14px 18px}
+.vnd-form.new{grid-template-columns:1fr 2fr 150px auto;border-style:dashed}
+.dir-samsung{color:var(--accent);background:var(--accent-glow)}
+.dir-agency{color:var(--group-4);background:rgba(251,146,60,.12)}
 /* ── document preview editor ── */
 .doc-bar{position:sticky;top:52px;z-index:60;display:flex;align-items:center;gap:10px;background:var(--surface-3);border:1px solid var(--border-bright);border-radius:var(--radius-md);padding:10px 14px;margin-bottom:18px;flex-wrap:wrap}
 .doc-bar .spacer{flex:1}
@@ -846,6 +850,16 @@ select.slot{cursor:pointer}
   .dd-tabs::-webkit-scrollbar{display:none}
   .dd-tab{flex:0 0 auto;padding:10px 16px}
   .dd-stats{grid-template-columns:repeat(2,1fr)}
+  .dd-stat{padding:14px 12px}
+  .dd-stat b{font-size:1.05rem;letter-spacing:-.03em;white-space:nowrap}
+  /* registry rows stack; the two actions share the last line (44px thumb zone) */
+  .vnd-form,.vnd-form.new{grid-template-columns:1fr 1fr;padding:12px 14px;gap:8px}
+  .vnd-form>input{grid-column:1/-1}
+  .vnd-form>span{grid-column:1/-1;text-align:right}
+  .vnd-form .btn{width:100%;min-height:44px}
+  .vnd-form.new .btn{grid-column:1/-1}
+  .cf-details>summary{padding:10px 2px}
+  .ctr-chip{min-height:32px;display:inline-flex;align-items:center}
   .sow-hero,.type-grid{grid-template-columns:1fr}
   .paper{padding:22px 16px}
   .doc-bar{top:0;position:static}
@@ -1222,7 +1236,7 @@ def _render_landing(user):
             f' — {reason}</span><span style="color:var(--accent);font-weight:700;white-space:nowrap">Open →</span></a>'
             for c, reason in todos)
         todo_html = (f'<div class="dd-todo"><div class="dd-todo-hd">📋 To Do '
-                     f'<span class="tab-badge" style="background:#f59e0b">{len(todos)}</span>'
+                     f'<span class="tab-badge" style="background:var(--warn)">{len(todos)}</span>'
                      f' <span style="font-weight:400;color:var(--text-muted);font-size:.74rem">— every contract needs a confirmed SEA ↔ vendor (or Cheil-USA-self) mapping</span></div>'
                      f'{items}</div>')
     body = f"""
@@ -1365,7 +1379,7 @@ def _render_people_by_contract(data):
     <span class="sow-meta">{period}{(" · " + _esc(c.get("amount"))) if c.get("amount") else ""}</span>
   </div>
   <div class="cf-wrap"><table class="cf-table" style="min-width:760px">
-    <thead><tr><th class="pin">Name</th><th>Role</th><th>소속</th>
+    <thead><tr><th class="pin">Name</th><th>Role</th><th>Affiliation</th>
       <th>Selling/mo</th><th>Cost/mo</th><th>Net/mo</th></tr></thead>
     <tbody>{body_rows}{total_row}</tbody>
   </table></div>
@@ -1483,7 +1497,7 @@ def _render_people(user, saved=False, view="roster"):
 <div class="pp-wrap"><table class="pp-table">
   <thead>
     <tr>
-      <th rowspan="2">Name / 소속</th><th rowspan="2">Project / SOW</th><th rowspan="2">Role · Title</th>
+      <th rowspan="2">Name / Affiliation</th><th rowspan="2">Project / SOW</th><th rowspan="2">Role · Title</th>
       <th class="grp g-sell" colspan="5">Client → Cheil</th>
       <th class="grp g-cost" colspan="5">Cheil → Partner</th>
       <th class="grp g-emp" colspan="3">Cheil employee</th>
@@ -1601,10 +1615,10 @@ def _render_person_detail(user, person, saved=False):
   <div class="sec-title" style="font-size:.8rem;font-weight:800;margin-bottom:12px">Basics</div>
   <div class="f-grid3">
     {fld('Name', 'name', 'required')}
-    <div class="f-cell"><div style="font-size:.64rem;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:3px">소속</div>
+    <div class="f-cell"><div style="font-size:.64rem;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:3px">Affiliation</div>
       <select class="slot" style="width:100%" name="affiliation">{aff_sel}</select></div>
     {fld('Role / Title', 'role_title', 'e.g. Sr. Developer')}
-    <div class="f-cell f-wide"><div style="font-size:.64rem;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:3px">투입 프로젝트 / SOW</div>
+    <div class="f-cell f-wide"><div style="font-size:.64rem;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:3px">Assigned project / SOW</div>
       <select class="slot" style="width:100%" name="project_pick" onchange="projPick(this)">{proj_opts}</select>
       <div style="font-size:.68rem;color:var(--text-muted);margin-top:3px">Picking a contract project also ticks it under Linked contracts below (a vendor contract links its SEA deal too).</div></div>
     {fld('Location', 'location', 'US / India')}
@@ -1932,7 +1946,7 @@ def _render_vendors(user, saved=False):
                         'padding:0 18px 12px;margin-top:-6px">' + "".join(map_bits) + '</div>')
         rows.append(f"""
 <div class="sow-card" style="padding:0">
-<form method="post" action="/sow/vendor/save" style="display:grid;grid-template-columns:1fr 2fr 150px auto auto;gap:10px;align-items:center;padding:14px 18px">
+<form method="post" action="/sow/vendor/save" class="vnd-form">
   <input type="hidden" name="id" value="{v['id']}">
   <input class="slot" name="name" value="{_esc(v.get('name'))}" placeholder="Vendor name">
   <input class="slot" name="entity_line" value="{_esc(v.get('entity_line'))}" placeholder="Entity line (name + address, used in the SOW/MSA preamble)">
@@ -1950,7 +1964,7 @@ def _render_vendors(user, saved=False):
 </div>
 <p style="color:var(--text-muted);font-size:.86rem">One row per contractor — name, the entity line that lands in document preambles, and the MSA date. Referenced by Agency-side SOWs, MSAs and NDAs.</p>
 {saved_banner}
-<form method="post" action="/sow/vendor/save" class="sow-card" style="display:grid;grid-template-columns:1fr 2fr 150px auto;gap:10px;align-items:center;padding:14px 18px;border-style:dashed">
+<form method="post" action="/sow/vendor/save" class="sow-card vnd-form new">
   <input class="slot" name="name" placeholder="+ New vendor name — e.g. Invictus Data, Inc." required>
   <input class="slot" name="entity_line" placeholder="Entity line — Invictus Data Inc, with its principal place of business located at ...">
   <input class="slot" type="date" name="msa_date" title="MSA date">
@@ -2971,8 +2985,8 @@ def _contract_groups(data):
 
 
 _SIDE_META = {
-    "sea": ("SEA ↔ Cheil", "dir-samsung", "#38bdf8", "🔵"),
-    "vendor": ("Cheil ↔ Vendor", "dir-agency", "#fb923c", "🟠"),
+    "sea": ("SEA ↔ Cheil", "dir-samsung", "var(--accent)", "🔵"),
+    "vendor": ("Cheil ↔ Vendor", "dir-agency", "var(--group-4)", "🟠"),
 }
 
 
@@ -2996,7 +3010,7 @@ def _contract_card(c, draggable=False, show_title=True, status="active"):
         + f'<div class="ctr-top"><span class="dir-chip {chip}">{icon} {label}</span>'
         + ('<span class="dir-chip" style="color:var(--danger);background:rgba(248,113,113,.12)">❌ Cancelled</span>'
            if status == "cancelled" else '')
-        + ('<span class="dir-chip" style="color:#a78bfa;background:rgba(167,139,250,.14)" title="Adds its stated amount/period on top of the base contract">↺ Amendment</span>'
+        + ('<span class="dir-chip" style="color:var(--info);background:rgba(129,140,248,.14)" title="Adds its stated amount/period on top of the base contract">↺ Amendment</span>'
            if c.get("amends_id") else '')
         + ('' if c.get("confirmed") or status != "active" else
            '<span title="Needs review & confirmation" style="font-size:.8rem">⚠️</span>')
@@ -3361,7 +3375,7 @@ def _render_contract_frag(user, data, cid):
         for o in amend_cands)
     lc_chip = ('<span class="ctr-chip neg">❌ Cancelled — excluded from totals</span>'
                if lc == "cancelled" else
-               ('<span class="ctr-chip" style="color:#a78bfa;border-color:rgba(167,139,250,.4)">↺ Amendment — overrides the earlier document</span>'
+               ('<span class="ctr-chip" style="color:var(--info);border-color:rgba(129,140,248,.4)">↺ Amendment — overrides the earlier document</span>'
                 if c.get("amends_id") else '<span class="ctr-chip pos">● Active</span>'))
     eff_html = ""
     if amds:
@@ -3487,10 +3501,10 @@ _CTR_CSS = """
 .ctr-chip.pos{color:var(--success);border-color:rgba(52,211,153,.35)}
 .ctr-chip.neg{color:var(--danger);border-color:rgba(248,113,113,.4)}
 .ctr-group-body{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:14px;align-items:start}
-.ctr-sea-col .ctr-card{border-left:3px solid #38bdf8}
+.ctr-sea-col .ctr-card{border-left:3px solid var(--accent)}
 .ctr-ven-col{display:flex;flex-direction:column;gap:8px;min-height:40px;padding:6px;border:1px dashed transparent;border-radius:var(--radius-md);transition:.15s}
 .ctr-ven-col.drag-over,.ctr-orphans.drag-over{background:rgba(56,189,248,.10);border-color:var(--accent)}
-.ctr-ven-col .ctr-card{border-left:3px solid #fb923c}
+.ctr-ven-col .ctr-card{border-left:3px solid var(--group-4)}
 .ctr-drop-hint{font-size:.72rem;color:var(--text-muted);font-style:italic;padding:6px 4px}
 .ctr-orphans{margin-top:16px;padding:12px;border:1px dashed var(--border-bright);border-radius:var(--radius-lg);display:flex;flex-direction:column;gap:8px;transition:.15s}
 .ctr-orphan-hd{font-size:.74rem;font-weight:700;color:var(--text)}
@@ -3519,7 +3533,7 @@ _CTR_CSS = """
 .cf-table .pin{position:sticky;left:0;background:var(--surface-2);font-weight:700;font-size:.72rem;color:var(--text);z-index:1;max-width:190px;overflow:hidden;text-overflow:ellipsis}
 .cf-table th.pin{z-index:2}
 .cf-table .bill{color:var(--success)}
-.cf-table .pay{color:#fb923c}
+.cf-table .pay{color:var(--group-4)}
 .cf-table .tot{font-weight:800;border-left:1px solid var(--border-bright)}
 .cf-table .pos{color:var(--success)}
 .cf-table .neg{color:var(--danger)}

@@ -1,0 +1,61 @@
+{
+  "_cardconv_core.py": {},
+  "_cardconv_render.py": {
+    "token-color": 73
+  },
+  "_matters_render.py": {
+    "english-ui": 18,
+    "mobile-bp": 1,
+    "viewport": 1
+  },
+  "admin.py": {
+    "english-ui": 19,
+    "global-css": 1,
+    "mobile-bp": 1,
+    "token-color": 44,
+    "viewport": 1
+  },
+  "aeo.py": {
+    "mobile-bp": 1,
+    "token-color": 121
+  },
+  "auth.py": {
+    "english-ui": 1,
+    "global-css": 1
+  },
+  "dashboard.py": {
+    "english-ui": 2,
+    "mobile-bp": 1,
+    "token-color": 4
+  },
+  "design.py": {},
+  "habits.py": {
+    "mobile-bp": 1,
+    "token-color": 3
+  },
+  "llm_check.py": {
+    "english-ui": 14,
+    "mobile-bp": 1,
+    "token-color": 147
+  },
+  "notebot.py": {
+    "mobile-bp": 1,
+    "token-color": 5
+  },
+  "pov.py": {
+    "english-ui": 1,
+    "token-color": 4
+  },
+  "report.py": {
+    "mobile-bp": 1,
+    "token-color": 7
+  },
+  "sow.py": {},
+  "terminals.py": {
+    "global-css": 1,
+    "token-color": 6
+  },
+  "todo.py": {
+    "token-color": 1
+  }
+}
