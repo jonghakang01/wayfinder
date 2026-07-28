@@ -121,6 +121,14 @@ details.ds-intake .body{margin-top:10px;color:var(--text-muted);font-size:var(--
 .ds-step.done{color:var(--text-muted)} .ds-step.done .b{background:var(--accent);color:var(--on-accent);border:0}
 .ds-step.now{color:var(--text);font-weight:var(--fw-bold)}
 .ds-step.now .b{border-color:var(--accent);color:var(--accent)}
+/* demo staging — the shared modal/sheet are position:fixed in the real app, so
+   the page pins them into a box instead of letting them cover this page */
+.ds-stage{position:relative;background:var(--bg-deep);border:1px solid var(--border);
+  border-radius:var(--radius-lg);padding:18px;overflow:hidden}
+.ds-stage .wf-modal-backdrop,.ds-stage .wf-sheet{position:static}
+.ds-stage .wf-modal-backdrop{padding:0}
+.ds-stage .wf-sheet{border:1px solid var(--border-bright)}
+.ds-phone{max-width:390px}
 @media(max-width:640px){ .ds-toolbar{flex-direction:column;align-items:stretch} }
 """
 
@@ -229,6 +237,83 @@ def render(user):
       <span class="ds-step now"><span class="b">3</span>Review Ledger</span>
       <span class="ds-step"><span class="b">4</span>Convert CSV</span>
       <span class="ds-step"><span class="b">5</span>Review &amp; Download</span></div>
+
+    <h3>Form controls</h3>
+    <p>Controls sit on <code>--bg-deep</code> inside a <code>--surface</code> container, so they
+    read as recessed; focus moves the border to <code>--accent</code>, never a browser glow.
+    Money uses <code>type=text inputmode=decimal</code> with <code>.wf-num</code> — the number
+    spinner is useless and the mobile keypad is worse. Remember that
+    <b>clearing a field needs a sentinel</b>: <code>parse_qs</code> drops empty values.</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;max-width:520px">
+      <label class="wf-field"><span class="wf-label">Merchant</span>
+        <input class="wf-input" type="text" value="JANG TU RESTAURANT"></label>
+      <label class="wf-field"><span class="wf-label">Card type</span>
+        <select class="wf-input"><option>AMEX</option><option>Cash</option></select></label>
+      <label class="wf-field"><span class="wf-label">Amount (USD)</span>
+        <input class="wf-input wf-num" type="text" inputmode="decimal" value="157.98"></label>
+      <label class="wf-field"><span class="wf-label">Usage</span>
+        <input class="wf-input" type="text" value="Regular" disabled></label>
+    </div>
+    <p style="margin-top:10px"><label class="wf-checkbox"><input type="checkbox" checked> Select all</label></p>
+
+    <h3>Empty state</h3>
+    <p>Name <b>why</b> it's empty and offer the one action that fills it — "No data" is not a
+    message. Nothing-yet and filter-matched-nothing read differently; the second must not
+    look like failure.</p>
+    <div class="wf-empty-card" style="padding:26px 20px;text-align:center;max-width:420px">
+      <div class="wf-empty-icon">🔍</div>
+      <div class="wf-empty-title">No rows match these filters</div>
+      <p class="wf-empty-sub">3 filters are active — 113 receipts are hidden.</p>
+      <div class="wf-empty-actions"><button class="btn btn-secondary">↺ Reset all</button></div>
+    </div>
+
+    <h3>Modal</h3>
+    <p>State the <b>consequence</b>, not the mechanism. Buttons are verbs that match the title,
+    the destructive one is <code>.btn-danger</code> and never the default focus. Anything
+    undoable shouldn't be a modal at all — do it and offer an undo. At ≤768px the modal
+    becomes a bottom sheet automatically, same as every other popover.</p>
+    <div class="ds-stage">
+      <div class="wf-modal-backdrop"><div class="wf-modal">
+        <h3 class="wf-modal-title">🗑 Delete card profile</h3>
+        <p class="wf-modal-body">This removes the profile and <b>all of its app data</b> —
+        statements, ledger, OCR queue and card names. Files already in Google Drive stay in Drive.</p>
+        <div class="wf-modal-actions"><button class="btn btn-secondary">Cancel</button>
+          <button class="btn btn-danger">Delete profile</button></div>
+      </div></div>
+    </div>
+
+    <h3>Bottom sheet</h3>
+    <p>An anchored menu clips off-screen on a narrow viewport, so at ≤768px it stops being
+    anchored and becomes a fixed sheet in the thumb zone, padded for
+    <code>env(safe-area-inset-bottom)</code>. Same click-to-toggle behavior as the desktop
+    popover — don't invent a drag gesture nothing else in the app uses.</p>
+    <div class="ds-stage ds-phone">
+      <div class="wf-sheet">
+        <div class="wf-sheet-title">Filters</div>
+        <label class="wf-field" style="margin-bottom:10px"><span class="wf-label">Card</span>
+          <select class="wf-input"><option>All</option><option>AMEX</option><option>Cash</option></select></label>
+        <div style="display:flex;gap:8px"><button class="btn btn-secondary">↺ Reset</button>
+          <button class="btn btn-primary" style="flex:1">Apply</button></div>
+      </div>
+    </div>
+
+    <h3>Table that becomes cards</h3>
+    <p>Transactional rows (ones people act on) use <code>.wf-cardtable</code>: a normal table on
+    desktop, one card per row below 768px, where <b>every <code>td</code> carries
+    <code>data-label</code></b>. Cap the card at ~6 visible fields — deeper edits belong in the
+    detail panel. Reference tables you only read keep their shape inside an
+    <code>overflow-x:auto</code> wrapper instead. Either way the page body never scrolls sideways.</p>
+    <table class="wf-cardtable" style="max-width:640px">
+      <thead><tr><th>Date</th><th>Merchant</th><th>Final</th><th>Card</th><th>Status</th></tr></thead>
+      <tbody>
+        <tr><td data-label="Date">2026-07-15</td><td data-label="Merchant">JANG TU RESTAURANT</td>
+          <td data-label="Final">$157.98</td><td data-label="Card">AMEX</td>
+          <td data-label="Status"><span class="ds-chip prog">⏳ IN PROGRESS</span></td></tr>
+        <tr><td data-label="Date">2026-07-15</td><td data-label="Merchant">STARBUCKS Store #5217</td>
+          <td data-label="Final">$15.85</td><td data-label="Card">Cash</td>
+          <td data-label="Status"><span class="ds-chip open">OPEN</span></td></tr>
+      </tbody>
+    </table>
   </div>
 
   <div class="ds-sect"><h2>4 · Rules &amp; pitfalls</h2>

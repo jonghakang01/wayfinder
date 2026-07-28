@@ -191,7 +191,9 @@ details.bucket-section[open] .service-grid { margin-top:14px; }
 .btn-secondary { background:var(--surface-2); color:var(--text); border:1px solid var(--border); }
 .btn-ghost     { background:transparent; color:var(--text-muted); border:1px solid var(--border); }
 .btn-success   { background:rgba(52,211,153,0.12); color:var(--success); border:1px solid rgba(52,211,153,0.3); }
-.btn-danger    { background:transparent; color:var(--text-muted); }
+/* A destructive action has to read as destructive without being hovered —
+   there is no hover on touch, and muted grey reads as disabled. */
+.btn-danger    { background:transparent; color:var(--danger); }
 .btn-accent    { background:var(--accent); color:var(--on-accent); font-weight:700; }
 .btn-warn      { background:rgba(251,191,36,0.12); color:var(--warn); border:1px solid rgba(251,191,36,0.3); }
 .btn-primary:hover   { opacity:0.88; transform:translateY(-1px); box-shadow:0 4px 12px rgba(56,189,248,0.3); }
@@ -205,7 +207,7 @@ details.bucket-section[open] .service-grid { margin-top:14px; }
   .btn-sm { height:36px; padding:0 10px; }
   .btn-lg { height:48px; }
 }
-.empty { text-align: center; color: #94a3b8; padding: 48px 0; }
+.empty { text-align: center; color: var(--text-muted); padding: 48px 0; }
 
 /* Tap ergonomics (all viewports — harmless on desktop) */
 a, button, select, label, input[type=checkbox], input[type=radio] { touch-action: manipulation; }
@@ -280,6 +282,75 @@ a, button, select, label, input[type=checkbox], input[type=radio] { touch-action
   .wf-stat-grid{grid-template-columns:1fr 1fr;gap:10px}
   .wf-stat{padding:14px 12px}.wf-stat-value{font-size:1.7rem}
   .wf-home-empty{grid-template-columns:1fr}
+}
+
+/* === Shared components (2026-07-28) ==========================================
+   Promoted out of cardconv so apps stop re-inventing them. Demos and the rules
+   that go with each one live on /design §3. The mobile guardrails above already
+   cover type size and tap targets — these only add shape. */
+
+/* Form controls — recessed on --bg-deep inside a --surface container */
+.wf-field{display:flex;flex-direction:column;gap:4px;min-width:0}
+.wf-label{font-size:var(--text-xs);font-weight:var(--fw-bold);letter-spacing:.06em;
+  text-transform:uppercase;color:var(--text-muted)}
+.wf-input{background:var(--bg-deep);border:1px solid var(--border);border-radius:var(--radius-md);
+  color:var(--text);padding:8px 10px;font-size:var(--text-sm);font-family:inherit;width:100%}
+.wf-input:focus{outline:none;border-color:var(--accent)}
+.wf-input:disabled{color:var(--text-dim);background:var(--surface-2)}
+/* Money and any other column that has to line up between rows. */
+.wf-input.wf-num{text-align:right;font-variant-numeric:tabular-nums}
+.wf-checkbox{display:inline-flex;align-items:center;gap:6px;font-size:var(--text-sm);
+  color:var(--text-muted);cursor:pointer}
+
+/* Empty state — self-sufficient on its own, transparent when a card wraps it */
+.wf-empty-card:not(.notepad-card){background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius-lg)}
+.wf-empty-sub{font-size:var(--text-sm);color:var(--text-muted);margin:-6px 0 14px}
+.wf-empty-actions{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+
+/* Modal — states the consequence; the destructive action is never the default */
+/* The scrim stays dark in both themes — a light scrim doesn't read as "the
+   page behind is inert", which is the one job a scrim has. */
+.wf-modal-backdrop{position:fixed;inset:0;z-index:300;background:rgba(8,13,20,.6);
+  display:flex;align-items:center;justify-content:center;padding:20px}
+.wf-modal{background:var(--surface);border:1px solid var(--border-bright);
+  border-radius:var(--radius-lg);box-shadow:var(--shadow-lg);padding:18px 20px;
+  width:100%;max-width:440px;max-height:85vh;overflow-y:auto}
+.wf-modal-title{font-size:var(--text-base);font-weight:var(--fw-bold);margin:0 0 8px}
+.wf-modal-body{font-size:var(--text-sm);color:var(--text-muted);line-height:1.6;margin:0 0 16px}
+.wf-modal-actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+
+/* Bottom sheet — what an anchored popover becomes on a narrow viewport */
+.wf-sheet{position:fixed;left:0;right:0;bottom:0;z-index:250;background:var(--surface);
+  border-top:1px solid var(--border-bright);border-radius:var(--radius-xl) var(--radius-xl) 0 0;
+  box-shadow:var(--shadow-lg);padding:16px 16px calc(16px + env(safe-area-inset-bottom,0px));
+  max-height:80vh;overflow-y:auto}
+.wf-sheet-title{font-size:var(--text-base);font-weight:var(--fw-bold);margin-bottom:12px}
+
+/* Transactional table that becomes cards on mobile — every td needs data-label */
+.wf-cardtable{width:100%;border-collapse:collapse;font-size:var(--text-sm)}
+.wf-cardtable th{text-align:left;font-size:var(--text-xs);font-weight:var(--fw-bold);
+  letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted);
+  padding:8px 10px;border-bottom:1px solid var(--border)}
+.wf-cardtable td{padding:9px 10px;border-bottom:1px solid var(--border)}
+
+@media (max-width: 768px){
+  /* A modal at phone width is a bottom sheet — same rule as every popover. */
+  .wf-modal-backdrop{align-items:flex-end;padding:0}
+  .wf-modal{max-width:none;border-radius:var(--radius-xl) var(--radius-xl) 0 0;
+    border-left:0;border-right:0;border-bottom:0;
+    padding-bottom:calc(18px + env(safe-area-inset-bottom,0px))}
+  .wf-modal-actions .btn{flex:1}
+  /* Rows become cards: the header goes away and each cell labels itself. */
+  .wf-cardtable thead{display:none}
+  .wf-cardtable tr{display:block;background:var(--surface);border:1px solid var(--border);
+    border-radius:var(--radius-lg);padding:10px 12px;margin-bottom:10px}
+  .wf-cardtable td{display:flex;justify-content:space-between;align-items:center;gap:12px;
+    padding:5px 0;border:0}
+  .wf-cardtable td::before{content:attr(data-label);font-size:var(--text-xs);
+    font-weight:var(--fw-bold);letter-spacing:.06em;text-transform:uppercase;
+    color:var(--text-muted);flex-shrink:0}
+  .wf-cardtable td[data-label=""]::before{content:none}
 }
 """
 
