@@ -66,7 +66,7 @@ def test_matched_receipt_cannot_become_cash_single_edit(monkeypatch):
 def test_matched_receipt_cannot_become_cash_bulk(monkeypatch):
     st = _isolate(monkeypatch,
                   [_receipt("r1", brand="amex", matched=True),
-                   _receipt("r2", brand="visa", matched=False)], [])
+                   _receipt("r2", brand=None, matched=False)], [])
     kind, resp, *_ = core._handle_ledger_bulk(
         "u", {"ids": ["r1", "r2"], "action": "card", "value": "other"})
     assert resp["cash_blocked"] == 1 and resp["updated"] == 1

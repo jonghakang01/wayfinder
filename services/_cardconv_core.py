@@ -310,7 +310,7 @@ def _migrate_entry(e: dict) -> dict:
     e.setdefault("ocr_handwritten_amount", None)
     # v2.2: multi-receipt bounding box overlay. Legacy entries have no bbox.
     e.setdefault("ocr_bbox", None)
-    # v2.3: card brand (amex/visa/other, OCR-detected, user-editable), usage tag
+    # v2.3: card brand (amex/other, OCR-detected, user-editable), usage tag
     # (default "Regular"), and completion state (completed entries are hidden from
     # the default Ledger view, Sync and Mapping, and their Drive originals are
     # moved to a "Completed" folder).
@@ -353,6 +353,11 @@ def _migrate_entry(e: dict) -> dict:
     # backfill the brand for already-matched entries that predate card detection.
     if e.get("match_status") == "matched" and not e.get("card_brand"):
         e["card_brand"] = "amex"
+    # v2.9: the card type is AMEX or Cash, nothing else. Anything paid on another
+    # card (legacy "visa") is reimbursed as cash all the same, so it folds into
+    # "other" on load — persisted rows heal on their next save.
+    if e.get("card_brand") and e["card_brand"] != "amex":
+        e["card_brand"] = "other"
     return e
 
 
@@ -680,8 +685,7 @@ def _handle_ocr_staging_confirm(username: str, body: dict):
                     pass
         raw = fix.get("card_brand")
         if raw is not None:
-            v = str(raw).strip().lower()
-            entry["card_brand"] = v if v in ("amex", "visa", "other") else None
+            entry["card_brand"] = _valid_brand(raw)
         raw = fix.get("ocr_companions")
         if raw is not None:
             entry["ocr_companions"] = _coerce_companions(str(raw))
@@ -1741,15 +1745,16 @@ _OCR_PROMPT = (
     '4) handwritten_amount: any HAND-WRITTEN final amount including tip (number only, '
     'null if none visible). '
     'Handwritten amount, when present, is the REAL final amount and overrides printed. '
-    '5) card_brand: the payment card brand used, normalized to one of "amex", '
-    '"visa", "other", or null only if there is NO card information at all (e.g. '
-    'cash payment). Determine it from BOTH of these signals: '
+    '5) card_brand: the payment method, normalized to "amex" (the corporate AMEX '
+    'card) or "other" (anything else — a personal card of any brand, or cash), or '
+    'null only if there is NO payment information at all. Determine it from BOTH of '
+    'these signals: '
     '(a) brand text/logo on the receipt — "AMERICAN EXPRESS"/"AMEX"/"AMX" -> "amex", '
-    '"VISA" -> "visa", any other brand (Mastercard, Discover, etc.) -> "other"; AND '
+    'any other brand (Visa, Mastercard, Discover, etc.) -> "other"; AND '
     '(b) the card account number, even when masked (e.g. "XXXX-XXXXXX-X1234", '
     '"************1234", "ending in 1234", "AETC 3759"): use the FIRST visible digit '
-    '- a number starting with 3 (15-digit, 4-6-5 grouping) -> "amex"; starting with 4 '
-    '-> "visa"; starting with 2 or 5 -> "other". If (a) and (b) disagree, prefer the '
+    '- a number starting with 3 (15-digit, 4-6-5 grouping) -> "amex"; starting with '
+    '2, 4 or 5 -> "other". If (a) and (b) disagree, prefer the '
     'explicit brand text. AMEX receipts often show "AMEX", "AETC", or a 15-digit / '
     '3-prefixed card number — treat any of these as "amex". '
     '6) currency: the ISO 4217 code of the amounts on the receipt. Infer from '
@@ -1915,7 +1920,7 @@ def _fx_usd_estimate(amount, currency: str, date_str: str = None):
 
 
 def _coerce_card_brand(v):
-    """Normalize a model's card-brand string to 'amex'/'visa'/'other' or None."""
+    """Normalize a model's card-brand string to 'amex' or 'other' (Cash), or None."""
     if not v:
         return None
     s = str(v).strip().lower()
@@ -1923,9 +1928,19 @@ def _coerce_card_brand(v):
         return None
     if "amex" in s or "american express" in s or s == "amx":
         return "amex"
-    if "visa" in s:
-        return "visa"
     return "other"
+
+
+def _valid_brand(v):
+    """A user-supplied card type: 'amex' or 'other' (Cash) only, else None.
+
+    Legacy 'visa' values still arrive from stale pages/bookmarks and settle as
+    cash reimbursements, so they map onto 'other' rather than clearing the field.
+    """
+    s = str(v or "").strip().lower()
+    if s in ("amex", "other"):
+        return s
+    return "other" if s == "visa" else None
 
 
 def _coerce_bbox(v):
@@ -3704,7 +3719,7 @@ def _handle_ledger_update(username: str, entry_id: str, body: dict):
                         rc["companions"] = e["ocr_companions"]
                         _save_tx_pool(username, pool)
                         break
-        # Card brand: normalize to amex/visa/other, or clear when blank.
+        # Card brand: normalize to amex/other, or clear when blank.
         # Matched ⇒ AMEX by definition (the statement is AMEX), so a matched
         # receipt cannot be flipped to Cash — unmatch first.
         raw = body.get("card_brand")
@@ -3714,7 +3729,7 @@ def _handle_ledger_update(username: str, entry_id: str, body: dict):
             if val == "other" and e.get("matched"):
                 cash_blocked = True
             else:
-                e["card_brand"] = val if val in ("amex", "visa", "other") else None
+                e["card_brand"] = _valid_brand(val)
         # Reason for Cash: receipt is the source of truth; _sync_cash_pool
         # mirrors it onto the cash pool row for Review + the SAP column S.
         raw = body.get("cash_reason")
@@ -3795,7 +3810,7 @@ def _handle_ledger_bulk(username: str, body: dict):
             if v == "other" and e.get("matched"):
                 cash_blocked += 1  # matched ⇒ AMEX by definition
                 continue
-            e["card_brand"] = v if v in ("amex", "visa", "other") else None
+            e["card_brand"] = _valid_brand(v)
         elif action == "usage":
             e["usage"] = str(value or "").strip() or "Regular"
         elif action == "companions":
@@ -4055,14 +4070,14 @@ def _handle_review_download(username: str, query: dict):
     if not entries:
         return ("html", "<h2 style='padding:40px'>No open transactions to download.</h2>", 404)
     # Receipt Type (col A): D = AMEX statement charge; everything else —
-    # cash, personal Visa, any non-AMEX method — is reimbursed as cash → A.
+    # cash, a personal card, any non-AMEX method — is reimbursed as cash → A.
     # Reason for Cash lives on the receipt (OCR confirm / Ledger edit) — read
     # it live so a fresh edit exports even before a Review render mirrors it.
     rcpts = {r.get("id"): r for r in _load_receipts(username)}
     for e in entries:
         rc = rcpts.get((e.get("receipt") or {}).get("id"))
         rb = (rc or {}).get("card_brand") or ""
-        e["receipt_type"] = "A" if (e.get("cash") or rb in ("visa", "other")) else "D"
+        e["receipt_type"] = "A" if (e.get("cash") or rb == "other") else "D"
         if e.get("cash") and rc is not None:
             e["cash_reason"] = rc.get("cash_reason") or e.get("cash_reason")
     try:
@@ -4237,7 +4252,7 @@ def _build_expense_report(username: str, entries: list) -> bytes:
     return out.getvalue()
 
 
-_CARD_BRAND_LABEL = {"amex": "AMEX", "visa": "Visa", "other": "Other"}
+_CARD_BRAND_LABEL = {"amex": "AMEX", "other": "Cash"}
 
 
 def _handle_ledger_xlsx(username: str, query: dict):

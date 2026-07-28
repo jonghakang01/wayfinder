@@ -1158,7 +1158,7 @@ def _render_review(user: str) -> str:
                 done_badge = ''
             # Payment chip: cash rows keep the 💵 badge; everything else is a
             # statement line = AMEX charge by definition, but a matched
-            # receipt's own card type wins (legacy visa rows possible).
+            # receipt's own card type wins.
             if r.get("cash"):
                 brand = "other"
                 pay_chip = ('<span class="rv-gl rv-cash" title="Cash receipt — not on the AMEX statement. '
@@ -1167,7 +1167,7 @@ def _render_review(user: str) -> str:
                             + (f'<span class="rv-gl">G/L {_esc(r.get("gl"))}</span>' if r.get("gl") else ''))
             else:
                 brand = (_rcpt_attrs.get(rc.get("id"), ("", ""))[0] if is_matched else "") or "amex"
-                label = {"amex": "AMEX", "visa": "Visa", "other": "Cash"}.get(brand, brand.upper())
+                label = {"amex": "AMEX", "other": "Cash"}.get(brand, "Cash")
                 pay_chip = (f'<span class="rv-gl rv-brand" title="Payment card type">💳 {label}</span>'
                             f'<span class="rv-gl">G/L {_esc(r.get("gl"))}</span>')
             # Cash rows show the receipt's own currency + USD conversion
@@ -1483,7 +1483,6 @@ body:has(.fb-menu.open) .wf-back,body:has(.fb-menu.open) #wfThemeBtn{{display:no
       <select id="rvCard">
         <option value="all">All</option>
         <option value="amex">AMEX</option>
-        <option value="visa">Visa</option>
         <option value="other">Cash</option>
         <option value="unknown">–</option>
       </select>
@@ -2159,7 +2158,7 @@ def _render_ocr_staging_review(user: str) -> str:
     <div class="stg-row"><span class="stg-lbl">Merchant</span><span class="stg-val">{merch_v}</span></div>
     <div class="stg-row"><span class="stg-lbl">Printed</span><span class="stg-val">{amt_v}</span></div>
     <div class="stg-row"><span class="stg-lbl">Handwritten</span><span class="stg-val">{hw_v}</span></div>
-    <div class="stg-row"><span class="stg-lbl">Card</span><span class="stg-val">{_esc({"amex": "AMEX", "visa": "Visa", "other": "Cash"}.get(e.get("card_brand") or "", "–"))}</span></div>
+    <div class="stg-row"><span class="stg-lbl">Card</span><span class="stg-val">{_esc({"amex": "AMEX", "other": "Cash"}.get(e.get("card_brand") or "", "–"))}</span></div>
     <div class="stg-row"><span class="stg-lbl">w/</span><span class="stg-val">{_esc(e.get("ocr_companions") or "–")}</span></div>
     {'<div class="stg-row stg-reason"><span class="stg-lbl">Reason for Cash</span><input type="text" name="cash_reason_' + eid + '" maxlength="120" value="' + _esc(e.get("cash_reason") or "") + '" placeholder="e.g. Vendor does not accept cards" style="flex:1;margin-left:10px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:.78rem;padding:3px 6px"></div>' if (e.get("card_brand") or "") == "other" else ''}
     {fx_row}
@@ -2403,7 +2402,6 @@ __TABCSS__
 .ai-badge.claude{color:#7c3aed;background:rgba(124,58,237,.1)}
 .card-badge{font-size:.66rem;font-weight:700;padding:2px 8px;border-radius:10px;white-space:nowrap}
 .card-amex{color:#1e40af;background:rgba(37,99,235,.14)}
-.card-visa{color:#6d28d9;background:rgba(124,58,237,.12)}
 .card-other{color:#64748b;background:rgba(100,116,139,.14)}
 .comp-tag{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:10px;font-size:.6rem;
   font-weight:700;background:rgba(129,140,248,.18);color:#818cf8;white-space:nowrap}
@@ -2556,7 +2554,6 @@ body:has(.fb-selbar.show) .wf-back,body:has(.fb-selbar.show) #wfThemeBtn{display
       <select id="fCard">
         <option value="all">All</option>
         <option value="amex">AMEX</option>
-        <option value="visa">Visa</option>
         <option value="other">Cash</option>
         <option value="unknown">Unknown</option>
       </select>
@@ -2605,7 +2602,6 @@ body:has(.fb-selbar.show) .wf-back,body:has(.fb-selbar.show) #wfThemeBtn{display
       <select class="sb-act" id="fBulkCard" title="Set card type on all selected">
         <option value="">💳 Card type</option>
         <option value="amex">AMEX</option>
-        <option value="visa">Visa</option>
         <option value="other">Cash</option>
         <option value="none">Clear (–)</option>
       </select>
@@ -2680,7 +2676,7 @@ body:has(.fb-selbar.show) .wf-back,body:has(.fb-selbar.show) #wfThemeBtn{display
     <div class="detail-row"><span class="key">Card Type</span>
       <span class="val" id="dCard">–</span>
       <select id="eCard" style="display:none;width:120px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:.82rem;padding:2px 6px">
-        <option value="none">–</option><option value="amex">AMEX</option><option value="visa">Visa</option><option value="other">Cash</option>
+        <option value="none">–</option><option value="amex">AMEX</option><option value="other">Cash</option>
       </select>
     </div>
     <div class="detail-row"><span class="key">Usage</span>
@@ -2793,7 +2789,7 @@ function thumb(e){
          'onerror="this.onerror=null;this.src=\'' + proxy + '\'">';
 }
 
-const CARD_LABEL = {amex:'AMEX', visa:'Visa', other:'Cash'};
+const CARD_LABEL = {amex:'AMEX', other:'Cash'};
 function cardBadge(b){
   if(!b || !CARD_LABEL[b]) return '<span style="color:var(--text-muted);font-size:.72rem">–</span>';
   return '<span class="card-badge card-' + b + '">' + CARD_LABEL[b] + '</span>';
@@ -2851,10 +2847,10 @@ async function markNotDup(id, on){
   load();
 }
 
-// Inline-editable Card Type cell: dropdown of –/AMEX/Visa/Other, edited from the row.
+// Inline-editable Card Type cell: dropdown of –/AMEX/Cash, edited from the row.
 // The "none" value is an explicit sentinel (empty form values get dropped in
 // transit, so they can't clear a field) that the backend maps back to null.
-const CARD_OPTS = [['none','–'],['amex','AMEX'],['visa','Visa'],['other','Cash']];
+const CARD_OPTS = [['none','–'],['amex','AMEX'],['other','Cash']];
 function cardCell(e){
   const cur = e.card_brand || 'none';
   let html = '<select class="card-sel" data-id="' + esc1(e.id) + '" title="Change card type">';
@@ -3975,8 +3971,8 @@ function _imgLbKey(e){ if(e.key==='Escape') closeImgLb(); }
         + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">'
         +   '<div><label style="' + LABEL_STYLE + '">Card type</label>'
         +     '<select class="ocr-field" data-field="card_brand" data-id="' + eid + '" style="' + INPUT_STYLE + '">'
-        +       ['','amex','visa','other'].map(function(v){
-                  var lbl = {'':'–', amex:'AMEX', visa:'Visa', other:'Cash'}[v];
+        +       ['','amex','other'].map(function(v){
+                  var lbl = {'':'–', amex:'AMEX', other:'Cash'}[v];
                   return '<option value="' + v + '"' + ((e.card_brand || '') === v ? ' selected' : '') + '>' + lbl + '</option>';
                 }).join('')
         +     '</select></div>'
