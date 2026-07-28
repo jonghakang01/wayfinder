@@ -4243,9 +4243,11 @@ def _schedule_box(c, months):
 
 
 def _people_sheet_box(c):
-    """Per-contract team sheet intake (강프로 2026-07-27). The parsed rows land
-    in the SAME review list as the ones read out of the contract text, so the
-    rate axis, the roster merge and the contract link all stay in one path."""
+    """One sheet intake per contract, for BOTH sheets that turn up against a
+    contract (강프로 2026-07-28): the team roster and the revised monthly
+    billing schedule. It used to take only the roster and reject a schedule
+    with "No name column found", which is a dead end when the schedule is what
+    you have in your hand — so what the sheet contains decides where it goes."""
     axis = "Contract rate (what Cheil pays)" if c.get("side") == "vendor" else \
            "Selling rate (what Cheil bills)"
     err = c.get("people_sheet_error")
@@ -4257,13 +4259,15 @@ def _people_sheet_box(c):
         status = f'<div class="sow-meta">Last sheet read: <b>{_esc(note)}</b></div>'
     return f"""
 <details class="ctr-linkbox ppl-sheet">
-  <summary><b>📊 Upload this contract's team sheet</b>
-    <span class="sow-meta">— Excel/CSV, or paste the range</span></summary>
+  <summary><b>📥 Upload a sheet for this contract</b>
+    <span class="sow-meta">— the team, or a revised monthly schedule</span></summary>
   {status}
-  <div class="sow-meta" style="margin:6px 0 8px">One row per person with a header
-    row: <b>Resource/Name</b> plus any of Role/Function, Rate, Location, Email.
-    Rates land as the <b>{axis}</b>; hourly vs monthly is taken from the column
-    heading. Nothing is saved until you review the list above.</div>
+  <div class="sow-meta" style="margin:6px 0 8px">The sheet decides what it is:
+    <br>👥 <b>Team</b> — a <b>Resource/Name</b> column, plus any of Role/Function,
+    Rate, Location, Email. Rates land as the <b>{axis}</b>.
+    <br>📅 <b>Monthly schedule</b> — month labels (Jan-26, 2026-01) with the
+    amount against each. It comes back for review as a change to this contract.
+    <br>Nothing is saved either way until you review it.</div>
   <form class="ppl-sheet-form" onsubmit="return pplSheet(event,'{c["id"]}')">
     <input class="slot" type="file" name="file" accept=".xlsx,.xlsm,.csv,.txt,.tsv">
     <textarea class="slot" name="text" rows="3"
@@ -5005,7 +5009,11 @@ def handle(method, path, body, ctx):
             src = "pasted range"
         read = _month_table_read(rows) if rows else None
         if not read or not read["columns"]:
+            people, _n = _people_from_table(rows) if rows else ([], "")
             target["schedule_error"] = (
+                f"That looks like a team sheet ({len(people)} people), not a "
+                f"billing schedule — upload it from the contract itself, under "
+                f"“Upload a sheet for this contract”." if people else
                 "No monthly figures found — the sheet needs month labels "
                 "(Jan-26, January 2026, 2026-01) with an amount against each.")
             _save(user, data)
@@ -5200,8 +5208,10 @@ def handle(method, path, body, ctx):
         return ("redirect", "/sow/contracts")
 
     if method == "POST" and path == "/sow/contract/people_upload":
-        # the team for a deal usually arrives as a sheet, not inside the
-        # contract text (강프로 2026-07-27) — same review list either way
+        # One sheet intake against a contract (강프로 2026-07-28). The team for a
+        # deal usually arrives as a sheet rather than inside the contract text,
+        # and so does a revised monthly billing schedule — the sheet's own
+        # contents say which it is, instead of one being rejected out of hand.
         raw = body.get("__raw__") or body.get("__raw_handler__")
         fields, files = _read_multipart(raw) if raw else ({}, [])
         if not fields and not files:
@@ -5210,24 +5220,34 @@ def handle(method, path, body, ctx):
         c = _contract_by_id(data, (fields.get("id") or "").strip())
         if not c:
             return ("redirect", "/sow/contracts")
-        rows = []
+        rows, src = [], ""
         if files:
             fn, content, _mime = files[0]
             try:
                 rows = _sheet_rows(content, _sheet_ext(fn))
+                src = _safe_filename(fn)
             except Exception:
                 rows = []
         elif (fields.get("text") or "").strip():
             rows = _text_rows(fields["text"])
+            src = "pasted range"
         found, note = _people_from_table(rows) if rows else ([], "")
+        read = _month_table_read(rows) if rows else None
         if found:
+            # a roster names people; that wins whenever a name column is there
             c["people_pending"] = _merge_pending(c.get("people_pending"), found)
             c["people_sheet_note"] = note
             c.pop("people_sheet_error", None)
+        elif read and read["columns"]:
+            c["schedule_preview"] = dict(read, src=src, name="", note_text="")
+            c["people_sheet_note"] = (
+                f"read as a monthly billing schedule — {read['note']}")
+            c.pop("people_sheet_error", None)
         else:
             c["people_sheet_error"] = (
-                "No name column found — the sheet needs a header row with "
-                "Resource/Name, and ideally Role, Rate and Location.")
+                "Neither a team nor a schedule could be read — a team sheet "
+                "needs a Resource/Name column, a monthly schedule needs month "
+                "labels (Jan-26, 2026-01) with an amount against each.")
         _save(user, data)
         return ("redirect", f"/sow/contracts?newc={c['id']}")
 

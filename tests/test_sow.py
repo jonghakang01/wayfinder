@@ -1035,9 +1035,58 @@ def test_a_sheet_with_no_months_says_so_and_stages_nothing(tmp_path, monkeypatch
     m = _isolated(tmp_path, monkeypatch)
     user = "badsheet"
     m._save(user, {"contracts": [{"id": "base", "side": "sea"}]})
-    raw = _multipart({"target": "base"}, "team.xlsx",
-                     _xlsx([["Resource", "Rate"], ["Jane Park", 120]]))
+    raw = _multipart({"target": "base"}, "junk.xlsx",
+                     _xlsx([["Widget", "Colour"], ["A", "red"]]))
     m.handle("POST", "/sow/contract/schedule", {"__raw__": raw}, {"user": user})
     c = m._load(user)["contracts"][0]
     assert "schedule_preview" not in c
     assert "No monthly figures found" in c["schedule_error"]
+
+
+def test_the_contract_sheet_box_takes_a_schedule_too_not_only_a_roster(tmp_path, monkeypatch):
+    # 강프로 2026-07-28: uploading the billing schedule where the contract is
+    # open answered "No name column found", a dead end. The sheet decides now.
+    m = _isolated(tmp_path, monkeypatch)
+    user = "bothsheets"
+    m._save(user, {"contracts": [{"id": "base", "side": "sea", "period_start": "2025-01-01",
+                                  "period_end": "2027-12-31"}]})
+    raw = _multipart({"id": "base"}, "cut.xlsx", _xlsx(_cut_simulation_rows()))
+    m.handle("POST", "/sow/contract/people_upload", {"__raw__": raw}, {"user": user})
+    c = m._load(user)["contracts"][0]
+    assert "people_sheet_error" not in c
+    assert len(c["schedule_preview"]["columns"]) == 2
+    assert "monthly billing schedule" in c["people_sheet_note"]
+    assert not c.get("people_pending")
+
+
+def test_a_roster_still_wins_when_the_sheet_names_people(tmp_path, monkeypatch):
+    m = _isolated(tmp_path, monkeypatch)
+    user = "roster"
+    m._save(user, {"contracts": [{"id": "base", "side": "vendor"}]})
+    raw = _multipart({"id": "base"}, "team.xlsx",
+                     _xlsx([["Resource", "Role", "Rate"], ["Jane Park", "Dev", 40]]))
+    m.handle("POST", "/sow/contract/people_upload", {"__raw__": raw}, {"user": user})
+    c = m._load(user)["contracts"][0]
+    assert [p["name"] for p in c["people_pending"]] == ["Jane Park"]
+    assert "schedule_preview" not in c
+
+
+def test_neither_shape_says_what_both_would_need(tmp_path, monkeypatch):
+    m = _isolated(tmp_path, monkeypatch)
+    user = "junk"
+    m._save(user, {"contracts": [{"id": "base", "side": "sea"}]})
+    raw = _multipart({"id": "base"}, "junk.xlsx", _xlsx([["a", "b"], ["c", "d"]]))
+    m.handle("POST", "/sow/contract/people_upload", {"__raw__": raw}, {"user": user})
+    err = m._load(user)["contracts"][0]["people_sheet_error"]
+    assert "Resource/Name" in err and "month labels" in err
+
+
+def test_a_team_sheet_in_the_schedule_tab_points_at_the_right_box(tmp_path, monkeypatch):
+    m = _isolated(tmp_path, monkeypatch)
+    user = "wrongtab"
+    m._save(user, {"contracts": [{"id": "base", "side": "sea"}]})
+    raw = _multipart({"target": "base"}, "team.xlsx",
+                     _xlsx([["Resource", "Role", "Rate"], ["Jane Park", "Dev", 40]]))
+    m.handle("POST", "/sow/contract/schedule", {"__raw__": raw}, {"user": user})
+    err = m._load(user)["contracts"][0]["schedule_error"]
+    assert "team sheet (1 people)" in err and "Upload a sheet for this contract" in err
