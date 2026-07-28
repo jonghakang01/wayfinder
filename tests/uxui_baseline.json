@@ -8,15 +8,12 @@
   },
   "services/_matters_render.py": {
     "english-ui": 18,
-    "mobile-bp": 1,
-    "viewport": 1
+    "mobile-bp": 1
   },
   "services/admin.py": {
     "english-ui": 19,
-    "global-css": 1,
     "mobile-bp": 1,
-    "token-color": 44,
-    "viewport": 1
+    "token-color": 44
   },
   "services/aeo.py": {
     "mobile-bp": 1,
@@ -54,10 +51,6 @@
     "token-color": 7
   },
   "services/sow.py": {},
-  "services/terminals.py": {
-    "global-css": 1,
-    "token-color": 6
-  },
   "services/todo.py": {
     "token-color": 1
   }

@@ -96,7 +96,10 @@ def lint_source(src, toks):
                          f"{m.group(0)} duplicates {tok} — use var({tok})"))
 
     for m in re.finditer(r"<!doctype html>(.{0,900})", src, re.I | re.S):
-        head = m.group(1)
+        # A shell built by concatenating escaped string literals carries \" in
+        # the source; without unescaping, every one of them reads as "no
+        # viewport meta" (services/_matters_render.py did, and has one).
+        head = m.group(1).replace('\\"', '"')
         if "name=\"viewport\"" not in head:
             hits.append(("viewport", at(m.start()), "page shell has no viewport meta"))
         if "/static/style.css" not in head:

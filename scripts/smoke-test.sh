@@ -45,7 +45,6 @@ check "POV feed (auth required)"  "$BASE/pov/feed"         "302"
 check "AEO (auth required)"       "$BASE/aeo"              "302"
 check "LLM Check (auth required)" "$BASE/llm-check"        "302"
 check "Admin (auth required)"     "$BASE/admin"            "302"
-check "Terminals (auth required)" "$BASE/terminals"        "302"
 
 check "Design System (auth required)"    "$BASE/design"    "302"
 check "Matter Tracker (auth required)"    "$BASE/matters"   "302"

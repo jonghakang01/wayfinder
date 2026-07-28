@@ -158,10 +158,21 @@ def _render_view(target_user, service_name, admin_user):
 
 
 def _forbidden():
+    """The 403 is a page too — it gets the same shell as every other one."""
     return (
-        '<!DOCTYPE html><html><body style="text-align:center;padding:80px;font-family:sans-serif">'
-        '<h2>🚫 권한 없음</h2><p>관리자만 접근할 수 있습니다.</p>'
-        '<a href="/">← 홈으로</a></body></html>'
+        '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">'
+        '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        '<title>Admin · Wayfinder</title>'
+        '<link rel="stylesheet" href="/static/style.css"></head><body>'
+        '<nav><span class="nav-brand">⚙️ Admin</span>'
+        '<span class="nav-user"><a class="nav-back" href="/">← Home</a></span></nav>'
+        '<div class="container"><div class="wf-empty-card" '
+        'style="padding:40px 24px;text-align:center">'
+        '<div class="wf-empty-icon">🚫</div>'
+        '<div class="wf-empty-title">Admins only</div>'
+        '<p class="wf-empty-sub">This page is restricted to administrator accounts.</p>'
+        '<div class="wf-empty-actions"><a class="btn btn-secondary" href="/">← Back to Wayfinder</a></div>'
+        '</div></div></body></html>'
     )
 
 
