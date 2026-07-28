@@ -2586,9 +2586,12 @@ __TABCSS__
 .detail-row{display:flex;justify-content:space-between;font-size:.84rem;padding:4px 0}
 .detail-row .key{color:var(--text-muted)}
 .detail-row .val{font-weight:600;color:var(--text)}
-.receipt-image-full{width:100%;border-radius:var(--radius-md);border:1px solid var(--border);
-  object-fit:contain;max-height:320px;background:var(--surface-2)}
-.receipt-image-wrap{position:relative;line-height:0}
+.receipt-image-full{max-width:100%;max-height:100%;object-fit:contain}
+.receipt-image-wrap{position:relative;display:flex;justify-content:center;align-items:center;height:320px;overflow:hidden;border-radius:var(--radius-md);border:1px solid var(--border);background:var(--surface-2)}
+/* A quarter-turned photo trades width for height, so the fit has to be
+   computed against the swapped axes — applyRotation() sets the limits. */
+.receipt-image-wrap.rotated #dImage{width:auto;height:auto}
+.rot-btn{padding:3px 9px;font-size:.9rem;line-height:1}
 /* SVG is sized/positioned in JS to overlap the rendered (object-fit:contain) image rect. */
 .receipt-bbox-overlay{position:absolute;top:0;left:0;pointer-events:none;display:none}
 .detail-actions{padding:16px 20px;display:flex;flex-direction:column;gap:8px;margin-top:auto}
@@ -2800,7 +2803,13 @@ body:has(.fb-selbar.show) .wf-back,body:has(.fb-selbar.show) #wfThemeBtn{display
     <button class="btn btn-ghost btn-sm" id="panelClose">× Close</button>
   </div>
   <div class="detail-section">
-    <div class="detail-section-title">Receipt Image <span style="font-size:.7rem;color:var(--text-muted);font-weight:400">(click to enlarge)</span></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+      <div class="detail-section-title" style="margin-bottom:0">Receipt Image <span style="font-size:.7rem;color:var(--text-muted);font-weight:400">(click to enlarge)</span></div>
+      <span style="display:flex;gap:4px">
+        <button class="btn btn-ghost btn-sm rot-btn" onclick="rotateReceipt(-90, event)" title="Rotate left">↺</button>
+        <button class="btn btn-ghost btn-sm rot-btn" onclick="rotateReceipt(90, event)" title="Rotate right">↻</button>
+      </span>
+    </div>
     <div class="receipt-image-wrap" id="dImageWrap" style="cursor:zoom-in" onclick="openImgLb()">
       <img class="receipt-image-full" id="dImage" alt="receipt">
       <svg class="receipt-bbox-overlay" id="dBboxOverlay"></svg>
@@ -2862,11 +2871,11 @@ body:has(.fb-selbar.show) .wf-back,body:has(.fb-selbar.show) #wfThemeBtn{display
     <div id="dStatus"></div>
   </div>
   <div class="detail-actions">
+    <button class="btn btn-ghost btn-sm" id="reOcrBtn" onclick="reOCR()" style="color:#818cf8;width:100%;margin-bottom:6px">🔄 Re-OCR</button>
     <button class="btn btn-ghost btn-sm" data-set="matched" style="color:#22c55e">✅ Mark Matched</button>
     <button class="btn btn-ghost btn-sm" data-set="unmatched" style="color:#ef4444">❌ Mark Unmatched</button>
     <button class="btn btn-ghost btn-sm" data-set="pending_match" style="color:#f59e0b">⏳ Mark Pending</button>
     <button class="btn btn-ghost btn-sm" id="dCompleteBtn" onclick="togglePanelComplete()" style="color:#818cf8;margin-top:6px;width:100%">✓ Mark Complete</button>
-    <button class="btn btn-ghost btn-sm" id="reOcrBtn" onclick="reOCR()" style="color:#818cf8;margin-top:6px;width:100%">🔄 Re-OCR</button>
     <button class="btn btn-ghost btn-sm" id="manualAddBtn" onclick="openManualAdd()" style="color:#34d399;margin-top:2px;width:100%">➕ Manually add a receipt on this image</button>
     <button class="btn btn-danger btn-sm" id="dDeleteBtn" onclick="deleteFromPanel()" style="margin-top:10px;width:100%">🗑 Delete this receipt</button>
   </div>
@@ -2940,7 +2949,7 @@ body:has(.fb-selbar.show) .wf-back,body:has(.fb-selbar.show) #wfThemeBtn{display
 </div>
 
 <script>
-let CUR_ID = null, CUR_FILE_ID = null, ENTRIES = [], VIEW_MODE = 'group';
+let CUR_ID = null, CUR_FILE_ID = null, CUR_ROT = 0, ENTRIES = [], VIEW_MODE = 'group';
 const $ = id => document.getElementById(id);
 const STATUS_LABEL = {matched:'✅ Matched', unmatched:'❌ Unmatched', pending_match:'⏳ Pending Match'};
 
@@ -3480,6 +3489,8 @@ function paintBoxes(svg, img, sibs, cur){
 function openPanel(e){
   CUR_ID = e.id;
   CUR_FILE_ID = e.file_id || null;
+  CUR_ROT = e.img_rotate || 0;
+  applyRotation();
   $('dDate').textContent = e.ocr_date || '–';
   $('dAmount').textContent = fmtAmtFx(e, e.ocr_amount);
   $('dPrinted').textContent = fmtAmtFx(e, e.ocr_printed_amount);
@@ -4115,6 +4126,43 @@ function syncFail(msg) {
   <button onclick="closeImgLb()" style="position:fixed;top:16px;right:20px;background:rgba(255,255,255,.15);border:none;color:#fff;font-size:1.6rem;line-height:1;width:36px;height:36px;border-radius:50%;cursor:pointer">&times;</button>
 </div>
 <script>
+// Rotation is a property of the receipt, not of this visit — a sideways photo
+// stays fixed for whoever opens it next, including the enlarged view.
+function applyRotation(){
+  const img = $('dImage'), wrap = $('dImageWrap');
+  if(!img || !wrap) return;
+  const r = ((CUR_ROT % 360) + 360) % 360;
+  img.style.transform = r ? 'rotate(' + r + 'deg)' : '';
+  const quarter = (r === 90 || r === 270);
+  wrap.classList.toggle('rotated', quarter);
+  // A rotated element still lays out on its own axes, so to fit the turned
+  // footprint inside the stage the limits swap: its height becomes the visible
+  // width and vice versa.
+  if(quarter){
+    const box = wrap.getBoundingClientRect();
+    img.style.maxWidth  = Math.round(box.height) + 'px';
+    img.style.maxHeight = Math.round(box.width) + 'px';
+  } else {
+    img.style.maxWidth = '';
+    img.style.maxHeight = '';
+  }
+  // The bbox overlay is drawn in unrotated image coordinates, so it would sit
+  // on the wrong edge once turned. Hide it rather than lie about where it is.
+  const bb = $('dBboxOverlay');
+  if(bb) bb.style.visibility = r ? 'hidden' : '';
+}
+async function rotateReceipt(delta, ev){
+  // Take the event rather than reaching for the global one — that only exists
+  // during a real click, so any programmatic call would throw before the save.
+  if(ev) ev.stopPropagation();
+  if(!CUR_ID) return;
+  CUR_ROT = ((CUR_ROT + delta) % 360 + 360) % 360;
+  applyRotation();
+  const ent = ENTRIES.find(x => x.id === CUR_ID);
+  if(ent) ent.img_rotate = CUR_ROT;
+  await fetch('/cardconv/ledger/' + CUR_ID + '/update',
+    {method:'POST', body: new URLSearchParams({img_rotate: String(CUR_ROT)})});
+}
 function openImgLb(fid){
   var fileId = fid || CUR_FILE_ID;
   if(!fileId) return;
@@ -4122,6 +4170,8 @@ function openImgLb(fid){
   var lb = document.getElementById('imgLb');
   var img = document.getElementById('imgLbImg');
   img.src = url;
+  const r = fid ? 0 : (((CUR_ROT % 360) + 360) % 360);
+  img.style.transform = r ? 'rotate(' + r + 'deg)' : '';
   lb.style.display = 'flex';
   document.addEventListener('keydown', _imgLbKey);
 }

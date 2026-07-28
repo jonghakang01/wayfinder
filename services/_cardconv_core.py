@@ -327,6 +327,10 @@ def _migrate_entry(e: dict) -> dict:
     # that pins an entry out of duplicate grouping ("this is a separate purchase").
     e.setdefault("ocr_time", None)
     e.setdefault("dup_exempt", False)
+    # v2.10: quarter-turns to apply when showing the photo. Phones save
+    # receipts sideways and a receipt laid down rotated has no EXIF to
+    # fix it, so the reader has to be able to turn it and have that stick.
+    e.setdefault("img_rotate", 0)
     # v2.4: foreign-currency receipts (KRW/INR business trips) — OCR currency +
     # USD estimate for band-matching against the USD AMEX statement.
     e.setdefault("ocr_currency", None)
@@ -1854,7 +1858,12 @@ _OCR_PROMPT = (
     'base Amount. '
     'For each receipt extract: '
     '1) date (YYYY-MM-DD; if the receipt only shows a relative date such as "today", '
-    'return the literal string "today" — do not guess an absolute date), '
+    'return the literal string "today" — do not guess an absolute date). '
+    'When the printed date is three numbers whose order is ambiguous (e.g. '
+    '"24-02-26"), do NOT pick a reading — return the digits exactly as printed, '
+    'separators and all, and the caller resolves it. Only return YYYY-MM-DD when '
+    'the receipt makes the order unambiguous (a 4-digit year, or a written month '
+    'name such as "Feb"). '
     '1b) time: the transaction time printed on the receipt as "HH:MM" in 24-hour '
     'format (convert AM/PM, e.g. "1:45 PM" -> "13:45"); null if no time is printed, '
     '2) merchant name, '
@@ -2198,6 +2207,64 @@ _ISO_DATE_RE    = re.compile(r'^\d{4}-\d{2}-\d{2}$')
 _TODAY_TOKEN_RE = re.compile(r'today|오늘', re.IGNORECASE)
 
 
+_NUM_DATE_RE = re.compile(r'^\s*(\d{1,4})[-/.](\d{1,2})[-/.](\d{1,4})\s*$')
+
+
+def _resolve_ambiguous_date(raw, today=None):
+    """Read a three-part numeric date whose field order is unknown.
+
+    A receipt printed "24-02-26" is three numbers and no convention. The rule
+    (강프로 2026-07-28): whichever part reads as a plausible year is the year,
+    and **when two of them could be** — 24 and 26 both can — the more recent
+    one wins, because the receipt in your hand is the recent one. Of the two
+    that remain, anything past 12 has to be the day; when both could go either
+    way it is US order, month first, since the statement is a US AMEX one.
+
+    Returns YYYY-MM-DD, or None when nothing sane comes out (a bad guess costs
+    a statement match, so silence is better).
+    """
+    if not isinstance(raw, str):
+        return None
+    m = _NUM_DATE_RE.match(raw)
+    if not m:
+        return None
+    parts = [int(x) for x in m.groups()]
+    widths = [len(x) for x in m.groups()]
+    today = today or datetime.now()
+    lo, hi = today.year - 10, today.year
+
+    def as_year(v, w):
+        if w == 4:
+            return v if lo <= v <= hi else None
+        y = 2000 + v
+        return y if lo <= y <= hi else None
+
+    cands = [(i, as_year(v, w)) for i, (v, w) in enumerate(zip(parts, widths))]
+    cands = [(i, y) for i, y in cands if y is not None]
+    if not cands:
+        return None
+    # Four digits is a statement of fact; two digits is a guess, so a written-out
+    # year outranks any candidate and only then does "most recent" decide.
+    explicit = [(i, y) for i, y in cands if widths[i] == 4]
+    yi, year = max(explicit or cands, key=lambda c: c[1])
+
+    rest = [(i, parts[i]) for i in range(3) if i != yi]
+    (ia, a), (ib, b) = rest
+    over = [v for _, v in rest if v > 12]
+    if len(over) > 1:
+        return None                      # two day-sized numbers, no reading works
+    if a > 12:
+        month, day = b, a
+    elif b > 12:
+        month, day = a, b
+    else:
+        month, day = a, b                # both fit either slot — US order, month first
+    try:
+        return datetime(year, month, day).strftime("%Y-%m-%d")
+    except ValueError:
+        return None                      # Feb 30 and friends
+
+
 def _ocr_entry_fields(ocr: dict, upload_date: str = None) -> dict:
     """Map a normalized OCR dict to the ledger entry's ocr_* fields.
 
@@ -2209,7 +2276,12 @@ def _ocr_entry_fields(ocr: dict, upload_date: str = None) -> dict:
     if ocr_date == "YYYY-MM-DD":  # treat placeholder as missing
         ocr_date = None
     if isinstance(ocr_date, str) and not _ISO_DATE_RE.match(ocr_date):
-        ocr_date = upload_date if _TODAY_TOKEN_RE.search(ocr_date) else None
+        if _TODAY_TOKEN_RE.search(ocr_date):
+            ocr_date = upload_date
+        else:
+            # A printed "24-02-26" used to be dropped on the floor; resolve the
+            # field order ourselves rather than lose the date entirely.
+            ocr_date = _resolve_ambiguous_date(ocr_date)
     has_ocr = ocr.get("amount") is not None
     currency = ocr.get("currency")
     usd_est, fx_rate = _fx_usd_estimate(ocr.get("amount"), currency, ocr_date)
@@ -3863,6 +3935,14 @@ def _handle_ledger_update(username: str, entry_id: str, body: dict):
         if raw is not None:
             val = (raw[0] if isinstance(raw, list) else str(raw)).strip()
             e["dup_exempt"] = val == "1"
+        # Photo orientation, in quarter turns clockwise.
+        raw = body.get("img_rotate")
+        if raw is not None:
+            val = (raw[0] if isinstance(raw, list) else str(raw)).strip()
+            try:
+                e["img_rotate"] = int(val) % 360 // 90 * 90
+            except (TypeError, ValueError):
+                pass
         # Printed transaction time (HH:MM) — used by duplicate detection.
         raw = body.get("ocr_time")
         if raw is not None:
