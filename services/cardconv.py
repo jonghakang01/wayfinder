@@ -204,6 +204,10 @@ def handle(method, path, body, ctx=None):
         return ("redirect", "/cardconv/ledger")
     if method == "POST" and path == "/cardconv/receipts/review/discard-file":
         return _handle_ocr_staging_discard_file(user, body)
+    if method == "GET" and path == "/cardconv/receipts/review/compare":
+        return _handle_dup_compare(user, body)  # GET passes query dict as body
+    if method == "POST" and path == "/cardconv/receipts/review/dup-exempt":
+        return _handle_dup_exempt(user, body)
     if method == "POST" and path == "/cardconv/receipts/review/discard-entry":
         return _handle_ocr_staging_discard_entry(user, body)
     if method == "POST" and path == "/cardconv/receipts/review/restore":

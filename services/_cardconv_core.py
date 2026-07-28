@@ -564,6 +564,79 @@ def _handle_ocr_staging_discard_file(username: str, body: dict):
     return ("json", {"ok": True, "removed": removed})
 
 
+_STATUS_LABEL = {"matched": "MATCHED", "unmatched": "UNMATCHED",
+                 "pending_match": "PENDING MATCH"}
+
+
+def _dup_side(e, is_ledger: bool) -> dict:
+    """One column of the compare view — the fields a person actually squints at."""
+    fid = e.get("file_id")
+    out = {
+        "id": e.get("id"),
+        "filename": e.get("filename"),
+        "image": f"/cardconv/receipts/image/{fid}" if fid else None,
+        "date": e.get("ocr_date"),
+        "merchant": e.get("ocr_merchant"),
+        "printed": e.get("ocr_printed_amount"),
+        "handwritten": e.get("ocr_handwritten_amount"),
+        "final": e.get("ocr_final_amount", e.get("ocr_amount")),
+        "currency": e.get("ocr_currency"),
+        "card_brand": _CARD_BRAND_LABEL.get(e.get("card_brand") or "", "–"),
+        "time": e.get("ocr_time"),
+    }
+    if is_ledger:
+        out["status"] = _STATUS_LABEL.get(e.get("match_status"), "–")
+        out["matched_transaction"] = e.get("matched_transaction") or None
+        out["usage"] = e.get("usage") or "Regular"
+    return out
+
+
+def _handle_dup_compare(username: str, query: dict):
+    """GET /cardconv/receipts/review/compare?id=<staged_id>
+
+    The two sides of the duplicate question: the scan waiting in the queue, and
+    every active ledger receipt it collides with — each with the AMEX line it is
+    already mapped to. All of them, not the likeliest one: choosing for the user
+    is the part they asked us to stop doing.
+    """
+    eid = query.get("id")
+    if isinstance(eid, list):
+        eid = eid[0] if eid else ""
+    eid = (eid or "").strip()
+    if not eid:
+        return ("json", {"error": "id required"}, 400)
+    staging = _load_ocr_staging(username)
+    entries = _flag_staged_dups(username, staging.get("entries", []))
+    target = next((e for e in entries if e.get("id") == eid), None)
+    if not target:
+        return ("json", {"error": "entry not found"}, 404)
+    by_id = {le.get("id"): le for le in _load_receipts(username)}
+    cands = [_dup_side(by_id[i], True) for i in target.get("dup_match_ids", []) if i in by_id]
+    return ("json", {"ok": True, "staged": _dup_side(target, False), "candidates": cands})
+
+
+def _handle_dup_exempt(username: str, body: dict):
+    """POST /cardconv/receipts/review/dup-exempt — "these are separate purchases".
+
+    Sticks to the entry for good: it rides into the ledger on confirm and keeps
+    the receipt out of ledger dup groups too, so the same verdict isn't asked
+    for twice.
+    """
+    eid = body.get("id")
+    if isinstance(eid, list):
+        eid = eid[0] if eid else ""
+    eid = (eid or "").strip()
+    if not eid:
+        return ("json", {"error": "id required"}, 400)
+    staging = _load_ocr_staging(username)
+    target = next((e for e in staging.get("entries", []) if e.get("id") == eid), None)
+    if not target:
+        return ("json", {"error": "entry not found"}, 404)
+    target["dup_exempt"] = True
+    _save_ocr_staging(username, staging)
+    return ("json", {"ok": True, "id": eid})
+
+
 def _handle_ocr_staging_discard_entry(username: str, body: dict):
     """POST /cardconv/receipts/review/discard-entry — reject one staged receipt
     before it reaches the Ledger. Drive is never touched; the file is
@@ -600,7 +673,11 @@ def _flag_staged_dups(username: str, entries: list) -> list:
     merchant on a compatible date/time (this upload is likely a re-scan);
     'staged' — an earlier entry in this same queue does (double upload).
     Mirrors the Ledger dup-group rule: (amount, merchant) bucket, dates equal
-    or one side missing, printed times within tolerance (_times_close)."""
+    or one side missing, printed times within tolerance (_times_close).
+
+    A 'ledger' hint also records dup_match_ids — every ledger entry it collides
+    with, so the compare view can show them all rather than picking one for the
+    user. Computed per render and never persisted (no schema change)."""
     def key(e):
         amt = e.get("ocr_amount")
         if amt is None:
@@ -624,11 +701,22 @@ def _flag_staged_dups(username: str, entries: list) -> list:
     seen = {}
     for e in entries:
         e["dup_hint"] = None
+        e["dup_match_ids"] = []
         k = key(e)
         if not k:
             continue
-        if any(compatible(e, le) for le in ledger_by_key.get(k, [])):
+        if e.get("dup_exempt"):
+            # The user already looked at this one and called it a separate
+            # purchase — don't flag it again on every render.
+            seen.setdefault(k, []).append(e)
+            continue
+        # The warning depends on the collision, the compare list on the ids —
+        # a legacy row without one still has to raise the flag, or a real
+        # duplicate would go quiet just because it predates entry ids.
+        hits = [le for le in ledger_by_key.get(k, []) if compatible(e, le)]
+        if hits:
             e["dup_hint"] = "ledger"
+            e["dup_match_ids"] = [le["id"] for le in hits if le.get("id")]
         elif any(compatible(e, se) for se in seen.get(k, [])):
             e["dup_hint"] = "staged"
         seen.setdefault(k, []).append(e)

@@ -2136,9 +2136,17 @@ def _render_ocr_staging_review(user: str) -> str:
         # discard instead of silently ingesting a second copy.
         dup_hint = e.get("dup_hint")
         dup_badge = ""
+        dup_compare = ""
         if dup_hint == "ledger":
+            n = len(e.get("dup_match_ids") or [])
             dup_badge = ('<span class="stg-badge" style="background:rgba(239,68,68,.15);'
-                         'color:#ef4444">⚠ Already in Ledger?</span>')
+                         f'color:#ef4444">⚠ Already in Ledger?{f" ({n})" if n > 1 else ""}</span>')
+            # Nothing on this card says WHICH ledger receipt it collides with —
+            # that answer lives one click away rather than in a confirm() string.
+            dup_compare = (f'<button type="button" class="btn btn-secondary btn-sm" '
+                           f'onclick="dupCompare(\'{eid}\')" '
+                           f'title="See this scan next to the Ledger receipt it matches">'
+                           f'🔍 Compare</button>')
         elif dup_hint == "staged":
             dup_badge = ('<span class="stg-badge" style="background:rgba(239,68,68,.15);'
                          'color:#ef4444">⚠ Duplicate in this batch</span>')
@@ -2148,8 +2156,9 @@ def _render_ocr_staging_review(user: str) -> str:
   <label class="stg-check-wrap">
     <input type="checkbox" name="confirmed" value="{eid}" {"checked" if (ocr_ok and not dup_hint) else ""}>
     <span class="stg-check-lbl">Include</span>
-    <button type="button" class="btn btn-danger btn-sm" style="margin-left:auto"
-      onclick="stgDiscardEntry('{eid}', '{dup_hint or ""}')" title="Reject this receipt (removes it from the queue)">🗑 Discard</button>
+    <span style="margin-left:auto;display:flex;gap:6px;align-items:center">{dup_compare}
+    <button type="button" class="btn btn-danger btn-sm"
+      onclick="stgDiscardEntry('{eid}', '{dup_hint or ""}')" title="Reject this receipt (removes it from the queue)">🗑 Discard</button></span>
   </label>
   <div class="stg-img-wrap">{img_html}</div>
   <div class="stg-info">
@@ -2204,6 +2213,37 @@ def _render_ocr_staging_review(user: str) -> str:
 .stg-badge.fx{{background:rgba(251,191,36,.15);color:#fbbf24}}
 .stg-badge.warn{{background:rgba(245,158,11,.15);color:#f59e0b}}
 .stg-empty{{text-align:center;color:var(--text-muted);padding:60px 20px}}
+/* Duplicate compare — the new scan on the left, every Ledger receipt it
+   collides with on the right. Modal chrome is the shared .wf-modal, which
+   turns itself into a bottom sheet at ≤768px. */
+.dc-cols{{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}}
+.dc-col{{min-width:0}}
+.dc-head{{font-size:var(--text-xs);font-weight:var(--fw-bold);letter-spacing:.06em;
+  text-transform:uppercase;color:var(--text-muted);margin-bottom:6px}}
+.dc-card{{background:var(--surface-2);border:1px solid var(--border);
+  border-radius:var(--radius-md);padding:10px;margin-bottom:10px}}
+.dc-card.dc-new{{border-color:var(--accent)}}
+.dc-img{{width:100%;max-height:190px;object-fit:contain;background:var(--bg-deep);
+  border-radius:var(--radius-sm);display:block}}
+.dc-nophoto{{height:110px;display:flex;align-items:center;justify-content:center;
+  background:var(--bg-deep);border-radius:var(--radius-sm);color:var(--text-dim);font-size:.78rem}}
+.dc-row{{display:flex;justify-content:space-between;gap:10px;font-size:.78rem;padding:3px 0}}
+.dc-row .k{{color:var(--text-muted);flex-shrink:0}}
+.dc-row .v{{text-align:right;word-break:break-word}}
+/* Only the rows that disagree get marked — a wall of highlights says nothing. */
+.dc-row.diff .v{{color:var(--warn);font-weight:var(--fw-bold)}}
+.dc-row.diff .k::after{{content:" ≠"}}
+.dc-map{{margin-top:8px;padding:8px 10px;background:var(--bg-deep);
+  border:1px solid var(--border);border-radius:var(--radius-sm);font-size:.75rem}}
+.dc-map .t{{font-size:var(--text-xs);font-weight:var(--fw-bold);letter-spacing:.05em;
+  text-transform:uppercase;color:var(--text-muted);margin-bottom:4px}}
+.dc-chip{{display:inline-block;font-size:var(--text-xs);font-weight:var(--fw-bold);border-radius:var(--radius-full);padding:2px 10px}}
+.dc-ok{{background:rgba(52,211,153,.15);color:var(--success)}}
+.dc-bad{{background:rgba(248,113,113,.15);color:var(--danger)}}
+.dc-prog{{background:rgba(251,191,36,.15);color:var(--warn)}}
+.dc-none{{color:var(--text-dim);font-size:.75rem}}
+.dc-note{{font-size:.75rem;color:var(--text-muted);line-height:1.6;margin:12px 0 0}}
+@media(max-width:768px){{ .dc-cols{{grid-template-columns:1fr}} }}
 </style>
 </head><body>
 <nav>
@@ -2238,6 +2278,24 @@ def _render_ocr_staging_review(user: str) -> str:
     </div>
   </form>
 </div>
+
+<div class="wf-modal-backdrop" id="dcBack" style="display:none">
+  <div class="wf-modal" style="max-width:820px">
+    <h3 class="wf-modal-title">🔍 Same purchase, or two of them?</h3>
+    <div id="dcBody"></div>
+    <p class="dc-note">
+      <b>Same purchase</b> drops only this queued scan — the Ledger row and its mapping stay exactly as they are.
+      It will not come back on the next Drive sync, and you can restore it from Ledger → 🪦 Discarded.<br>
+      <b>Different purchases</b> keeps this scan and stops asking; it is never grouped as a duplicate again.<br>
+      To remove the <i>Ledger</i> side instead, delete it from the Ledger list — this dialog never touches it.
+    </p>
+    <div class="wf-modal-actions" style="margin-top:14px">
+      <button type="button" class="btn btn-ghost" onclick="dcClose()">Cancel</button>
+      <button type="button" class="btn btn-secondary" id="dcKeep">Different purchases — keep both</button>
+      <button type="button" class="btn btn-danger" id="dcDrop">Same purchase — discard this scan</button>
+    </div>
+  </div>
+</div>
 <script>
 // Cash rows must carry a Reason for Cash before confirm (fills SAP col S).
 document.getElementById('stgForm').addEventListener('submit', function(ev) {{
@@ -2271,6 +2329,101 @@ function stgDiscardFile(fid, n) {{
     body: 'file_id=' + encodeURIComponent(fid)
   }}).then(function(r) {{ return r.json(); }}).then(function() {{ location.reload(); }});
 }}
+// ---- duplicate compare -------------------------------------------------
+var dcId = null;
+function dcEsc(s) {{
+  return String(s === null || s === undefined ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}}
+function dcMoney(v, cur) {{
+  if (v === null || v === undefined || v === '') return '–';
+  var n = Number(v);
+  if (isNaN(n)) return dcEsc(v);
+  return (cur && cur !== 'USD' ? cur + ' ' : '$') + n.toLocaleString(undefined, {{minimumFractionDigits: 2, maximumFractionDigits: 2}});
+}}
+// same(): compares against the staged side so only disagreements get marked.
+function dcRow(k, val, ref) {{
+  var diff = (ref !== undefined && String(val === null ? '' : val) !== String(ref === null ? '' : ref));
+  return '<div class="dc-row' + (diff ? ' diff' : '') + '"><span class="k">' + dcEsc(k) +
+         '</span><span class="v">' + dcEsc(val === null || val === '' ? '–' : val) + '</span></div>';
+}}
+// A broken <img> icon tells you nothing about why. When the Drive proxy is
+// down (expired token) say so, because the whole point of this view is looking.
+function dcImgFail(img) {{
+  img.outerHTML = '<div class="dc-nophoto">🧾 Preview unavailable — reconnect Google Drive</div>';
+}}
+function dcImg(src) {{
+  return src ? '<img class="dc-img" src="' + dcEsc(src) + '" loading="lazy" alt="" onerror="dcImgFail(this)">'
+             : '<div class="dc-nophoto">No image</div>';
+}}
+function dcSide(s, isNew, ref) {{
+  var h = '<div class="dc-card' + (isNew ? ' dc-new' : '') + '">';
+  h += dcImg(s.image);
+  if (!isNew) {{
+    h += '<div style="margin:8px 0 4px"><span class="dc-chip dc-' +
+         (s.status === 'MATCHED' ? 'ok' : s.status === 'UNMATCHED' ? 'bad' : 'prog') +
+         '">' + dcEsc(s.status) + '</span></div>';
+  }}
+  h += dcRow('Date', s.date, ref && ref.date);
+  h += dcRow('Time', s.time, ref && ref.time);
+  h += dcRow('Merchant', s.merchant, ref && ref.merchant);
+  h += dcRow('Printed', dcMoney(s.printed, s.currency), ref && dcMoney(ref.printed, ref.currency));
+  h += dcRow('Handwritten', dcMoney(s.handwritten, s.currency), ref && dcMoney(ref.handwritten, ref.currency));
+  h += dcRow('Final', dcMoney(s.final, s.currency), ref && dcMoney(ref.final, ref.currency));
+  h += dcRow('Card', s.card_brand, ref && ref.card_brand);
+  h += dcRow('File', s.filename, undefined);
+  if (!isNew) {{
+    var mt = s.matched_transaction;
+    h += '<div class="dc-map"><div class="t">Mapped AMEX line</div>' +
+         (mt ? dcRow('Date', mt.date, undefined) + dcRow('Vendor', mt.vendor, undefined) +
+               dcRow('Amount', dcMoney(mt.amount, 'USD'), undefined)
+             : '<span class="dc-none">Not matched yet — no statement line linked.</span>') +
+         '</div>';
+  }}
+  h += '</div>';
+  return h;
+}}
+function dcClose() {{ document.getElementById('dcBack').style.display = 'none'; dcId = null; }}
+function dupCompare(id) {{
+  dcId = id;
+  var body = document.getElementById('dcBody');
+  body.innerHTML = '<div class="dc-none" style="padding:20px 0">Loading…</div>';
+  document.getElementById('dcBack').style.display = 'flex';
+  fetch('/cardconv/receipts/review/compare?id=' + encodeURIComponent(id))
+    .then(function(r) {{ return r.json(); }})
+    .then(function(d) {{
+      if (!d.ok) {{ body.innerHTML = '<div class="dc-none">' + dcEsc(d.error || 'Could not load') + '</div>'; return; }}
+      var n = d.candidates.length;
+      var right = n
+        ? d.candidates.map(function(c) {{ return dcSide(c, false, d.staged); }}).join('')
+        : '<div class="dc-none">The Ledger receipt is gone — nothing left to compare.</div>';
+      body.innerHTML =
+        '<div class="dc-cols">' +
+          '<div class="dc-col"><div class="dc-head">New scan (in the queue)</div>' + dcSide(d.staged, true, undefined) + '</div>' +
+          '<div class="dc-col"><div class="dc-head">Already in Ledger' + (n > 1 ? ' — ' + n + ' matches' : '') + '</div>' + right + '</div>' +
+        '</div>';
+    }})
+    .catch(function() {{ body.innerHTML = '<div class="dc-none">Could not load the comparison.</div>'; }});
+}}
+document.getElementById('dcDrop').onclick = function() {{
+  if (!dcId) return;
+  fetch('/cardconv/receipts/review/discard-entry', {{
+    method: 'POST', headers: {{'Content-Type': 'application/x-www-form-urlencoded'}},
+    body: 'id=' + encodeURIComponent(dcId)
+  }}).then(function(r) {{ return r.json(); }}).then(function() {{ location.reload(); }});
+}};
+document.getElementById('dcKeep').onclick = function() {{
+  if (!dcId) return;
+  fetch('/cardconv/receipts/review/dup-exempt', {{
+    method: 'POST', headers: {{'Content-Type': 'application/x-www-form-urlencoded'}},
+    body: 'id=' + encodeURIComponent(dcId)
+  }}).then(function(r) {{ return r.json(); }}).then(function() {{ location.reload(); }});
+}};
+document.getElementById('dcBack').addEventListener('click', function(e) {{
+  if (e.target === this) dcClose();
+}});
+document.addEventListener('keydown', function(e) {{ if (e.key === 'Escape') dcClose(); }});
+
 function stgDiscardEntry(id, dupHint) {{
   var msg = dupHint === 'ledger'
     ? 'This scan already exists in the Ledger.\\nDiscard removes only this queued copy — the Ledger row stays as-is (delete it from the Ledger list if you want it gone entirely).'
