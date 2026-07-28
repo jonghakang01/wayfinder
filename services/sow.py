@@ -480,34 +480,100 @@ def _is_total_row(row):
     return False
 
 
-def _month_amounts_from_table(rows):
-    """({(y,m): amount}, note) out of a monthly billing sheet.
+def _col_letter(j):
+    s = ""
+    j += 1
+    while j:
+        j, r = divmod(j - 1, 26)
+        s = chr(65 + r) + s
+    return s
 
-    Two shapes are read, because that is what actually arrives (강프로
-    2026-07-27) — an amended schedule often carries no document name at all,
-    only the new monthly figures:
-      long — one row per month:  `Jan-26 | 120,000`
-      wide — months across a header row, figures underneath (per-line rows are
-             summed; a Total row is skipped so nothing is counted twice).
+
+def _month_table_read(rows):
+    """Everything a monthly billing sheet says, without deciding for the user
+    (강프로 2026-07-28 — "15% cut simulation_1.xlsx" has BOTH an Original Cost
+    and an Adjusted Cost column, and picking one silently is a wrong answer
+    dressed as a right one):
+
+      {"shape": "long"|"wide", "note": str, "warnings": [str],
+       "columns": [{"key","label","total","months":{"YYYY-MM": v}}],
+       "chosen": key}
+
+    Two layouts, because both arrive:
+      long — one row per month, one or more money columns beside it. Every
+             money column is offered; date columns (an Invoice Month next to
+             the billing month) fall out on their own, since a date is not a
+             number.
+      wide — months across a header row, figures underneath: the per-line rows
+             are summed into one column and a Total row is skipped.
+    Repeated months are reported, never quietly added together.
     """
-    months = {}
-    # ── long ──────────────────────────────────────────────────────────────
-    for row in rows:
-        if not row or _is_total_row(row):
+    body = [r for r in rows if r and not _is_total_row(r)]
+    # which column holds the months? whichever one parses as months most often
+    counts = {}
+    for r in body:
+        for j, cell in enumerate(r):
+            if _parse_month_label(cell):
+                counts[j] = counts.get(j, 0) + 1
+    mcol = max(counts, key=lambda j: (counts[j], -j)) if counts else None
+
+    if mcol is not None and counts[mcol] >= 2:
+        return _read_long(rows, body, mcol)
+    wide = _read_wide(rows)
+    if wide["columns"]:
+        return wide
+    if mcol is not None and counts[mcol] == 1:
+        return _read_long(rows, body, mcol)          # a one-month change
+    return {"shape": "", "note": "", "warnings": [], "columns": [], "chosen": ""}
+
+
+def _read_long(rows, body, mcol):
+    data = [r for r in body if mcol < len(r) and _parse_month_label(r[mcol])]
+    # the row above the first month row usually names the columns
+    first = rows.index(data[0])
+    header = rows[first - 1] if first > 0 else []
+    if any(_parse_month_label(c) for c in header):
+        header = []
+
+    def label(j):
+        h = str(header[j]).strip() if j < len(header) else ""
+        return h or f"Column {_col_letter(j)}"
+
+    cols, seen = [], {}
+    for j in range(max(len(r) for r in data)):
+        if j == mcol:
             continue
-        ym = _parse_month_label(row[0])
-        if not ym:
+        months, dups = {}, set()
+        for r in data:
+            n = _num_or_none(r[j]) if j < len(r) else None
+            if n is None:
+                continue
+            ym = _parse_month_label(r[mcol])
+            key = f"{ym[0]:04d}-{ym[1]:02d}"
+            if key in months:
+                dups.add(key)
+            months[key] = months.get(key, 0.0) + n
+        if not months:
             continue
-        val = None
-        for cell in row[1:]:
-            n = _num_or_none(cell)
-            if n is not None:
-                val = n
-        if val is not None:
-            months[ym] = months.get(ym, 0.0) + val
-    if months:
-        return months, _months_note(months, "one row per month")
-    # ── wide ──────────────────────────────────────────────────────────────
+        seen.update({k: 1 for k in dups})
+        cols.append({"key": str(j), "label": label(j),
+                     "total": sum(months.values()), "months": months})
+    warn = []
+    if seen:
+        names = ", ".join(date(int(k[:4]), int(k[5:]), 1).strftime("%b %Y")
+                          for k in sorted(seen))
+        warn.append(f"{names} appears more than once in column "
+                    f"{_col_letter(mcol)} — those rows were added together. "
+                    f"Check the sheet if that is not what you meant.")
+    if len(cols) > 1:
+        warn.append(f"{len(cols)} money columns found — pick the one this "
+                    f"change should bill.")
+    note = _months_note(cols[0]["months"], "one row per month") if cols else ""
+    return {"shape": "long", "note": note, "warnings": warn,
+            "columns": cols, "chosen": cols[0]["key"] if cols else ""}
+
+
+def _read_wide(rows):
     hdr_i, cols = None, {}
     for i, row in enumerate(rows[:15]):
         found = {}
@@ -517,22 +583,38 @@ def _month_amounts_from_table(rows):
                 found[j] = ym
         if len(found) > len(cols):
             hdr_i, cols = i, found
-    if hdr_i is None or not cols:
-        return {}, ""
-    for row in rows[hdr_i + 1:]:
-        if not row or _is_total_row(row):
-            continue
-        for j, ym in cols.items():
-            n = _num_or_none(row[j]) if j < len(row) else None
-            if n is not None:
-                months[ym] = months.get(ym, 0.0) + n
+    months = {}
+    if hdr_i is not None:
+        for row in rows[hdr_i + 1:]:
+            if not row or _is_total_row(row):
+                continue
+            for j, ym in cols.items():
+                n = _num_or_none(row[j]) if j < len(row) else None
+                if n is not None:
+                    key = f"{ym[0]:04d}-{ym[1]:02d}"
+                    months[key] = months.get(key, 0.0) + n
     if not months:
+        return {"shape": "", "note": "", "warnings": [], "columns": [], "chosen": ""}
+    col = {"key": "*", "label": "Monthly figures", "total": sum(months.values()),
+           "months": months}
+    return {"shape": "wide",
+            "note": _months_note(months, "months across the header row"),
+            "warnings": [], "columns": [col], "chosen": "*"}
+
+
+def _month_amounts_from_table(rows):
+    """({(y,m): amount}, note) for the sheet's default money column — the
+    single-answer view of _month_table_read, used where no choice is offered."""
+    read = _month_table_read(rows)
+    if not read["columns"]:
         return {}, ""
-    return months, _months_note(months, "months across the header row")
+    col = next(c for c in read["columns"] if c["key"] == read["chosen"])
+    return ({_parse_month_label(k): v for k, v in col["months"].items()},
+            read["note"])
 
 
 def _months_note(months, shape):
-    ks = sorted(months)
+    ks = sorted(_parse_month_label(k) if isinstance(k, str) else k for k in months)
     span = (f"{date(*ks[0], 1).strftime('%b %Y')} – {date(*ks[-1], 1).strftime('%b %Y')}"
             if ks else "")
     return f"{len(ks)} month(s) · {span} · {shape}"
@@ -3770,6 +3852,9 @@ def _contract_todos(data):
     groups, orphans = _contract_groups(data)
     live = lambda c: _lifecycle(data, c) == "active"
     for c in data.get("contracts", []):
+        if c.get("schedule_preview", {}).get("columns"):
+            todos.append((c, "A monthly sheet is waiting — pick its money column "
+                             "and apply it, or discard it"))
         if live(c) and not c.get("confirmed"):
             todos.append((c, "Not confirmed yet — review the extracted fields & mapping, then Confirm"))
         elif live(c) and c.get("amends_id") and not (
@@ -4083,14 +4168,62 @@ Months down a column, or across a header row with the figures underneath."></tex
 </details>"""
 
 
+def _month_rows_html(months, cls=""):
+    """month → amount list, taking either {(y,m):v} or {'YYYY-MM':v}."""
+    items = sorted((_parse_month_label(k) if isinstance(k, str) else k, v)
+                   for k, v in months.items())
+    return "".join(f'<li><span>{date(y, m, 1).strftime("%b %Y")}</span>'
+                   f'<b>{_money(v)}</b></li>' for (y, m), v in items)
+
+
+def _schedule_preview_box(c, prev):
+    """What the uploaded sheet says, BEFORE any of it counts (강프로
+    2026-07-28). A real schedule ("15% cut simulation_1.xlsx") carries an
+    Original Cost and an Adjusted Cost column and repeats a month; choosing for
+    the user there is a wrong answer that looks like a right one, so the read is
+    shown, the money column is picked by hand, and only then does it apply."""
+    cols = prev.get("columns") or []
+    chosen = next((x for x in cols if x["key"] == prev.get("chosen")), cols[0])
+    warn = "".join(f'<div class="ppl-sheet-err">⚠ {_esc(w)}</div>'
+                   for w in prev.get("warnings") or [])
+    picker = ""
+    if len(cols) > 1:
+        opts = "".join(
+            f'<label class="sch-pick{" is-on" if x["key"] == chosen["key"] else ""}">'
+            f'<input type="radio" name="schcol_{c["id"]}"'
+            f'{" checked" if x["key"] == chosen["key"] else ""} '
+            f'onchange="ctrPost(\'/sow/contract/schedule_pick\','
+            f'{{id:\'{c["id"]}\',col:\'{x["key"]}\'}})">'
+            f'<span>{_esc(x["label"])}</span><b>{_money(x["total"])}</b></label>'
+            for x in cols)
+        picker = (f'<div class="sow-meta">Which column should this change bill?</div>'
+                  f'<div class="sch-picks">{opts}</div>')
+    src = prev.get("src")
+    return f"""
+<div class="ctr-linkbox sch-preview">
+  <b>📅 Read from the sheet — not applied yet</b>
+  <div class="sow-meta">{_esc(src or "pasted range")} · {_esc(prev.get("note") or "")}</div>
+  {warn}
+  {picker}
+  <div class="sow-meta">Billing <b>{_money(chosen["total"])}</b> across
+    {len(chosen["months"])} month(s), exactly as listed — no even spread. Applying
+    it stops <b>this</b> contract the month before the first one.</div>
+  <ul class="ctr-kidlist sch-list">{_month_rows_html(chosen["months"])}</ul>
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <button class="btn btn-primary btn-sm" type="button"
+      onclick="ctrPost('/sow/contract/schedule_apply',{{id:'{c["id"]}'}})">✅ Apply as a change</button>
+    <button class="btn btn-secondary btn-sm" type="button"
+      onclick="ctrPost('/sow/contract/schedule_discard',{{id:'{c["id"]}'}})">Discard</button>
+  </div>
+</div>"""
+
+
 def _schedule_box(c, months):
     """The monthly figures this document bills, as read off the sheet — the
     document's amount and period are derived from them, so they are shown here
     rather than hidden behind a single total (강프로 2026-07-27)."""
     total, _s, _e = _schedule_summary(months)
-    rows = "".join(
-        f'<li><span>{date(y, m, 1).strftime("%b %Y")}</span>'
-        f'<b>{_money(v)}</b></li>' for (y, m), v in sorted(months.items()))
+    rows = _month_rows_html(months)
     note = c.get("schedule_note")
     src = f'<div class="sow-meta">Read from: <b>{_esc(note)}</b></div>' if note else ""
     return f"""
@@ -4211,6 +4344,8 @@ def _render_contract_frag(user, data, cid):
     else:
         amount_fld = fld("Contract amount", "amount", c.get("amount"))
         schedule_html = ""
+    if c.get("schedule_preview", {}).get("columns"):
+        schedule_html = _schedule_preview_box(c, c["schedule_preview"]) + schedule_html
     if c.get("schedule_error"):
         schedule_html = (f'<div class="ctr-linkbox"><div class="ppl-sheet-err">⚠ '
                          f'{_esc(c["schedule_error"])}</div></div>') + schedule_html
@@ -4449,6 +4584,11 @@ _CTR_CSS = """
 .chg-tab.is-on{background:var(--accent-glow);color:var(--accent);border-color:var(--accent)}
 .chg-pane[hidden]{display:none}
 .sch-list li span{color:var(--text-muted);font-size:.78rem}
+.sch-preview{border:1px solid var(--accent);border-radius:var(--radius-lg);padding:12px 14px;background:var(--accent-glow)}
+.sch-picks{display:flex;gap:8px;flex-wrap:wrap}
+.sch-pick{display:flex;align-items:center;gap:8px;padding:8px 12px;min-height:44px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--surface);cursor:pointer;font-size:.8rem;flex:1;min-width:180px}
+.sch-pick.is-on{border-color:var(--accent);color:var(--text)}
+.sch-pick b{margin-left:auto;font-variant-numeric:tabular-nums;color:var(--success)}
 .eml-hint{font-weight:500;color:var(--text-muted);font-size:.78rem}
 .eml-form{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:12px}
 .eml-field{display:flex;flex-direction:column;gap:4px;min-width:0}
@@ -4563,6 +4703,7 @@ details.ctr-group[open]>.ctr-group-hd{margin-bottom:12px}
   .eml-form{grid-template-columns:1fr}
   .eml-actions .btn{width:100%;min-height:44px}
   .chg-tab{flex:1;min-height:44px}
+  .sch-preview .btn{width:100%;min-height:44px}
   .chg-intake>summary{min-height:44px;display:flex;align-items:center;flex-wrap:wrap}
 }
 """
@@ -4573,12 +4714,18 @@ function openContract(id){
   fetch('/sow/contract?frag=1&id='+encodeURIComponent(id))
     .then(function(r){return r.text();})
     .then(function(h){document.getElementById('cmodal').innerHTML=h;
-      document.getElementById('cmodalOv').classList.add('show');});
+      document.getElementById('cmodalOv').classList.add('show');
+      // a sheet waiting for review is why the popup opened — don't make the
+      // user hunt for it down a long contract form
+      var s=document.querySelector('#cmodal .sch-preview');
+      if(s)s.scrollIntoView({block:'start'});});
 }
 function ctrPost(url,obj){
   var b=Object.keys(obj).map(function(k){return k+'='+encodeURIComponent(obj[k]);}).join('&');
   fetch(url,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:b})
-    .then(function(){closeContract();location.href='/sow/contracts';});
+    // follow where the route sent us — picking a column has to come back to
+    // the same contract, not drop the popup on the floor
+    .then(function(r){closeContract();location.href=r.url||'/sow/contracts';});
 }
 function ctrSave(id){
   var f=document.querySelector('#cmodal form.ctr-form');
@@ -4856,17 +5003,57 @@ def handle(method, path, body, ctx):
         elif (fields.get("text") or "").strip():
             rows = _text_rows(fields["text"])
             src = "pasted range"
-        months, note = _month_amounts_from_table(rows) if rows else ({}, "")
-        if not months:
+        read = _month_table_read(rows) if rows else None
+        if not read or not read["columns"]:
             target["schedule_error"] = (
                 "No monthly figures found — the sheet needs month labels "
                 "(Jan-26, January 2026, 2026-01) with an amount against each.")
             _save(user, data)
             return ("redirect", f"/sow/contracts?newc={target['id']}")
         target.pop("schedule_error", None)
+        # Nothing is written into the cashflow yet: a real sheet often has more
+        # than one money column (Original vs Adjusted) and repeated months, so
+        # what was read is staged for review first (강프로 2026-07-28).
+        target["schedule_preview"] = dict(
+            read, src=src, name=(fields.get("name") or "").strip(),
+            note_text=(fields.get("note") or "").strip())
+        _save(user, data)
+        return ("redirect", f"/sow/contracts?newc={target['id']}")
+
+    if method == "POST" and path == "/sow/contract/schedule_pick":
+        data = _load(user)
+        c = _contract_by_id(data, _f(body, "id"))
+        prev = (c or {}).get("schedule_preview")
+        if prev and any(col["key"] == _f(body, "col") for col in prev["columns"]):
+            prev["chosen"] = _f(body, "col")
+            _save(user, data)
+        return ("redirect", f"/sow/contracts?newc={_f(body, 'id')}")
+
+    if method == "POST" and path == "/sow/contract/schedule_discard":
+        data = _load(user)
+        c = _contract_by_id(data, _f(body, "id"))
+        if c:
+            c.pop("schedule_preview", None)
+            _save(user, data)
+        return ("redirect", f"/sow/contracts?newc={_f(body, 'id')}")
+
+    if method == "POST" and path == "/sow/contract/schedule_apply":
+        data = _load(user)
+        target = _contract_by_id(data, _f(body, "id"))
+        prev = (target or {}).get("schedule_preview")
+        if not prev or not prev.get("columns"):
+            return ("redirect", "/sow/contracts")
+        col = next((x for x in prev["columns"] if x["key"] == prev.get("chosen")),
+                   prev["columns"][0])
+        months = {_parse_month_label(k): v for k, v in col["months"].items()}
+        months = {k: v for k, v in months.items() if k}
+        if not months:
+            return ("redirect", "/sow/contracts")
         total, p_start, p_end = _schedule_summary(months)
         span = (f'{date(*sorted(months)[0], 1).strftime("%b %Y")} – '
                 f'{date(*sorted(months)[-1], 1).strftime("%b %Y")}')
+        src_bits = [x for x in (prev.get("src"), col["label"] if len(prev["columns"]) > 1
+                                else "", prev.get("note")) if x]
         cid = uuid.uuid4().hex[:8]
         rec = {"id": cid, "source": "schedule", "amends_id": target["id"],
                "side": target.get("side") or "sea",
@@ -4874,23 +5061,23 @@ def handle(method, path, body, ctx):
                "agency": target.get("agency") or "",
                "vendor": target.get("vendor") or "",
                "project_name": target.get("project_name") or "",
-               "filename": ((fields.get("name") or "").strip()
-                            or f"Monthly update · {span}"),
+               "filename": (prev.get("name") or f"Monthly update · {span}"),
                "ext": "txt", "linked_id": None, "has_file": False,
                "uploaded": datetime.now().isoformat(timespec="seconds"),
                "confirmed": False,
                "month_amounts": {f"{y:04d}-{m:02d}": round(v, 2)
                                  for (y, m), v in months.items()},
-               "schedule_note": f"{src} · {note}" if src else note,
+               "schedule_note": " · ".join(src_bits),
                "amount": _money(total),
                "period_start": p_start, "period_end": p_end,
-               "change_note": (fields.get("note") or "").strip()}
+               "change_note": prev.get("note_text") or ""}
         try:
             _store_contract_text(user, rec, "\n".join(
                 f'{date(y, m, 1).strftime("%b %Y")}\t{v:,.2f}'
                 for (y, m), v in sorted(months.items())))
         except OSError:
             pass
+        target.pop("schedule_preview", None)
         data.setdefault("contracts", []).append(rec)
         _save(user, data)
         return ("redirect", f"/sow/contracts?newc={cid}")

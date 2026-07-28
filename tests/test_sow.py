@@ -910,3 +910,134 @@ def test_vendor_cards_go_side_by_side_on_a_wide_screen():
     m = _mod()
     assert "@media(min-width:1400px){" in m._CTR_CSS
     assert "repeat(auto-fill,minmax(330px,1fr))" in m._CTR_CSS
+
+
+# ── a real schedule sheet: two money columns and a repeated month ───────────
+def _cut_simulation_rows():
+    """The shape of "15% cut simulation_1.xlsx" (강프로 2026-07-28): the month is
+    an Excel date, there are TWO money columns, an Invoice Month date column
+    beside them, and Oct 2025 shows up twice because of a year typo."""
+    return [
+        ["Month", "Original Cost", "Adjusted Cost", "Invoice Month"],
+        ["2025-10-25 00:00:00", "488909", "415573", "2025-11-03 00:00:00"],
+        ["2025-11-25 00:00:00", "488909", "415573", "2025-12-01 00:00:00"],
+        ["2025-12-25 00:00:00", "478929", "407090", "2026-01-02 00:00:00"],
+        ["2025-10-26 00:00:00", "478929", "407090", "2026-11-01 00:00:00"],
+    ]
+
+
+def test_both_money_columns_are_offered_never_guessed():
+    m = _mod()
+    read = m._month_table_read(_cut_simulation_rows())
+    assert read["shape"] == "long"
+    labels = [(c["label"], round(c["total"])) for c in read["columns"]]
+    # the Invoice Month column is a date, so it never reads as money
+    assert labels == [("Original Cost", 1935676), ("Adjusted Cost", 1645326)]
+    assert read["chosen"] == read["columns"][0]["key"]
+
+
+def test_a_repeated_month_is_reported_not_silently_summed_away():
+    m = _mod()
+    read = m._month_table_read(_cut_simulation_rows())
+    assert any("Oct 2025" in w and "more than once" in w for w in read["warnings"])
+    assert any("2 money columns" in w for w in read["warnings"])
+
+
+def test_the_month_column_is_found_by_content_not_by_position():
+    m = _mod()
+    rows = [["Line", "Month", "Fee"],
+            ["Media", "Jan-26", "100"], ["Media", "Feb-26", "200"]]
+    read = m._month_table_read(rows)
+    assert read["columns"][0]["label"] == "Fee"
+    assert read["columns"][0]["months"] == {"2026-01": 100.0, "2026-02": 200.0}
+
+
+def _isolated(tmp_path, monkeypatch):
+    """services.sow reads DATA_ROOT once at import — repoint it, don't reload."""
+    m = _mod()
+    monkeypatch.setattr(m, "DATA_ROOT", str(tmp_path))
+    return m
+
+
+def _xlsx(rows):
+    import io, openpyxl
+    wb = openpyxl.Workbook()
+    for r in rows:
+        wb.active.append(r)
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def _multipart(fields, filename=None, content=b""):
+    import io
+    b = "----S"
+    parts = b""
+    for k, v in fields.items():
+        parts += (f"--{b}\r\nContent-Disposition: form-data; name=\"{k}\"\r\n\r\n"
+                  f"{v}\r\n").encode()
+    if filename:
+        parts += (f"--{b}\r\nContent-Disposition: form-data; name=\"file\"; "
+                  f"filename=\"{filename}\"\r\nContent-Type: application/octet-stream"
+                  f"\r\n\r\n").encode() + content + b"\r\n"
+    parts += f"--{b}--\r\n".encode()
+
+    class _H:
+        rfile = io.BytesIO(parts)
+        headers = {"Content-Type": f"multipart/form-data; boundary={b}",
+                   "Content-Length": str(len(parts))}
+    return _H()
+
+
+def test_a_sheet_is_staged_for_review_before_it_touches_the_cashflow(tmp_path, monkeypatch):
+    m = _isolated(tmp_path, monkeypatch)
+    user = "sheetuser"
+    m._save(user, {"contracts": [{"id": "base", "side": "sea", "project_name": "AEM",
+                                  "amount": "$1,000,000", "period_start": "2025-01-01",
+                                  "period_end": "2027-12-31", "confirmed": True}]})
+    raw = _multipart({"target": "base"}, "cut.xlsx", _xlsx(_cut_simulation_rows()))
+    m.handle("POST", "/sow/contract/schedule", {"__raw__": raw}, {"user": user})
+
+    d = m._load(user)
+    assert len(d["contracts"]) == 1                # nothing billed yet
+    prev = d["contracts"][0]["schedule_preview"]
+    assert len(prev["columns"]) == 2 and prev["src"] == "cut.xlsx"
+    assert [n for _c, n in m._contract_todos(d) if "monthly sheet is waiting" in n]
+    frag = m._render_contract_frag(user, d, "base")
+    assert "not applied yet" in frag and "Original Cost" in frag and "Adjusted Cost" in frag
+
+    m.handle("POST", "/sow/contract/schedule_pick",
+             {"id": "base", "col": prev["columns"][1]["key"]}, {"user": user})
+    m.handle("POST", "/sow/contract/schedule_apply", {"id": "base"}, {"user": user})
+    d = m._load(user)
+    assert "schedule_preview" not in d["contracts"][0]
+    rec = d["contracts"][1]
+    assert rec["source"] == "schedule" and rec["amends_id"] == "base"
+    assert round(sum(rec["month_amounts"].values())) == 1645326     # the Adjusted column
+    assert "Adjusted Cost" in rec["schedule_note"]
+    # and the base now stops before the sheet's first month
+    assert m._effective_end(d, d["contracts"][0]).isoformat() == "2025-09-30"
+
+
+def test_discarding_a_staged_sheet_leaves_nothing_behind(tmp_path, monkeypatch):
+    m = _isolated(tmp_path, monkeypatch)
+    user = "discarder"
+    m._save(user, {"contracts": [{"id": "base", "side": "sea", "period_start": "2025-01-01",
+                                  "period_end": "2027-12-31"}]})
+    raw = _multipart({"target": "base"}, "cut.xlsx", _xlsx(_cut_simulation_rows()))
+    m.handle("POST", "/sow/contract/schedule", {"__raw__": raw}, {"user": user})
+    m.handle("POST", "/sow/contract/schedule_discard", {"id": "base"}, {"user": user})
+    d = m._load(user)
+    assert len(d["contracts"]) == 1 and "schedule_preview" not in d["contracts"][0]
+
+
+def test_a_sheet_with_no_months_says_so_and_stages_nothing(tmp_path, monkeypatch):
+    m = _isolated(tmp_path, monkeypatch)
+    user = "badsheet"
+    m._save(user, {"contracts": [{"id": "base", "side": "sea"}]})
+    raw = _multipart({"target": "base"}, "team.xlsx",
+                     _xlsx([["Resource", "Rate"], ["Jane Park", 120]]))
+    m.handle("POST", "/sow/contract/schedule", {"__raw__": raw}, {"user": user})
+    c = m._load(user)["contracts"][0]
+    assert "schedule_preview" not in c
+    assert "No monthly figures found" in c["schedule_error"]
