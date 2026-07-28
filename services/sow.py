@@ -428,6 +428,116 @@ def _text_rows(text):
     return [list(r) for r in _csv.reader((text or "").splitlines(), delimiter=delim)]
 
 
+_MONTH_WORDS = {}
+for _i in range(1, 13):
+    _MONTH_WORDS[calendar.month_abbr[_i].lower()] = _i
+    _MONTH_WORDS[calendar.month_name[_i].lower()] = _i
+
+_TOTAL_WORDS = ("total", "totals", "sum", "subtotal", "grand total",
+                "합계", "계", "총계", "소계")
+
+
+def _yy(s):
+    """'26' → 2026, '1998' → 1998. Billing sheets abbreviate the year."""
+    n = int(s)
+    if n >= 1000:
+        return n
+    return 2000 + n if n < 70 else 1900 + n
+
+
+def _parse_month_label(v):
+    """(year, month) out of a billing-schedule cell — 'Jan-26', 'January 2026',
+    '2026-01', '2026/01/01', '1/2026'. None for anything else, so an amount
+    column never gets mistaken for a month."""
+    s = re.sub(r"\s+", " ", str(v or "").strip()).strip(" :·|")
+    if not s:
+        return None
+    m = re.match(r"^(\d{4})[-/. ](\d{1,2})(?:[-/. ]\d{1,2})?(?:[ T].*)?$", s)
+    if m and 1 <= int(m.group(2)) <= 12:
+        return (int(m.group(1)), int(m.group(2)))
+    m = re.match(r"^(\d{1,2})[-/. ](\d{4})$", s)
+    if m and 1 <= int(m.group(1)) <= 12:
+        return (int(m.group(2)), int(m.group(1)))
+    m = re.match(r"^([A-Za-z]{3,9})\.?[-/. ,]*'?(\d{2,4})$", s)
+    if m:
+        mo = _MONTH_WORDS.get(m.group(1).lower())
+        if mo:
+            return (_yy(m.group(2)), mo)
+    # '2026 Jan' / '26-Jan' — a 2-digit lead is only a year when it can't be a day
+    m = re.match(r"^'?(\d{2,4})[-/. ,]*([A-Za-z]{3,9})\.?$", s)
+    if m:
+        mo = _MONTH_WORDS.get(m.group(2).lower())
+        if mo and (len(m.group(1)) == 4 or int(m.group(1)) > 12):
+            return (_yy(m.group(1)), mo)
+    return None
+
+
+def _is_total_row(row):
+    for cell in row:
+        t = _norm_header(cell)
+        if t:
+            return t in _TOTAL_WORDS or t.startswith("total")
+    return False
+
+
+def _month_amounts_from_table(rows):
+    """({(y,m): amount}, note) out of a monthly billing sheet.
+
+    Two shapes are read, because that is what actually arrives (강프로
+    2026-07-27) — an amended schedule often carries no document name at all,
+    only the new monthly figures:
+      long — one row per month:  `Jan-26 | 120,000`
+      wide — months across a header row, figures underneath (per-line rows are
+             summed; a Total row is skipped so nothing is counted twice).
+    """
+    months = {}
+    # ── long ──────────────────────────────────────────────────────────────
+    for row in rows:
+        if not row or _is_total_row(row):
+            continue
+        ym = _parse_month_label(row[0])
+        if not ym:
+            continue
+        val = None
+        for cell in row[1:]:
+            n = _num_or_none(cell)
+            if n is not None:
+                val = n
+        if val is not None:
+            months[ym] = months.get(ym, 0.0) + val
+    if months:
+        return months, _months_note(months, "one row per month")
+    # ── wide ──────────────────────────────────────────────────────────────
+    hdr_i, cols = None, {}
+    for i, row in enumerate(rows[:15]):
+        found = {}
+        for j, cell in enumerate(row):
+            ym = _parse_month_label(cell)
+            if ym and ym not in found.values():
+                found[j] = ym
+        if len(found) > len(cols):
+            hdr_i, cols = i, found
+    if hdr_i is None or not cols:
+        return {}, ""
+    for row in rows[hdr_i + 1:]:
+        if not row or _is_total_row(row):
+            continue
+        for j, ym in cols.items():
+            n = _num_or_none(row[j]) if j < len(row) else None
+            if n is not None:
+                months[ym] = months.get(ym, 0.0) + n
+    if not months:
+        return {}, ""
+    return months, _months_note(months, "months across the header row")
+
+
+def _months_note(months, shape):
+    ks = sorted(months)
+    span = (f"{date(*ks[0], 1).strftime('%b %Y')} – {date(*ks[-1], 1).strftime('%b %Y')}"
+            if ks else "")
+    return f"{len(ks)} month(s) · {span} · {shape}"
+
+
 def _find_header_row(rows):
     """(index, {field: column}) for the first row that reads like a header.
     Sheets in the wild start with a title row and a blank column, so the header
@@ -2847,6 +2957,15 @@ def _migrate_contract_texts(user, data):
 _ALLOWED_EXT = {"pdf", "docx", "doc", "txt", "eml", "msg"}
 
 
+def _sheet_ext(fn):
+    """Extension used only to pick a table parser. Spreadsheets are read and
+    thrown away, never stored, so they are outside the _ALLOWED_EXT whitelist
+    that guards on-disk contract files — which would flatten .xlsx to 'bin'
+    and silently hand a workbook to the CSV reader."""
+    ext = fn.rsplit(".", 1)[-1].lower() if "." in fn else ""
+    return re.sub(r"[^a-z0-9]", "", ext)[:5]
+
+
 def _safe_filename(fn):
     """Display/storage-safe filename: no path, no control chars/quotes."""
     fn = (fn or "").replace("\r", " ").replace("\n", " ").replace('"', " ").replace("\\", "/")
@@ -3455,6 +3574,23 @@ _SIDE_META = {
 }
 
 
+_SOURCE_META = {
+    "email": ("✉️ Email change",
+              "Change agreed by email — counts from its effective date, "
+              "no signed amendment on file"),
+    "schedule": ("📅 Monthly update",
+                 "Revised monthly billing figures — no document name, the sheet "
+                 "itself is the schedule from its first month"),
+    "": ("↺ Amendment", "Overrides the earlier document from its effective date"),
+}
+
+
+def _source_chip(c):
+    label, tip = _SOURCE_META.get(c.get("source") or "", _SOURCE_META[""])
+    return ('<span class="dir-chip ctr-src" '
+            f'title="{tip}">{label}</span>')
+
+
 def _contract_card(c, draggable=False, show_title=True, status="active", data=None):
     """Contract box: counterparty, period, total amount as labeled rows
     (강프로 2026-07-24) — the group header above carries the contract name.
@@ -3482,12 +3618,7 @@ def _contract_card(c, draggable=False, show_title=True, status="active", data=No
         + f'<div class="ctr-top"><span class="dir-chip {chip}">{icon} {label}</span>'
         + ('<span class="dir-chip" style="color:var(--danger);background:rgba(248,113,113,.12)">❌ Cancelled</span>'
            if status == "cancelled" else state_chip)
-        + (('<span class="dir-chip" style="color:var(--info);background:rgba(129,140,248,.14)" '
-            'title="Change agreed by email — counts from its effective date, no signed amendment on file">'
-            '✉️ Email change</span>' if c.get("source") == "email" else
-            '<span class="dir-chip" style="color:var(--info);background:rgba(129,140,248,.14)" '
-            'title="Adds its stated amount/period on top of the base contract">↺ Amendment</span>')
-           if c.get("amends_id") else '')
+        + (_source_chip(c) if c.get("amends_id") else '')
         + ('' if c.get("confirmed") or status != "active" else
            '<span title="Needs review & confirmation" style="font-size:.8rem">⚠️</span>')
         + '</div>'
@@ -3527,15 +3658,57 @@ def _parse_any_date(s, end=False):
     return None
 
 
+def _explicit_months(c):
+    """{(y,m): amount} typed straight onto the document by a monthly billing
+    sheet (강프로 2026-07-27) — no even spread, the sheet IS the schedule.
+    None when the document carries no such sheet."""
+    raw = c.get("month_amounts")
+    if not isinstance(raw, dict) or not raw:
+        return None
+    out = {}
+    for k, v in raw.items():
+        ym = _parse_month_label(k)
+        n = _num_or_none(v)
+        if ym and n is not None:
+            out[ym] = n
+    return out or None
+
+
+def _schedule_summary(months):
+    """(total, period_start_iso, period_end_iso) for an explicit month map, so
+    a sheet-only change still has the amount and dates every other part of the
+    app reads off a contract."""
+    ks = sorted(months)
+    if not ks:
+        return 0.0, "", ""
+    y0, m0 = ks[0]
+    y1, m1 = ks[-1]
+    return (sum(months.values()), date(y0, m0, 1).isoformat(),
+            date(y1, m1, calendar.monthrange(y1, m1)[1]).isoformat())
+
+
 def _contract_month_amounts(c, data=None):
     """{(y,m): amount} — the contract total spread across its term with the
     same days/30 partial-month convention the SOW schedules use. None when
     period or amount is missing/unparseable.
 
+    A document carrying its own monthly sheet skips the spread entirely and
+    bills exactly what the sheet says (강프로 2026-07-27).
+
     With `data`, the schedule is cut off where the next document in the amend
     chain takes over (강프로 2026-07-25): the monthly rate still comes from this
     document's own amount over its own full term, but months already governed by
     a later amendment are dropped instead of double-counted."""
+    explicit = _explicit_months(c)
+    if explicit is not None:
+        if data is None:
+            return dict(explicit)
+        eff_e = _effective_end(data, c)
+        if eff_e is None:
+            return dict(explicit)
+        # the successor takes over from its own effective month onward
+        cut = (eff_e.year, eff_e.month)
+        return {ym: v for ym, v in explicit.items() if ym <= cut}
     s = _parse_any_date(c.get("period_start"))
     e = _parse_any_date(c.get("period_end"), end=True)
     amt = _num_or_none(c.get("amount"))
@@ -3670,9 +3843,10 @@ def _group_cashflow_table(sea, kids, data=None):
         tot = sum(net.values())
         net_cells.append(f'<td class="num tot {"pos" if tot >= 0 else "neg"}">{_money(tot)}</td>')
         rows.append('<tr class="net"><td class="pin">Net (margin)</td>' + "".join(net_cells) + '</tr>')
-    note = ("Contract totals spread evenly across each term (days/30 partial months); "
-            "an amended document stops at the month its amendment takes effect. "
-            "Documents without a parsed period or amount are omitted.")
+    note = ("Contract totals spread evenly across each term (days/30 partial months) — "
+            "except a change that came in as a monthly sheet, which bills its own "
+            "figures. An amended document stops at the month its amendment takes "
+            "effect. Documents without a parsed period or amount are omitted.")
     return (f'<details class="cf-details" open><summary>📅 Monthly billing &amp; payouts</summary>'
             f'<div class="cf-wrap"><table class="cf-table"><thead>{head}</thead>'
             f'<tbody>{"".join(rows)}</tbody></table></div>'
@@ -3759,6 +3933,7 @@ def _render_contracts_section(user, data):
             f'<div class="ctr-ven-col" data-seadrop data-sea="{sea["id"]}">'
             f'{kid_cards}{empty}</div>'
             f'</div>'
+            f'{_change_intake(data, _group_docs(data, sea, kids), sea["id"])}'
             f'{_group_cashflow_table(sea, kids, data)}</details>')
     groups_html = "".join(gblocks) or (
         '<div class="sow-meta" style="padding:22px;text-align:center">'
@@ -3770,32 +3945,50 @@ def _render_contracts_section(user, data):
         + ("".join(_contract_card(c, draggable=True, status=_lifecycle(data, c), data=data)
                    for c in orphans)
            if orphans else '<div class="ctr-drop-hint">None — drop a vendor card here to unlink it</div>')
+        + _change_intake(data, orphans, "orphans")
         + '</div>')
     return f"""
 <div class="ctr-dropzone" id="ctrDrop" data-filedrop tabindex="0">
   <input type="file" id="ctrFile" accept=".pdf,.docx,.doc,.txt" hidden>
-  <b>⬆ Drop a contract here</b> or click to upload — PDF/Word, parsed automatically.
+  <b>⬆ Drop a NEW contract here</b> or click to upload — PDF/Word, parsed
+  automatically. Changes to a contract already below go in its own block.
 </div>
-{_email_intake(data)}
 <div class="ctr-groups">{groups_html}</div>
 {orphan_html}"""
 
 
-def _email_intake(data):
-    """Log a change that arrived by email instead of a signed amendment
-    (강프로 2026-07-27). Collapsed by default — the standard intake pattern."""
-    # only what a change can actually attach to (강프로 2026-07-27): the document
-    # governing today, or one that has not started yet. A superseded or ended
-    # document is history — amending it would move no money.
-    live = [c for c in data.get("contracts", [])
-            if _display_state(data, c) in ("current", "upcoming")]
-    if not live:
-        return ""
-    groups = []
+def _live_change_targets(data, pool=None):
+    """What a change can actually attach to (강프로 2026-07-27): the document
+    governing today, or one that has not started yet. A superseded or ended
+    document is history — amending it would move no money."""
+    pool = data.get("contracts", []) if pool is None else pool
+    return [c for c in pool if _display_state(data, c) in ("current", "upcoming")]
+
+
+def _group_docs(data, sea, kids):
+    """Every document that belongs to one deal block — the SEA chain and each
+    aligned vendor chain — so the block's own intake targets only its own."""
+    return [sea] + _amendments_of(data, sea) + list(kids)
+
+
+def _doc_label(d):
+    """Deal name plus the document's own reference when it adds something —
+    a change logged inside a deal inherits the deal name, so the reference is
+    the only thing telling two of them apart."""
+    name = (d.get("project_name") or "").strip()
+    ref = (d.get("filename") or "").strip()
+    if name and ref and ref.lower() != name.lower():
+        return f"{name} · {ref}"
+    return name or ref or "(untitled contract)"
+
+
+def _target_options(data, docs):
+    """<optgroup>s of live documents, SEA side first."""
+    out = []
     for side in ("sea", "vendor"):
         label, _chip, _col, icon = _SIDE_META[side]
         rows = []
-        for c in sorted((x for x in live if (x.get("side") or "sea") == side),
+        for c in sorted((x for x in docs if (x.get("side") or "sea") == side),
                         key=lambda x: (x.get("project_name") or "").lower()):
             party = c.get("vendor") or c.get("client") or ""
             name = c.get("project_name") or c.get("filename") or "(untitled contract)"
@@ -3804,15 +3997,37 @@ def _email_intake(data):
             soon = " · not started yet" if _display_state(data, c) == "upcoming" else ""
             rows.append(f'<option value="{c["id"]}">{_esc(name)}{tail}{amd}{soon}</option>')
         if rows:
-            groups.append(f'<optgroup label="{icon} {label}">{"".join(rows)}</optgroup>')
-    opts = groups
+            out.append(f'<optgroup label="{icon} {label}">{"".join(rows)}</optgroup>')
+    return "".join(out)
+
+
+def _change_intake(data, docs, key):
+    """Log a change to an existing contract — rendered INSIDE the deal block it
+    belongs to (강프로 2026-07-27), never as one page-wide form, so the document
+    being changed is the one you are already looking at and its deal name is
+    inherited instead of retyped.
+
+    Two ways in, because both arrive in real life:
+      ✉️  the mail that agreed the change
+      📅  the revised monthly figures alone — plenty of amendments carry no
+          document name at all, only a new billing schedule.
+    """
+    live = _live_change_targets(data, docs)
+    if not live:
+        return ""
+    opts = _target_options(data, live)
     return f"""
-<details class="eml-intake" id="emlIntake">
-  <summary>✉️ Log a change from email <span class="eml-hint">— fee revision, extension
-    or scope change agreed by mail instead of a signed amendment</span></summary>
-  <form class="eml-form" id="emlForm" onsubmit="return emlSubmit(event)">
+<details class="chg-intake" data-key="{_esc(key)}">
+  <summary>✏️ Log a change to this deal <span class="eml-hint">— fee revision,
+    extension or scope change on a contract already above</span></summary>
+  <div class="chg-tabs">
+    <button type="button" class="chg-tab is-on" onclick="chgTab(this,'eml')">✉️ From an email</button>
+    <button type="button" class="chg-tab" onclick="chgTab(this,'sch')">📅 Monthly amounts only</button>
+  </div>
+  <form class="eml-form chg-pane" data-pane="eml"
+        onsubmit="return chgSubmit(event,'/sow/contract/email')">
     <label class="eml-field eml-wide"><span>Which contract does this change?</span>
-      <select class="slot" name="target" required>{"".join(opts)}</select></label>
+      <select class="slot" name="target" required>{opts}</select></label>
     <label class="eml-field eml-wide"><span>Paste the email — headers and body</span>
       <textarea class="slot" name="text" rows="5" placeholder="From: … / Sent: … / Subject: …
 
@@ -3825,15 +4040,67 @@ Paste the mail here and the fields below fill themselves."></textarea></label>
       <input class="slot" name="effective" placeholder="August 1, 2026"></label>
     <label class="eml-field"><span>New end date</span>
       <input class="slot" name="end" placeholder="blank = end date unchanged"></label>
+    <label class="eml-field eml-wide"><span>Reference (optional)</span>
+      <input class="slot" name="name" placeholder="Amendment #2 — blank = the mail subject"></label>
     <label class="eml-field eml-wide"><span>What changed</span>
       <input class="slot" name="note" placeholder="Left blank, the AI writes this from the mail"></label>
     <div class="eml-actions">
-      <span class="eml-note">Typed values win over the AI read. You review and
-        Confirm it on the next screen before it counts.</span>
-      <button type="submit" class="btn btn-primary btn-sm" id="emlBtn">✉️ Log change</button>
+      <span class="eml-note">The deal name and both parties are inherited from the
+        contract above. Typed values win over the AI read, and you Confirm it on
+        the next screen before it counts.</span>
+      <button type="submit" class="btn btn-primary btn-sm">✉️ Log change</button>
+    </div>
+  </form>
+  <form class="eml-form chg-pane" data-pane="sch" hidden
+        onsubmit="return chgSubmit(event,'/sow/contract/schedule')">
+    <label class="eml-field eml-wide"><span>Which contract does this change?</span>
+      <select class="slot" name="target" required>{opts}</select></label>
+    <label class="eml-field eml-wide"><span>Upload the revised schedule</span>
+      <input class="slot" type="file" name="file" accept=".xlsx,.xlsm,.csv,.txt,.tsv"></label>
+    <label class="eml-field eml-wide"><span>…or paste the months straight from Excel</span>
+      <textarea class="slot" name="text" rows="4" placeholder="Jan-26	120,000
+Feb-26	120,000
+Mar-26	95,000
+
+Months down a column, or across a header row with the figures underneath."></textarea></label>
+    <label class="eml-field eml-wide"><span>Reference (optional)</span>
+      <input class="slot" name="name" placeholder="blank = “Monthly update · Jan 2026 – Mar 2026”"></label>
+    <label class="eml-field eml-wide"><span>What changed</span>
+      <input class="slot" name="note" placeholder="e.g. media retainer reduced from April"></label>
+    <div class="eml-actions">
+      <span class="eml-note">No document name needed — the sheet is the schedule.
+        It bills exactly these figures from its first month, and the contract
+        above stops there instead of being billed twice.</span>
+      <button type="submit" class="btn btn-primary btn-sm">📅 Apply schedule</button>
     </div>
   </form>
 </details>"""
+
+
+def _schedule_box(c, months):
+    """The monthly figures this document bills, as read off the sheet — the
+    document's amount and period are derived from them, so they are shown here
+    rather than hidden behind a single total (강프로 2026-07-27)."""
+    total, _s, _e = _schedule_summary(months)
+    rows = "".join(
+        f'<li><span>{date(y, m, 1).strftime("%b %Y")}</span>'
+        f'<b>{_money(v)}</b></li>' for (y, m), v in sorted(months.items()))
+    note = c.get("schedule_note")
+    src = f'<div class="sow-meta">Read from: <b>{_esc(note)}</b></div>' if note else ""
+    return f"""
+<div class="ctr-linkbox">
+  <b>📅 Monthly billing schedule ({len(months)} month(s))</b>
+  {src}
+  <div class="sow-meta">These figures bill as they stand — no even spread — and the
+    document they change stops the month before the first one. Totals
+    <b>{_money(total)}</b>.</div>
+  <ul class="ctr-kidlist sch-list">{rows}</ul>
+  <div>
+    <button class="btn btn-secondary btn-sm" type="button"
+      onclick="if(confirm('Drop the monthly schedule? The total stays as the contract amount and goes back to being spread evenly across the period.'))ctrPost('/sow/contract/schedule_clear',{{id:'{c["id"]}'}})">
+      🗑 Clear schedule</button>
+  </div>
+</div>"""
 
 
 def _people_sheet_box(c):
@@ -3914,9 +4181,10 @@ def _render_contract_frag(user, data, cid):
                          'border-top:1px solid var(--border)">No vendor contracts aligned yet — '
                          'drag a vendor card onto this group on the main screen.</div>')
 
-    def fld(lbl, key, val):
+    def fld(lbl, key, val, ro=False, tip=""):
+        extra = ' readonly' + (f' title="{tip}"' if tip else "") if ro else ""
         return (f'<label class="ctr-fld"><span>{lbl}</span>'
-                f'<input class="slot" name="{key}" value="{_esc(val)}"></label>')
+                f'<input class="slot" name="{key}" value="{_esc(val)}"{extra}></label>')
 
     # side-aware fields: the Cheil entity is a constant on both sides, and a
     # vendor deal's payer is always Cheil — neither is worth an editable box.
@@ -3926,6 +4194,20 @@ def _render_contract_frag(user, data, cid):
     else:
         party_fld = fld("Client (payer)", "client", c.get("client") or SAMSUNG_ENTITY)
         parties_note = f"{c.get('client') or SAMSUNG_ENTITY} ↔ {CHEIL_ENTITY} (agency)"
+    # a document billing off its own monthly sheet has no single figure to type —
+    # the amount, the start and the end are all read off the schedule below
+    months = _explicit_months(c)
+    sch_tip = ("Derived from the monthly schedule below — clear the schedule to "
+               "type these in by hand")
+    if months:
+        amount_fld = fld("Contract amount", "amount", c.get("amount"), ro=True, tip=sch_tip)
+        schedule_html = _schedule_box(c, months)
+    else:
+        amount_fld = fld("Contract amount", "amount", c.get("amount"))
+        schedule_html = ""
+    if c.get("schedule_error"):
+        schedule_html = (f'<div class="ctr-linkbox"><div class="ppl-sheet-err">⚠ '
+                         f'{_esc(c["schedule_error"])}</div></div>') + schedule_html
     # people found in the contract — 1차 정리 후 리뷰 요청 후 저장 (강프로 2026-07-24):
     # nothing lands in the roster until the user confirms here.
     people_html = ""
@@ -3984,12 +4266,11 @@ def _render_contract_frag(user, data, cid):
         f'<option value="{o["id"]}"{" selected" if c.get("amends_id") == o["id"] else ""}>'
         f'{_esc(o.get("project_name") or o.get("filename") or o["id"])}</option>'
         for o in amend_cands)
-    amend_chip = ('✉️ Email change — overrides the earlier document, no signed '
-                  'amendment on file' if c.get("source") == "email" else
-                  '↺ Amendment — overrides the earlier document')
+    amend_lb, amend_tip = _SOURCE_META.get(c.get("source") or "", _SOURCE_META[""])
     lc_chip = ('<span class="ctr-chip neg">❌ Cancelled — excluded from totals</span>'
                if lc == "cancelled" else
-               (f'<span class="ctr-chip" style="color:var(--info);border-color:rgba(129,140,248,.4)">{amend_chip}</span>'
+               (f'<span class="ctr-chip ctr-src-chip" title="{amend_tip}">{amend_lb}'
+                f' — overrides the earlier document</span>'
                 if c.get("amends_id") else '<span class="ctr-chip pos">● Active</span>'))
     eff_html = ""
     if amds:
@@ -4006,9 +4287,12 @@ def _render_contract_frag(user, data, cid):
             link = ("" if d["id"] == c["id"] else
                     f' <a href="#" onclick="openContract(\'{d["id"]}\');return false"'
                     f' style="color:var(--accent)">open →</a>')
+            icon_d = ("📅" if d.get("source") == "schedule" else
+                      "✉️" if d.get("source") == "email" else
+                      "↺" if d.get("amends_id") else "📄")
             amd_list += (
-                f'<li><span>{"↺" if d.get("amends_id") else "📄"} '
-                f'{_esc(d.get("project_name") or d.get("filename"))}{link}{note}</span>'
+                f'<li><span>{icon_d} '
+                f'{_esc(_doc_label(d))}{link}{note}</span>'
                 f'<b>{_esc(d.get("amount") or "—")}</b></li>')
         eff_html = (f'<div class="sow-meta"><b>Effective after {len(amds)} amendment(s):</b> '
                     f'{_money(eff_amt or 0)}{(" · " + span) if span else ""}'
@@ -4066,8 +4350,12 @@ def _render_contract_frag(user, data, cid):
     uploaded = (c.get("uploaded") or "")[:10]
     preview = _esc(_contract_text(user, c)[:6000])
     is_email = c.get("source") == "email"
+    is_sched = c.get("source") == "schedule"
     em = c.get("email_meta") or {}
     email_html = ""
+    if is_sched and c.get("change_note"):
+        email_html = (f'<div class="eml-note-box"><b>📅 What changed</b><br>'
+                      f'{_esc(c.get("change_note"))}</div>')
     if is_email:
         rows = "".join(
             f'<span class="lb">{k.capitalize()}</span><span>{_esc(v)}</span>'
@@ -4077,9 +4365,13 @@ def _render_contract_frag(user, data, cid):
         if c.get("change_note"):
             email_html += (f'<div class="eml-note-box"><b>✉️ What changed</b><br>'
                            f'{_esc(c.get("change_note"))}</div>')
-    prev_label = "✉️ Email text" if is_email else "🔤 Extracted text"
-    orig_btn = ("" if is_email and not c.get("has_file") else
-                f'<a class="btn btn-secondary btn-sm" href="/sow/contract/file?id={c["id"]}" target="_blank">⬇ Original</a>')
+    prev_label = ("✉️ Email text" if is_email else
+                  "📅 Schedule as read" if is_sched else "🔤 Extracted text")
+    # only offer the download when a file was actually kept — a logged change
+    # often has none, and a dead ⬇ Original reads as a broken contract
+    orig_btn = (f'<a class="btn btn-secondary btn-sm" href="/sow/contract/file?id={c["id"]}"'
+                f' target="_blank">⬇ Original</a>'
+                if not c.get("source") or c.get("has_file") else "")
     return f"""
 <div class="cmodal-head">
   <span class="dir-chip {chip}">{icon} {label}</span>
@@ -4093,14 +4385,15 @@ def _render_contract_frag(user, data, cid):
     <div class="ctr-grid">
       {fld("Project name", "project_name", c.get("project_name"))}
       {party_fld}
-      {fld("Contract amount", "amount", c.get("amount"))}
+      {amount_fld}
       <label class="ctr-fld"><span>Side</span>
         <select class="slot" name="side">
           <option value="sea"{' selected' if c.get('side')=='sea' else ''}>SEA ↔ Cheil</option>
           <option value="vendor"{' selected' if c.get('side')=='vendor' else ''}>Cheil ↔ Vendor</option>
         </select></label>
-      {fld("Effective date" if is_email else "Period start", "period_start", c.get("period_start"))}
-      {fld("Period end", "period_end", c.get("period_end"))}
+      {fld("Effective date" if is_email else "Period start", "period_start",
+           c.get("period_start"), ro=bool(months), tip=sch_tip)}
+      {fld("Period end", "period_end", c.get("period_end"), ro=bool(months), tip=sch_tip)}
     </div>
     <div class="ctr-actions">
       <button class="btn btn-primary btn-sm" type="submit">💾 Save fields</button>
@@ -4112,6 +4405,7 @@ def _render_contract_frag(user, data, cid):
   </form>
   {link_html}
   {lifecycle_html}
+  {schedule_html}
   {people_html}
   {viewer_html}
   <details class="ctr-prev"><summary>{prev_label}</summary><pre>{preview}</pre></details>
@@ -4135,12 +4429,20 @@ _CTR_CSS = """
 .ctr-group.is-dim .ctr-card.is-dim{opacity:.72}
 .dir-chip.ctr-state{color:var(--text-muted);background:var(--surface-3);
   border:1px solid var(--border);font-weight:600}
-/* ── email-sourced change intake ── */
-.eml-intake{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:12px 16px;margin-bottom:16px}
-.eml-intake>summary{cursor:pointer;list-style:none;font-size:.84rem;font-weight:700;color:var(--text)}
-.eml-intake>summary::-webkit-details-marker{display:none}
-.eml-intake>summary::before{content:"▸ ";color:var(--text-muted)}
-.eml-intake[open]>summary::before{content:"▾ "}
+/* ── per-deal change intake: lives inside the block it changes ── */
+.dir-chip.ctr-src{color:var(--info);background:var(--surface-3);border:1px solid var(--border)}
+.ctr-chip.ctr-src-chip{color:var(--info);border-color:var(--info)}
+.chg-intake{margin-top:12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:10px 14px}
+.chg-intake>summary{cursor:pointer;list-style:none;font-size:.8rem;font-weight:700;color:var(--text)}
+.chg-intake>summary::-webkit-details-marker{display:none}
+.chg-intake>summary::before{content:"▸ ";color:var(--text-muted)}
+.chg-intake[open]>summary::before{content:"▾ "}
+.chg-tabs{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
+.chg-tab{background:var(--surface-2,var(--surface));border:1px solid var(--border);color:var(--text-muted);border-radius:var(--radius-full);padding:5px 14px;font-size:.74rem;font-weight:700;cursor:pointer;transition:.15s}
+.chg-tab:hover{color:var(--text);border-color:var(--border-bright)}
+.chg-tab.is-on{background:var(--accent-glow);color:var(--accent);border-color:var(--accent)}
+.chg-pane[hidden]{display:none}
+.sch-list li span{color:var(--text-muted);font-size:.78rem}
 .eml-hint{font-weight:500;color:var(--text-muted);font-size:.78rem}
 .eml-form{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:12px}
 .eml-field{display:flex;flex-direction:column;gap:4px;min-width:0}
@@ -4220,6 +4522,8 @@ details.ctr-group[open]>.ctr-group-hd{margin-bottom:12px}
 .ctr-fld{display:flex;flex-direction:column;gap:3px}
 .ctr-fld>span{font-size:.68rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted)}
 .ctr-fld .slot{width:100%}
+/* derived from the monthly sheet — say so instead of inviting a doomed edit */
+.ctr-fld .slot[readonly]{background:var(--surface-2);color:var(--text-muted);cursor:not-allowed;border-style:dashed}
 .ctr-actions{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
 .ctr-linkbox,.ctr-linked{margin-top:16px;padding-top:14px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px;font-size:.82rem}
 .ppl-row{display:flex;gap:8px;align-items:flex-start;font-size:.82rem;padding:2px 0;cursor:pointer}
@@ -4246,6 +4550,8 @@ details.ctr-group[open]>.ctr-group-hd{margin-bottom:12px}
   .ctr-rows>span{overflow-wrap:anywhere}
   .eml-form{grid-template-columns:1fr}
   .eml-actions .btn{width:100%;min-height:44px}
+  .chg-tab{flex:1;min-height:44px}
+  .chg-intake>summary{min-height:44px;display:flex;align-items:center;flex-wrap:wrap}
 }
 """
 
@@ -4324,18 +4630,25 @@ function ctrReparse(id,btn){
   fetch('/sow/contract/reparse',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'id='+encodeURIComponent(id)})
     .then(function(){location.href='/sow/contracts?newc='+encodeURIComponent(id);});
 }
-function emlSubmit(e){
+function chgTab(btn,pane){
+  var box=btn.closest('.chg-intake'); if(!box)return;
+  box.querySelectorAll('.chg-tab').forEach(function(b){b.classList.toggle('is-on',b===btn);});
+  box.querySelectorAll('.chg-pane').forEach(function(f){f.hidden=(f.dataset.pane!==pane);});
+}
+function chgSubmit(e,url){
   e.preventDefault();
-  var f=document.getElementById('emlForm'), b=document.getElementById('emlBtn');
-  var fd=new FormData(f);
-  if(!(fd.get('text')||'').trim() && !(fd.get('file')&&fd.get('file').name)
-     && !(fd.get('amount')||'').trim() && !(fd.get('note')||'').trim()){
+  var f=e.target, fd=new FormData(f), b=f.querySelector('button[type=submit]');
+  var hasText=(fd.get('text')||'').trim(), hasFile=(fd.get('file')&&fd.get('file').name);
+  if(f.dataset.pane==='sch'){
+    if(!hasText && !hasFile){ alert('Attach the schedule or paste the months.'); return false; }
+  }else if(!hasText && !hasFile && !(fd.get('amount')||'').trim() && !(fd.get('note')||'').trim()){
     alert('Paste the email, attach it, or type what changed.'); return false;
   }
-  if(b){b.disabled=true;b.textContent='✉️ Reading…';}
-  fetch('/sow/contract/email',{method:'POST',body:fd})
+  var was=b?b.textContent:'';
+  if(b){b.disabled=true;b.textContent='⏳ Reading…';}
+  fetch(url,{method:'POST',body:fd})
     .then(function(r){ location.href = r.url || '/sow/contracts'; })
-    .catch(function(){ if(b){b.disabled=false;b.textContent='✉️ Log change';} });
+    .catch(function(){ if(b){b.disabled=false;b.textContent=was;} });
   return false;
 }
 function ctrUpload(files){
@@ -4450,7 +4763,7 @@ def handle(method, path, body, ctx):
         fields, files = _read_multipart(raw) if raw else ({}, [])
         if not fields and not files:
             fields = {k: _f(body, k) for k in
-                      ("target", "text", "amount", "effective", "end", "note")}
+                      ("target", "text", "amount", "effective", "end", "name", "note")}
         data = _load(user)
         target = _contract_by_id(data, (fields.get("target") or "").strip())
         if not target:
@@ -4473,16 +4786,20 @@ def handle(method, path, body, ctx):
                "client": target.get("client") or "",
                "agency": target.get("agency") or "",
                "vendor": target.get("vendor") or "",
-               "filename": fn or (meta.get("subject") or "Email change"),
+               "filename": ((fields.get("name") or "").strip() or fn
+                            or meta.get("subject") or "Email change"),
                "ext": ext or "txt", "linked_id": None,
                "has_file": bool(content),
                "uploaded": datetime.now().isoformat(timespec="seconds"),
                "confirmed": False,
                "email_meta": {k: v for k, v in meta.items() if v},
-               # typed values win over the AI read — the user is looking at the
-               # mail, the model is looking at a forward chain
+               # the deal name is inherited from the contract this change sits
+               # under — the intake lives inside its block, so it is never
+               # retyped (강프로 2026-07-27); the reference above names the change
                "project_name": (fields.get("project") or ai.get("project_name")
                                 or target.get("project_name") or ""),
+               # typed values win over the AI read — the user is looking at the
+               # mail, the model is looking at a forward chain
                "amount": (fields.get("amount") or ai.get("amount") or "").strip(),
                "period_start": (fields.get("effective") or ai.get("period_start") or "").strip(),
                "period_end": (fields.get("end") or ai.get("period_end") or "").strip(),
@@ -4502,6 +4819,78 @@ def handle(method, path, body, ctx):
         data.setdefault("contracts", []).append(rec)
         _save(user, data)
         return ("redirect", f"/sow/contracts?newc={cid}")
+
+    if method == "POST" and path == "/sow/contract/schedule":
+        # A change that arrives as monthly figures and nothing else (강프로
+        # 2026-07-27) — no document, often no name. Stored as an amendment so
+        # the effective-date override treats it like any other, except that it
+        # bills the sheet's own months instead of an even spread.
+        raw = body.get("__raw__") or body.get("__raw_handler__")
+        fields, files = _read_multipart(raw) if raw else ({}, [])
+        if not fields and not files:
+            fields = {k: _f(body, k) for k in ("target", "text", "name", "note")}
+        data = _load(user)
+        target = _contract_by_id(data, (fields.get("target") or "").strip())
+        if not target:
+            return ("redirect", "/sow/contracts")
+        rows, src = [], ""
+        if files:
+            fn, content, _mime = files[0]
+            try:
+                rows = _sheet_rows(content, _sheet_ext(fn))
+                src = _safe_filename(fn)
+            except Exception:
+                rows = []
+        elif (fields.get("text") or "").strip():
+            rows = _text_rows(fields["text"])
+            src = "pasted range"
+        months, note = _month_amounts_from_table(rows) if rows else ({}, "")
+        if not months:
+            target["schedule_error"] = (
+                "No monthly figures found — the sheet needs month labels "
+                "(Jan-26, January 2026, 2026-01) with an amount against each.")
+            _save(user, data)
+            return ("redirect", f"/sow/contracts?newc={target['id']}")
+        target.pop("schedule_error", None)
+        total, p_start, p_end = _schedule_summary(months)
+        span = (f'{date(*sorted(months)[0], 1).strftime("%b %Y")} – '
+                f'{date(*sorted(months)[-1], 1).strftime("%b %Y")}')
+        cid = uuid.uuid4().hex[:8]
+        rec = {"id": cid, "source": "schedule", "amends_id": target["id"],
+               "side": target.get("side") or "sea",
+               "client": target.get("client") or "",
+               "agency": target.get("agency") or "",
+               "vendor": target.get("vendor") or "",
+               "project_name": target.get("project_name") or "",
+               "filename": ((fields.get("name") or "").strip()
+                            or f"Monthly update · {span}"),
+               "ext": "txt", "linked_id": None, "has_file": False,
+               "uploaded": datetime.now().isoformat(timespec="seconds"),
+               "confirmed": False,
+               "month_amounts": {f"{y:04d}-{m:02d}": round(v, 2)
+                                 for (y, m), v in months.items()},
+               "schedule_note": f"{src} · {note}" if src else note,
+               "amount": _money(total),
+               "period_start": p_start, "period_end": p_end,
+               "change_note": (fields.get("note") or "").strip()}
+        try:
+            _store_contract_text(user, rec, "\n".join(
+                f'{date(y, m, 1).strftime("%b %Y")}\t{v:,.2f}'
+                for (y, m), v in sorted(months.items())))
+        except OSError:
+            pass
+        data.setdefault("contracts", []).append(rec)
+        _save(user, data)
+        return ("redirect", f"/sow/contracts?newc={cid}")
+
+    if method == "POST" and path == "/sow/contract/schedule_clear":
+        data = _load(user)
+        c = _contract_by_id(data, _f(body, "id"))
+        if c:
+            c.pop("month_amounts", None)
+            c.pop("schedule_note", None)
+            _save(user, data)
+        return ("redirect", "/sow/contracts")
 
     if method == "POST" and path == "/sow/contract/reparse":
         data = _load(user)
@@ -4625,9 +5014,8 @@ def handle(method, path, body, ctx):
         rows = []
         if files:
             fn, content, _mime = files[0]
-            ext = fn.rsplit(".", 1)[-1].lower() if "." in fn else ""
             try:
-                rows = _sheet_rows(content, ext)
+                rows = _sheet_rows(content, _sheet_ext(fn))
             except Exception:
                 rows = []
         elif (fields.get("text") or "").strip():

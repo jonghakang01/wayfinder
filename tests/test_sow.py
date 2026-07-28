@@ -357,12 +357,15 @@ def test_confirmed_change_without_amount_or_date_is_flagged_as_a_todo():
     assert "not in the cashflow" in notes[0]
 
 
-def test_email_intake_lists_live_contracts_and_posts_to_the_email_route():
+def test_change_intake_lists_live_contracts_and_posts_to_both_routes():
     m = _mod()
-    html = m._email_intake(_email_change_chain())
-    assert "Log a change from email" in html
+    d = _email_change_chain()
+    html = m._change_intake(d, d["contracts"], "g1")
+    assert "Log a change to this deal" in html
     assert 'value="base"' in html
     assert 'accept=".msg,.eml,.pdf,.docx,.doc,.txt"' in html
+    assert "/sow/contract/email" in html and "/sow/contract/schedule" in html
+    assert 'accept=".xlsx,.xlsm,.csv,.txt,.tsv"' in html
 
 
 def test_multipart_reader_returns_fields_and_files():
@@ -645,10 +648,10 @@ def test_finished_deals_start_folded_live_ones_open():
     assert state.get("base") is True                # live chain starts open
 
 
-def test_email_picker_offers_only_the_document_that_governs():
+def test_change_picker_offers_only_the_document_that_governs():
     m = _mod()
     d = _states_fixture()
-    html = m._email_intake(d)
+    html = m._change_intake(d, d["contracts"], "g1")
     assert 'value="amd"' in html          # the amendment governing today
     assert 'value="future"' in html       # signed, not started — still amendable
     assert 'value="base"' not in html     # superseded → not offered
@@ -656,20 +659,233 @@ def test_email_picker_offers_only_the_document_that_governs():
     assert "not started yet" in html
 
 
-def test_email_picker_separates_the_two_contract_sides():
+def test_change_picker_separates_the_two_contract_sides():
     m = _mod()
     d = _states_fixture()
     d["contracts"].append({"id": "v9", "side": "vendor", "vendor": "Accenture",
                            "project_name": "AEM vendor deal",
                            "period_start": _rel(years=-1), "period_end": _rel(years=1)})
-    html = m._email_intake(d)
+    html = m._change_intake(d, d["contracts"], "g1")
     assert '<optgroup label="🔵 SEA ↔ Cheil">' in html
     assert '<optgroup label="🟠 Cheil ↔ Vendor">' in html
     assert html.index("SEA ↔ Cheil") < html.index("Cheil ↔ Vendor")   # SEA side first
 
 
-def test_email_picker_disappears_when_nothing_is_live():
+def test_change_picker_disappears_when_nothing_is_live():
     m = _mod()
     d = {"contracts": [{"id": "x", "side": "sea", "period_start": _rel(years=-3),
                         "period_end": _rel(years=-2)}]}
-    assert m._email_intake(d) == ""
+    assert m._change_intake(d, d["contracts"], "g1") == ""
+
+
+# ── the change intake lives inside the deal block it changes ────────────────
+def test_page_has_no_global_change_form_only_per_deal_ones():
+    m = _mod()
+    d = _email_change_chain()
+    html = m._render_contracts_section("__testuser__", d)
+    # one intake, inside the group block — never a page-wide picker above it
+    assert html.count('class="chg-intake"') == 1
+    assert html.index('class="ctr-group') < html.index('class="chg-intake"')
+    # the upload dropzone stays, and says what it is for
+    assert "Drop a NEW contract here" in html
+
+
+def test_a_deal_block_only_offers_its_own_contracts():
+    m = _mod()
+    d = {"contracts": [
+        {"id": "s1", "side": "sea", "project_name": "Deal One",
+         "period_start": _rel(years=-1), "period_end": _rel(years=1)},
+        {"id": "v1", "side": "vendor", "linked_id": "s1", "vendor": "Accenture",
+         "period_start": _rel(years=-1), "period_end": _rel(years=1)},
+        {"id": "s2", "side": "sea", "project_name": "Deal Two",
+         "period_start": _rel(years=-1), "period_end": _rel(years=1)},
+    ]}
+    groups, _orphans = m._contract_groups(d)
+    sea, kids = next(g for g in groups if g[0]["id"] == "s1")
+    html = m._change_intake(d, m._group_docs(d, sea, kids), sea["id"])
+    assert 'value="s1"' in html and 'value="v1"' in html
+    assert 'value="s2"' not in html          # the other deal's contract
+
+
+def test_logged_change_inherits_the_deal_name_instead_of_asking_for_it():
+    m = _mod()
+    d = _email_change_chain()
+    html = m._change_intake(d, d["contracts"], "g1")
+    assert "inherited from the\n        contract above" in html or "inherited" in html
+    # the only name box is optional, and it names the change, not the deal
+    assert 'name="name"' in html and "optional" in html
+
+
+# ── amendments that carry monthly figures and no document name ─────────────
+def test_month_labels_the_sheets_actually_use():
+    m = _mod()
+    for s, want in (("Jan-26", (2026, 1)), ("January 2026", (2026, 1)),
+                    ("Jan 2026", (2026, 1)), ("2026-01", (2026, 1)),
+                    ("2026/01/01", (2026, 1)), ("1/2026", (2026, 1)),
+                    ("2026-03-01 00:00:00", (2026, 3)), ("Dec-25", (2025, 12))):
+        assert m._parse_month_label(s) == want, s
+    # an amount column must never read as a month
+    for s in ("120,000", "$95,000", "Total", "", "Resource", "26"):
+        assert m._parse_month_label(s) is None, s
+
+
+def test_monthly_sheet_reads_one_row_per_month():
+    m = _mod()
+    rows = [["Month", "Amount"], ["Jan-26", "120,000"], ["Feb-26", "120,000"],
+            ["Mar-26", "95,000"], ["Total", "335,000"]]
+    months, note = m._month_amounts_from_table(rows)
+    assert months == {(2026, 1): 120000.0, (2026, 2): 120000.0, (2026, 3): 95000.0}
+    assert sum(months.values()) == 335000.0      # the Total row is not added again
+    assert "3 month(s)" in note
+
+
+def test_monthly_sheet_reads_months_across_the_header_row():
+    m = _mod()
+    rows = [["Cheil billing schedule"],
+            ["Line", "Jan-26", "Feb-26", "Mar-26", "Total"],
+            ["Media", "100,000", "100,000", "80,000", "280,000"],
+            ["Production", "20,000", "20,000", "15,000", "55,000"],
+            ["Total", "120,000", "120,000", "95,000", "335,000"]]
+    months, _note = m._month_amounts_from_table(rows)
+    # per-line rows summed; the Total row and the Total column both left out
+    assert months == {(2026, 1): 120000.0, (2026, 2): 120000.0, (2026, 3): 95000.0}
+
+
+def test_sheet_without_month_labels_is_rejected_not_guessed():
+    m = _mod()
+    rows = [["Resource", "Rate"], ["Jane Park", "120"]]
+    assert m._month_amounts_from_table(rows) == ({}, "")
+
+
+def _schedule_chain():
+    """A yearly contract, then a change that is nothing but new monthly figures."""
+    return {"contracts": [
+        {"id": "base", "side": "sea", "project_name": "AEM Support",
+         "amount": "$1,200,000", "period_start": "2026-01-01",
+         "period_end": "2026-12-31", "confirmed": True,
+         "uploaded": "2026-01-02T09:00:00"},
+        {"id": "sch1", "side": "sea", "source": "schedule", "amends_id": "base",
+         "project_name": "AEM Support", "filename": "Monthly update · Jul 2026 – Sep 2026",
+         "amount": "$210,000", "period_start": "2026-07-01",
+         "period_end": "2026-09-30", "confirmed": True,
+         "month_amounts": {"2026-07": 80000, "2026-08": 80000, "2026-09": 50000},
+         "uploaded": "2026-06-20T09:00:00"},
+    ]}
+
+
+def test_monthly_schedule_bills_its_own_figures_not_an_even_spread():
+    m = _mod()
+    d = _schedule_chain()
+    sch = d["contracts"][1]
+    got = m._contract_month_amounts(sch, d)
+    assert got == {(2026, 7): 80000.0, (2026, 8): 80000.0, (2026, 9): 50000.0}
+    assert m._effective_amount(d, sch) == 210000.0
+
+
+def test_a_monthly_change_supersedes_the_base_from_its_first_month():
+    m = _mod()
+    d = _schedule_chain()
+    base = d["contracts"][0]
+    assert m._effective_end(d, base).isoformat() == "2026-06-30"
+    seen = {}
+    for c in d["contracts"]:
+        for ym in m._contract_month_amounts(c, d):
+            assert ym not in seen, f"{ym} billed twice"
+            seen[ym] = c["id"]
+    assert seen[(2026, 6)] == "base" and seen[(2026, 7)] == "sch1"
+    # 6 months of the base (600k) + the sheet's own 210k
+    total, _s, _e = m._chain_effective(d, base)
+    assert round(total) == 810000
+
+
+def test_schedule_summary_derives_amount_and_period_from_the_months():
+    m = _mod()
+    total, start, end = m._schedule_summary(
+        {(2026, 7): 80000.0, (2026, 8): 80000.0, (2026, 9): 50000.0})
+    assert total == 210000.0
+    assert start == "2026-07-01" and end == "2026-09-30"
+
+
+def test_a_nameless_monthly_change_is_still_labelled_and_chipped():
+    m = _mod()
+    d = _schedule_chain()
+    card = m._contract_card(d["contracts"][1], data=d)
+    assert "📅 Monthly update" in card and "↺ Amendment" not in card
+    # it inherits the deal name, and its own reference tells it apart
+    assert m._doc_label(d["contracts"][1]) == "AEM Support · Monthly update · Jul 2026 – Sep 2026"
+
+
+def test_a_scheduled_document_does_not_invite_hand_typed_totals():
+    m = _mod()
+    d = _schedule_chain()
+    frag = m._render_contract_frag("__testuser__", d, "sch1")
+    assert 'name="amount"' in frag and "readonly" in frag
+    assert "Monthly billing schedule (3 month(s))" in frag
+    assert "/sow/contract/schedule_clear" in frag
+
+
+def test_a_plain_contract_keeps_its_editable_amount():
+    m = _mod()
+    d = _schedule_chain()
+    frag = m._render_contract_frag("__testuser__", d, "base")
+    assert "Monthly billing schedule" not in frag
+    assert 'name="amount" value="$1,200,000">' in frag        # no readonly
+
+
+def test_uploaded_workbook_reaches_the_xlsx_parser_not_the_csv_one():
+    # _safe_ext guards on-disk contract files and flattens .xlsx to "bin";
+    # a schedule sheet is parsed and discarded, so it uses its own extension
+    m = _mod()
+    assert m._safe_ext("revised.xlsx") == "bin"
+    assert m._sheet_ext("revised.xlsx") == "xlsx"
+    assert not set(m._sheet_ext("../../etc/pa$$wd")) & set("./\\$")   # alnum only
+    import io, openpyxl
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["Line", "Jan-26", "Feb-26", "Total"])
+    ws.append(["Media", 100000, 80000, 180000])
+    buf = io.BytesIO()
+    wb.save(buf)
+    months, _n = m._month_amounts_from_table(m._sheet_rows(buf.getvalue(), m._sheet_ext("s.xlsx")))
+    assert months == {(2026, 1): 100000.0, (2026, 2): 80000.0}
+
+
+def test_a_logged_change_with_no_file_offers_no_dead_download():
+    m = _mod()
+    d = _schedule_chain()
+    frag = m._render_contract_frag("__testuser__", d, "sch1")
+    assert "⬇ Original" not in frag and "📅 Schedule as read" in frag
+    # an uploaded contract still offers it
+    assert "⬇ Original" in m._render_contract_frag("__testuser__", d, "base")
+
+
+def test_an_emailed_change_that_kept_its_attachment_still_offers_it():
+    m = _mod()
+    d = _email_change_chain()
+    d["contracts"][1]["has_file"] = True
+    d["contracts"][1]["ext"] = "msg"
+    assert "⬇ Original" in m._render_contract_frag("__testuser__", d, "eml1")
+    d["contracts"][1]["has_file"] = False
+    assert "⬇ Original" not in m._render_contract_frag("__testuser__", d, "eml1")
+
+
+def test_an_unlinked_vendor_contract_can_still_be_changed():
+    m = _mod()
+    d = {"contracts": [{"id": "v1", "side": "vendor", "vendor": "Accenture",
+                        "project_name": "Loose vendor deal",
+                        "period_start": _rel(years=-1), "period_end": _rel(years=1)}]}
+    html = m._render_contracts_section("__testuser__", d)
+    assert html.count('<details class="chg-intake"') == 1
+    assert 'value="v1"' in html
+
+
+def test_the_home_cashflow_follows_a_sheet_driven_change():
+    m = _mod()
+    d = _schedule_chain()
+    bill, _pay, _sal = m._dd_year_cashflow(d, 2026)
+    # base 1.2M/yr = 100k a month until the sheet takes over in July,
+    # then exactly the sheet's own figures — and nothing after it runs out,
+    # the same as any other amendment (the base does not resume)
+    assert [round(x) for x in bill[:6]] == [100000] * 6
+    assert [round(x) for x in bill[6:9]] == [80000, 80000, 50000]
+    assert [round(x) for x in bill[9:]] == [0, 0, 0]
