@@ -337,6 +337,41 @@ def _workflow_bar(active: str, user: str) -> str:
 
 
 # Shared upload-zone CSS (used by Convert and Ledger register section)
+_DUP_COMPARE_CSS = """
+/* Duplicate compare — the new scan on the left, every Ledger receipt it
+   collides with on the right. Modal chrome is the shared .wf-modal, which
+   turns itself into a bottom sheet at ≤768px. */
+.dc-cols{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}
+.dc-col{min-width:0}
+.dc-head{font-size:var(--text-xs);font-weight:var(--fw-bold);letter-spacing:.06em;
+  text-transform:uppercase;color:var(--text-muted);margin-bottom:6px}
+.dc-card{background:var(--surface-2);border:1px solid var(--border);
+  border-radius:var(--radius-md);padding:10px;margin-bottom:10px}
+.dc-card.dc-new{border-color:var(--accent)}
+.dc-img{width:100%;max-height:190px;object-fit:contain;background:var(--bg-deep);
+  border-radius:var(--radius-sm);display:block}
+.dc-nophoto{height:110px;display:flex;align-items:center;justify-content:center;
+  background:var(--bg-deep);border-radius:var(--radius-sm);color:var(--text-dim);font-size:.78rem}
+.dc-row{display:flex;justify-content:space-between;gap:10px;font-size:.78rem;padding:3px 0}
+.dc-row .k{color:var(--text-muted);flex-shrink:0}
+.dc-row .v{text-align:right;word-break:break-word}
+/* Only the rows that disagree get marked — a wall of highlights says nothing. */
+.dc-row.diff .v{color:var(--warn);font-weight:var(--fw-bold)}
+.dc-row.diff .k::after{content:" ≠"}
+.dc-map{margin-top:8px;padding:8px 10px;background:var(--bg-deep);
+  border:1px solid var(--border);border-radius:var(--radius-sm);font-size:.75rem}
+.dc-map .t{font-size:var(--text-xs);font-weight:var(--fw-bold);letter-spacing:.05em;
+  text-transform:uppercase;color:var(--text-muted);margin-bottom:4px}
+.dc-chip{display:inline-block;font-size:var(--text-xs);font-weight:var(--fw-bold);border-radius:var(--radius-full);padding:2px 10px}
+.dc-ok{background:rgba(52,211,153,.15);color:var(--success)}
+.dc-bad{background:rgba(248,113,113,.15);color:var(--danger)}
+.dc-prog{background:rgba(251,191,36,.15);color:var(--warn)}
+.dc-none{color:var(--text-dim);font-size:.75rem}
+.dc-note{font-size:.75rem;color:var(--text-muted);line-height:1.6;margin:12px 0 0}
+@media(max-width:768px){ .dc-cols{grid-template-columns:1fr} }
+"""
+
+
 _UPLOAD_CSS = (
     ".upload-zone{border:2px dashed var(--border);border-radius:var(--radius-lg);padding:40px 20px;"
     "text-align:center;cursor:pointer;transition:.2s;background:var(--surface)}"
@@ -2213,37 +2248,7 @@ def _render_ocr_staging_review(user: str) -> str:
 .stg-badge.fx{{background:rgba(251,191,36,.15);color:#fbbf24}}
 .stg-badge.warn{{background:rgba(245,158,11,.15);color:#f59e0b}}
 .stg-empty{{text-align:center;color:var(--text-muted);padding:60px 20px}}
-/* Duplicate compare — the new scan on the left, every Ledger receipt it
-   collides with on the right. Modal chrome is the shared .wf-modal, which
-   turns itself into a bottom sheet at ≤768px. */
-.dc-cols{{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}}
-.dc-col{{min-width:0}}
-.dc-head{{font-size:var(--text-xs);font-weight:var(--fw-bold);letter-spacing:.06em;
-  text-transform:uppercase;color:var(--text-muted);margin-bottom:6px}}
-.dc-card{{background:var(--surface-2);border:1px solid var(--border);
-  border-radius:var(--radius-md);padding:10px;margin-bottom:10px}}
-.dc-card.dc-new{{border-color:var(--accent)}}
-.dc-img{{width:100%;max-height:190px;object-fit:contain;background:var(--bg-deep);
-  border-radius:var(--radius-sm);display:block}}
-.dc-nophoto{{height:110px;display:flex;align-items:center;justify-content:center;
-  background:var(--bg-deep);border-radius:var(--radius-sm);color:var(--text-dim);font-size:.78rem}}
-.dc-row{{display:flex;justify-content:space-between;gap:10px;font-size:.78rem;padding:3px 0}}
-.dc-row .k{{color:var(--text-muted);flex-shrink:0}}
-.dc-row .v{{text-align:right;word-break:break-word}}
-/* Only the rows that disagree get marked — a wall of highlights says nothing. */
-.dc-row.diff .v{{color:var(--warn);font-weight:var(--fw-bold)}}
-.dc-row.diff .k::after{{content:" ≠"}}
-.dc-map{{margin-top:8px;padding:8px 10px;background:var(--bg-deep);
-  border:1px solid var(--border);border-radius:var(--radius-sm);font-size:.75rem}}
-.dc-map .t{{font-size:var(--text-xs);font-weight:var(--fw-bold);letter-spacing:.05em;
-  text-transform:uppercase;color:var(--text-muted);margin-bottom:4px}}
-.dc-chip{{display:inline-block;font-size:var(--text-xs);font-weight:var(--fw-bold);border-radius:var(--radius-full);padding:2px 10px}}
-.dc-ok{{background:rgba(52,211,153,.15);color:var(--success)}}
-.dc-bad{{background:rgba(248,113,113,.15);color:var(--danger)}}
-.dc-prog{{background:rgba(251,191,36,.15);color:var(--warn)}}
-.dc-none{{color:var(--text-dim);font-size:.75rem}}
-.dc-note{{font-size:.75rem;color:var(--text-muted);line-height:1.6;margin:12px 0 0}}
-@media(max-width:768px){{ .dc-cols{{grid-template-columns:1fr}} }}
+{_DUP_COMPARE_CSS}
 </style>
 </head><body>
 <nav>
@@ -2447,7 +2452,7 @@ def _render_ledger(user: str) -> str:
             .replace("__TABS__", _tab_bar("ledger", user))
             .replace("__REGISTER__", _register_section(user))
             .replace("__DISCARDED__", _discarded_section(user))
-            .replace("__TABCSS__", _CC_TAB_CSS + _UPLOAD_CSS)
+            .replace("__TABCSS__", _CC_TAB_CSS + _UPLOAD_CSS + _DUP_COMPARE_CSS)
             .replace("__RCPTJS__", _RCPT_JS)
             .replace("__VAPID_PUB__", vapid_pub))
 
@@ -2525,6 +2530,11 @@ __TABCSS__
 .dup-split{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:10px;font-size:.6rem;
   border:1px solid var(--border-bright);color:var(--text-muted);cursor:pointer;white-space:nowrap}
 .dup-split:hover{border-color:var(--accent);color:var(--accent)}
+.dup-cmp{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:10px;font-size:.6rem;font-weight:700;cursor:pointer;border:1px solid var(--border);color:var(--text-muted);white-space:nowrap}
+.dup-cmp:hover{border-color:var(--accent);color:var(--accent)}
+/* Row chips are the only way to act on a duplicate — at touch sizes they
+   need a real hit area, so grow the padding rather than the glyph. */
+@media(max-width:768px){.dup-split,.dup-cmp{padding:13px 12px;font-size:.68rem;margin-left:8px}}
 .split-tag{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:10px;font-size:.6rem;
   border:1px dashed var(--border-bright);color:var(--text-muted);cursor:pointer;white-space:nowrap}
 .split-tag:hover{border-color:var(--accent);color:var(--accent)}
@@ -2902,6 +2912,22 @@ body:has(.fb-selbar.show) .wf-back,body:has(.fb-selbar.show) #wfThemeBtn{display
     <button class="btn btn-primary btn-sm" id="dupReview">Review duplicates</button>
   </div>
 </div>
+<div class="wf-modal-backdrop" id="dcBack" style="display:none">
+  <div class="wf-modal" style="max-width:820px">
+    <h3 class="wf-modal-title">🔍 Same purchase, or two of them?</h3>
+    <div id="dcBody"></div>
+    <p class="dc-note">
+      <b>Delete</b> removes that copy from the Ledger. If it was the matched one, the AMEX line
+      re-links to the copy you keep — the statement never loses its receipt. The Drive photo stays
+      where it is, and the row is restorable from 🪦 Discarded.<br>
+      <b>Not duplicates</b> keeps every copy and stops grouping them.
+    </p>
+    <div class="wf-modal-actions" style="margin-top:14px">
+      <button type="button" class="btn btn-ghost" onclick="dcClose()">Close</button>
+      <button type="button" class="btn btn-secondary" id="dcKeepAll">Not duplicates — keep all</button>
+    </div>
+  </div>
+</div>
 <div class="del-modal" id="delModal">
   <div class="del-title">🗑 Delete receipts</div>
   <div class="del-body" id="delBody">Delete the checked receipts from the Ledger?</div>
@@ -2998,6 +3024,96 @@ async function markNotDup(id, on){
   const d = await r.json().catch(function(){ return {}; });
   if(!d.ok){ alert('Update failed: ' + (d.error || r.status)); return; }
   load();
+}
+
+// ---- duplicate compare (Ledger side) -----------------------------------
+// Both sides are already in the Ledger here, so the columns are the group's
+// keeper and the copies behind it, and each copy carries its own delete.
+let dcIds = [];
+function dcEsc(s){
+  return String(s === null || s === undefined ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function dcMoney(v, cur){
+  if(v === null || v === undefined || v === '') return '–';
+  const n = Number(v);
+  if(isNaN(n)) return dcEsc(v);
+  return (cur && cur !== 'USD' ? cur + ' ' : '$') +
+    n.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+}
+function dcRow(k, val, ref){
+  const diff = (ref !== undefined && String(val === null ? '' : val) !== String(ref === null ? '' : ref));
+  return '<div class="dc-row' + (diff ? ' diff' : '') + '"><span class="k">' + dcEsc(k) +
+         '</span><span class="v">' + dcEsc(val === null || val === '' ? '–' : val) + '</span></div>';
+}
+function dcImgFail(img){
+  img.outerHTML = '<div class="dc-nophoto">🧾 Preview unavailable — reconnect Google Drive</div>';
+}
+function dcImg(src){
+  return src ? '<img class="dc-img" src="' + dcEsc(src) + '" loading="lazy" alt="" onerror="dcImgFail(this)">'
+             : '<div class="dc-nophoto">No image</div>';
+}
+function dcSide(s, isKeep, ref){
+  let h = '<div class="dc-card' + (isKeep ? ' dc-new' : '') + '">' + dcImg(s.image);
+  h += '<div style="margin:8px 0 4px"><span class="dc-chip dc-' +
+       (s.status === 'MATCHED' ? 'ok' : s.status === 'UNMATCHED' ? 'bad' : 'prog') +
+       '">' + dcEsc(s.status) + '</span>' +
+       (isKeep ? ' <span class="keep-tag">KEEP</span>' : '') + '</div>';
+  h += dcRow('Date', s.date, ref && ref.date);
+  h += dcRow('Time', s.time, ref && ref.time);
+  h += dcRow('Merchant', s.merchant, ref && ref.merchant);
+  h += dcRow('Printed', dcMoney(s.printed, s.currency), ref && dcMoney(ref.printed, ref.currency));
+  h += dcRow('Handwritten', dcMoney(s.handwritten, s.currency), ref && dcMoney(ref.handwritten, ref.currency));
+  h += dcRow('Final', dcMoney(s.final, s.currency), ref && dcMoney(ref.final, ref.currency));
+  h += dcRow('Card', s.card_brand, ref && ref.card_brand);
+  h += dcRow('Usage', s.usage, ref && ref.usage);
+  h += dcRow('File', s.filename, undefined);
+  const mt = s.matched_transaction;
+  h += '<div class="dc-map"><div class="t">Mapped AMEX line</div>' +
+       (mt ? dcRow('Date', mt.date, undefined) + dcRow('Vendor', mt.vendor, undefined) +
+             dcRow('Amount', dcMoney(mt.amount, 'USD'), undefined)
+           : '<span class="dc-none">Not matched yet — no statement line linked.</span>') +
+       '</div>';
+  if(!isKeep){
+    h += '<button type="button" class="btn btn-danger btn-sm dc-del" data-id="' +
+         dcEsc(s.id) + '" style="margin-top:10px;width:100%">🗑 Delete this copy</button>';
+  }
+  h += '</div>';
+  return h;
+}
+function dcClose(){ $('dcBack').style.display = 'none'; dcIds = []; }
+async function ledgerDupCompare(id){
+  const body = $('dcBody');
+  body.innerHTML = '<div class="dc-none" style="padding:20px 0">Loading…</div>';
+  $('dcBack').style.display = 'flex';
+  try {
+    const r = await fetch('/cardconv/ledger/dup-compare?id=' + encodeURIComponent(id));
+    const d = await r.json();
+    if(!d.ok){ body.innerHTML = '<div class="dc-none">' + dcEsc(d.error || 'Could not load') + '</div>'; return; }
+    dcIds = d.others.map(o => o.id);
+    const right = d.others.length
+      ? d.others.map(o => dcSide(o, false, d.keep)).join('')
+      : '<div class="dc-none">This receipt is no longer grouped with any other.</div>';
+    body.innerHTML =
+      '<div class="dc-cols">' +
+        '<div class="dc-col"><div class="dc-head">Keeping this one</div>' + dcSide(d.keep, true, undefined) + '</div>' +
+        '<div class="dc-col"><div class="dc-head">Other copies' +
+          (d.others.length > 1 ? ' — ' + d.others.length : '') + '</div>' + right + '</div>' +
+      '</div>';
+    body.querySelectorAll('.dc-del').forEach(b =>
+      b.addEventListener('click', () => dcDelete(b.dataset.id)));
+  } catch(err) {
+    body.innerHTML = '<div class="dc-none">Could not load the comparison.</div>';
+  }
+}
+async function dcDelete(id){
+  const r = await fetch('/cardconv/ledger/delete', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ids:[id]})
+  });
+  const d = await r.json().catch(() => ({}));
+  if(!d.ok){ alert('Delete failed: ' + (d.error || r.status)); return; }
+  dcClose(); load();
 }
 
 // Inline-editable Card Type cell: dropdown of –/AMEX/Cash, edited from the row.
@@ -3097,16 +3213,19 @@ function rowHtml(e, i, opts){
   // ✂ separates a mis-grouped receipt into its own entry; ◇ can undo that.
   const splitBtn = '<span class="dup-split" data-nd="' + e.id + '" ' +
     'title="Not a duplicate — keep this receipt as a separate entry">✂ Not dup</span>';
+  // ✂ decides without looking; 🔍 shows the photos and mappings side by side first.
+  const cmpBtn = '<span class="dup-cmp" data-cmp="' + e.id + '" ' +
+    'title="Compare the receipts in this group side by side">🔍 Compare</span>';
   let dupTag = e.dup
-    ? (e.dup_keep ? '<span class="keep-tag">KEEP</span>' + splitBtn
-                  : '<span class="dup-tag">🔁 Duplicate</span>' + splitBtn)
+    ? (e.dup_keep ? '<span class="keep-tag">KEEP</span>' + cmpBtn + splitBtn
+                  : '<span class="dup-tag">🔁 Duplicate</span>' + cmpBtn + splitBtn)
     : (e.dup_exempt
         ? '<span class="split-tag" data-rd="' + e.id + '" ' +
           'title="Marked as a separate purchase (excluded from duplicate grouping) — click to re-include">◇ Separate</span>'
         : '');
   if(opts.groupHead){
     dupTag = '<span class="grp-toggle" data-gid="' + opts.groupHead + '">+' +
-      opts.extra + ' duplicate' + (opts.extra>1?'s':'') + '</span>';
+      opts.extra + ' duplicate' + (opts.extra>1?'s':'') + '</span>' + cmpBtn;
   }
   let cls = e.dup ? 'dup-row' : '';
   if(opts.groupChild) cls += ' dup-child gc-' + opts.groupChild;
@@ -3210,6 +3329,8 @@ function rerender(){
       }));
     body.querySelectorAll('.dup-split').forEach(s =>
       s.addEventListener('click', ev => { ev.stopPropagation(); markNotDup(s.dataset.nd, true); }));
+    body.querySelectorAll('.dup-cmp').forEach(s =>
+      s.addEventListener('click', ev => { ev.stopPropagation(); ledgerDupCompare(s.dataset.cmp); }));
     body.querySelectorAll('.split-tag').forEach(s =>
       s.addEventListener('click', ev => { ev.stopPropagation(); markNotDup(s.dataset.rd, false); }));
   }
@@ -3287,6 +3408,17 @@ function closeDupModal(){
   $('delOverlay').classList.remove('open');
 }
 $('dupLater').addEventListener('click', closeDupModal);
+// Exempting the copies is enough to dissolve the group; the keeper stays open
+// to grouping so a genuinely new re-scan later still gets flagged.
+$('dcKeepAll').addEventListener('click', async () => {
+  for(const id of dcIds){
+    await fetch('/cardconv/ledger/' + id + '/update',
+      {method:'POST', body: new URLSearchParams({dup_exempt: '1'})});
+  }
+  dcClose(); load();
+});
+$('dcBack').addEventListener('click', ev => { if(ev.target === $('dcBack')) dcClose(); });
+document.addEventListener('keydown', ev => { if(ev.key === 'Escape') dcClose(); });
 $('dupReview').addEventListener('click', () => {
   closeDupModal();
   // Expand every collapsed group, pre-check the non-keeper copies for

@@ -615,6 +615,35 @@ def _handle_dup_compare(username: str, query: dict):
     return ("json", {"ok": True, "staged": _dup_side(target, False), "candidates": cands})
 
 
+def _handle_ledger_dup_compare(username: str, query: dict):
+    """GET /cardconv/ledger/dup-compare?id=<entry_id>
+
+    The same question one step later: these are all already in the ledger, so
+    the sides are the group's keeper and the copies stacked behind it. Deleting
+    a matched copy is safe — _handle_ledger_delete rematches, so the statement
+    line lands on the survivor instead of pointing at a ghost.
+    """
+    eid = query.get("id")
+    if isinstance(eid, list):
+        eid = eid[0] if eid else ""
+    eid = (eid or "").strip()
+    if not eid:
+        return ("json", {"error": "id required"}, 400)
+    entries = _load_receipts(username)
+    _mark_duplicates(entries)
+    target = next((e for e in entries if e.get("id") == eid), None)
+    if not target:
+        return ("json", {"error": "entry not found"}, 404)
+    gid = target.get("dup_group_id")
+    if not gid:
+        return ("json", {"ok": True, "keep": _dup_side(target, True), "others": []})
+    group = [e for e in entries if e.get("dup_group_id") == gid]
+    keep = next((e for e in group if e.get("dup_keep")), group[0])
+    others = [e for e in group if e is not keep]
+    return ("json", {"ok": True, "keep": _dup_side(keep, True),
+                     "others": [_dup_side(e, True) for e in others]})
+
+
 def _handle_dup_exempt(username: str, body: dict):
     """POST /cardconv/receipts/review/dup-exempt — "these are separate purchases".
 

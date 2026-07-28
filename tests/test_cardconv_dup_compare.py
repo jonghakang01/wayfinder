@@ -105,6 +105,32 @@ def test_a_ledger_row_without_an_id_still_raises_the_flag(monkeypatch):
     assert out[0]["dup_match_ids"] == []
 
 
+def test_ledger_compare_splits_the_group_into_keeper_and_copies(monkeypatch):
+    """Same question one step later — both sides are already in the ledger."""
+    keep = _ledger("L1")                                    # matched → keeper
+    copy = _ledger("L2", match_status="pending_match", matched=False,
+                   matched_transaction=None, ocr_handwritten_amount=12.0)
+    _isolate(monkeypatch, [], [keep, copy])
+    kind, resp, *_ = core._handle_ledger_dup_compare("u", {"id": "L2"})
+    assert resp["ok"]
+    assert resp["keep"]["id"] == "L1"
+    assert resp["keep"]["matched_transaction"]["vendor"] == "SAN FRANCISCO GIANTS"
+    assert [o["id"] for o in resp["others"]] == ["L2"]
+    assert resp["others"][0]["handwritten"] == 12.0
+
+
+def test_ledger_compare_on_an_ungrouped_receipt_has_no_copies(monkeypatch):
+    _isolate(monkeypatch, [], [_ledger("L1")])
+    kind, resp, *_ = core._handle_ledger_dup_compare("u", {"id": "L1"})
+    assert resp["ok"] and resp["others"] == []
+
+
+def test_ledger_compare_rejects_an_unknown_id(monkeypatch):
+    _isolate(monkeypatch, [], [_ledger("L1")])
+    kind, resp, status = core._handle_ledger_dup_compare("u", {"id": "nope"})
+    assert status == 404
+
+
 def test_keeping_both_survives_into_the_ledger():
     """'Separate purchases' is a verdict, not a one-render dismissal: the flag
     rides along on confirm and keeps the receipt out of Ledger dup groups."""
