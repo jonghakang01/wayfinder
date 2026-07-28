@@ -1174,7 +1174,13 @@ def _tab_bar(active):
 
 
 def _shell(user, title, body, wide=False, tab=None):
+    """Page frame. Every tabbed page runs at the full app width (강프로
+    2026-07-28): People was the only wide one, so switching to any other tab
+    snapped the content into a 1000px column and read as boxed in. Narrow stays
+    for the leaf forms reached from a tab — a person, a document type — where a
+    single column is the point."""
     tabs = _tab_bar(tab) if tab else ""
+    wide = wide or bool(tab)
     return f"""<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>🤝 {_esc(title)} · Wayfinder</title><link rel="stylesheet" href="/static/style.css">
@@ -4474,6 +4480,12 @@ details.ctr-group[open]>.ctr-group-hd{margin-bottom:12px}
 .ctr-ven-col.drag-over,.ctr-orphans.drag-over{background:rgba(56,189,248,.10);border-color:var(--accent)}
 .ctr-ven-col .ctr-card{border-left:3px solid var(--group-4)}
 .ctr-drop-hint{font-size:.72rem;color:var(--text-muted);font-style:italic;padding:6px 4px}
+/* on a wide screen the vendor cards sit side by side instead of stretching to
+   850px for three short rows (강프로 2026-07-28) */
+@media(min-width:1400px){
+  .ctr-ven-col{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));align-content:start}
+  .ctr-ven-col .ctr-drop-hint{grid-column:1/-1}
+}
 .ctr-orphans{margin-top:16px;padding:12px;border:1px dashed var(--border-bright);border-radius:var(--radius-lg);display:flex;flex-direction:column;gap:8px;transition:.15s}
 .ctr-orphan-hd{font-size:.74rem;font-weight:700;color:var(--text)}
 .ctr-orphan-hd span{font-weight:400;color:var(--text-muted)}

@@ -889,3 +889,24 @@ def test_the_home_cashflow_follows_a_sheet_driven_change():
     assert [round(x) for x in bill[:6]] == [100000] * 6
     assert [round(x) for x in bill[6:9]] == [80000, 80000, 50000]
     assert [round(x) for x in bill[9:]] == [0, 0, 0]
+
+
+# ── desktop width: every tab reads at the same width, not just People ───────
+def test_every_tabbed_page_runs_at_the_full_app_width():
+    m = _mod()
+    for path in ("/sow", "/sow/contracts", "/sow/docs", "/sow/people", "/sow/vendors"):
+        kind, html = m.handle("GET", path, {}, {"user": "__testuser__"})
+        assert kind == "html"
+        assert "max-width:1800px" in html, path
+
+
+def test_a_leaf_form_without_tabs_stays_a_single_column():
+    m = _mod()
+    assert "max-width:1000px" in m._shell("u", "Document Type", "<p>x</p>")
+    assert "max-width:1800px" in m._shell("u", "Contracts", "<p>x</p>", tab="contracts")
+
+
+def test_vendor_cards_go_side_by_side_on_a_wide_screen():
+    m = _mod()
+    assert "@media(min-width:1400px){" in m._CTR_CSS
+    assert "repeat(auto-fill,minmax(330px,1fr))" in m._CTR_CSS
