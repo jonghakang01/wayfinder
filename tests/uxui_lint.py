@@ -52,9 +52,37 @@ def _strip_noise(src):
     return re.sub(r"(?m)^[ \t]*#(?![0-9a-fA-F]{3}\b|[0-9a-fA-F]{6}\b)(?![^\n]*\{).*$", "", src)
 
 
+def _blank(m):
+    """Same text height, no content — keeps every later line number honest."""
+    return "\n" * m.group(0).count("\n")
+
+
+def _strip_token_defs(src):
+    """Blank the `:root` blocks. They are where the hex literals are SUPPOSED to
+    live — the token rule exists to push everything else onto var(--*)."""
+    return re.sub(r":root[^{\n]*\{[^}]*\n\}", _blank, src)
+
+
+# Places a hex is the only thing that works, so flagging one is pure noise:
+# a var() fallback (already correct usage), and the handful of surfaces that
+# are not CSS at all — the PWA icon, the manifest, the browser theme color.
+_HEX_OK = (
+    r"var\(\s*--[a-z0-9-]+\s*,\s*#[0-9a-fA-F]{3,6}\s*\)",
+    r'(?:fill|stroke|stop-color)="#[0-9a-fA-F]{3,6}"',
+    r'name="theme-color"[^>]*content="#[0-9a-fA-F]{3,6}"',
+    r'"(?:background_color|theme_color)"\s*:\s*"#[0-9a-fA-F]{3,6}"',
+)
+
+
+def _strip_unfixable_hex(src):
+    for pat in _HEX_OK:
+        src = re.sub(pat, _blank, src)
+    return src
+
+
 def lint_source(src, toks):
     """-> list of (rule, line_no, snippet)."""
-    src = _strip_noise(src)
+    src = _strip_unfixable_hex(_strip_noise(src))
     lines = src.splitlines()
     hits = []
 
@@ -88,12 +116,19 @@ def lint_source(src, toks):
 
 
 def lint_module(path, toks=None):
-    return lint_source(path.read_text(encoding="utf-8"), toks or token_map())
+    src = path.read_text(encoding="utf-8")
+    if path.name == "server.py":
+        src = _strip_token_defs(src)
+    return lint_source(src, toks or token_map())
 
 
 def ui_modules():
-    """Service modules that render pages (private helpers included)."""
-    out = []
+    """Every module that renders UI — the global stylesheet included.
+
+    server.py is the one every app inherits from, so a violation there is the
+    most expensive kind; leaving it unscanned is how `.empty { color:#94a3b8 }`
+    survived (2026-07-28)."""
+    out = [ROOT / "server.py"]
     for p in sorted(SERVICES.glob("*.py")):
         if p.name == "__init__.py":
             continue
@@ -103,10 +138,15 @@ def ui_modules():
     return out
 
 
+def key(path):
+    """Baseline key — repo-relative, since modules no longer share a directory."""
+    return str(path.relative_to(ROOT))
+
+
 def scan():
-    """-> {module: {rule: count}} for every page-rendering service."""
+    """-> {module: {rule: count}} for every page-rendering module."""
     toks = token_map()
-    return {p.name: _tally(lint_module(p, toks)) for p in ui_modules()}
+    return {key(p): _tally(lint_module(p, toks)) for p in ui_modules()}
 
 
 def _tally(hits):

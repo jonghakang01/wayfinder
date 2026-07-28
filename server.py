@@ -199,7 +199,7 @@ details.bucket-section[open] .service-grid { margin-top:14px; }
 .btn-primary:hover   { opacity:0.88; transform:translateY(-1px); box-shadow:0 4px 12px rgba(56,189,248,0.3); }
 .btn-secondary:hover { border-color:var(--accent); color:var(--accent); }
 .btn-ghost:hover     { border-color:var(--accent); color:var(--accent); background:var(--accent-glow); }
-.btn-success:hover   { background:var(--success); color:#080d14; border-color:transparent; }
+.btn-success:hover   { background:var(--success); color:var(--on-accent); border-color:transparent; }
 .btn-danger:hover    { color:var(--danger); background:rgba(248,113,113,0.12); }
 .btn-accent:hover    { opacity:0.88; transform:translateY(-1px); box-shadow:0 4px 12px rgba(56,189,248,0.3); }
 @media (max-width:600px) {
@@ -266,7 +266,7 @@ a, button, select, label, input[type=checkbox], input[type=radio] { touch-action
 .wf-today-item.wf-done{opacity:.5}
 .wf-today-text{flex:1;font-size:.92rem;font-weight:600;color:var(--text);text-align:left}
 .wf-today-item.wf-done .wf-today-text{text-decoration:line-through;color:var(--text-muted)}
-.wf-check{width:26px;height:26px;flex-shrink:0;border-radius:50%;border:2px solid var(--border);background:transparent;cursor:pointer;color:#080d14;font-size:.85rem;font-weight:800;display:flex;align-items:center;justify-content:center;transition:.15s;padding:0}
+.wf-check{width:26px;height:26px;flex-shrink:0;border-radius:50%;border:2px solid var(--border);background:transparent;cursor:pointer;color:var(--on-accent);font-size:.85rem;font-weight:800;display:flex;align-items:center;justify-content:center;transition:.15s;padding:0}
 .wf-check:hover{border-color:var(--accent)}
 .wf-check--on{background:linear-gradient(135deg,var(--accent),var(--info));border-color:transparent}
 .wf-streak-chip{font-size:.72rem;color:var(--warn);font-weight:700;white-space:nowrap;background:rgba(251,191,36,.1);padding:2px 8px;border-radius:var(--radius-full);border:1px solid rgba(251,191,36,.3)}
@@ -436,7 +436,7 @@ APP_TAB_CSS = """
 .app-tabs{position:fixed!important;top:auto!important;bottom:0!important;left:0;right:0;height:auto;background:rgba(8,13,20,0.97);backdrop-filter:blur(20px);border-top:1px solid rgba(255,255,255,0.06);border-bottom:none;display:flex!important;justify-content:stretch;z-index:200;padding:8px 8px calc(8px + env(safe-area-inset-bottom,0));gap:4px}
 .app-tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:8px 4px;color:rgba(100,116,139,0.8);text-decoration:none;font-size:0.6rem;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;border-radius:12px;transition:all 0.2s}
 .app-tab:hover{color:rgba(255,255,255,0.7);background:rgba(255,255,255,0.04)}
-.app-tab.active{color:#38bdf8;background:rgba(56,189,248,0.12)}
+.app-tab.active{color:var(--accent);background:var(--accent-glow)}
 .app-tab-icon{font-size:1.3rem;line-height:1;transition:transform 0.2s}
 .app-tab.active .app-tab-icon{filter:drop-shadow(0 0 8px rgba(56,189,248,0.7));transform:translateY(-2px)}
 body{padding-bottom:calc(72px + env(safe-area-inset-bottom,0px))!important}

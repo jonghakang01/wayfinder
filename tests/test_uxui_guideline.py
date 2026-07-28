@@ -10,32 +10,31 @@ import pytest
 import uxui_lint as lint
 
 BASE = lint.load_baseline()
-MODULES = [p.name for p in lint.ui_modules()]
+MODULES = [lint.key(p) for p in lint.ui_modules()]
 
 
 @pytest.mark.parametrize("name", MODULES)
 def test_no_new_uxui_violations(name):
-    path = lint.SERVICES / name
-    hits = lint.lint_module(path)
+    hits = lint.lint_module(lint.ROOT / name)
     allowed = BASE.get(name, {})
     counts = lint._tally(hits)
     for rule in lint.RULES:
         got, cap = counts.get(rule, 0), allowed.get(rule, 0)
         if got > cap:
-            detail = "\n".join(f"    services/{name}:{ln}  {msg}"
+            detail = "\n".join(f"    {name}:{ln}  {msg}"
                                for r, ln, msg in hits if r == rule)
             pytest.fail(
-                f"new UX/UI violation in services/{name} [{rule}] {got} > baseline {cap}\n"
+                f"new UX/UI violation in {name} [{rule}] {got} > baseline {cap}\n"
                 f"{detail}\n  standard: /design · docs/mobile_ux_guideline.md")
 
 
 @pytest.mark.parametrize("name", MODULES)
 def test_baseline_is_tight(name):
     """Debt only goes down: once fixed, the baseline must be lowered."""
-    counts = lint._tally(lint.lint_module(lint.SERVICES / name))
+    counts = lint._tally(lint.lint_module(lint.ROOT / name))
     allowed = BASE.get(name, {})
     stale = {r: (counts.get(r, 0), c) for r, c in allowed.items() if counts.get(r, 0) < c}
-    assert not stale, (f"services/{name} improved {stale} (rule: now, baseline) — "
+    assert not stale, (f"{name} improved {stale} (rule: now, baseline) — "
                        f"run `python3 tests/uxui_lint.py --write` to lock it in")
 
 
