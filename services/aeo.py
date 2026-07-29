@@ -559,7 +559,7 @@ def render_category_panel(current_page_type="other"):
         badge = ' <span style="font-size:0.65rem;background:#6d28d9;color:white;padding:1px 6px;border-radius:8px;margin-left:4px;font-weight:700">current</span>' if is_current else ""
         cells = "".join(
             f'<td style="text-align:center;padding:8px 4px;background:{bg}">'
-            f'<span style="font-size:0.85rem;color:{"#10b981" if lb not in skip_set else "#d1d5db"};'
+            f'<span style="font-size:0.85rem;color:{"#177E42" if lb not in skip_set else "#d1d5db"};'
             f'font-weight:{"700" if lb not in skip_set else "400"}">{"✓" if lb not in skip_set else "—"}</span></td>'
             for lb in all_labels
         )
@@ -568,7 +568,7 @@ def render_category_panel(current_page_type="other"):
             f'<tr>'
             f'<td style="padding:8px 14px;font-size:0.8rem;font-weight:{"700" if is_current else "600"};color:{name_color};'
             f'white-space:nowrap;background:{bg};{left_border}border-right:1px solid #f1f5f9">{pt_name}{badge}</td>'
-            f'<td style="padding:8px 14px;font-size:0.72rem;color:#94a3b8;font-family:monospace;'
+            f'<td style="padding:8px 14px;font-size:0.72rem;color:#64748b;font-family:monospace;'
             f'white-space:nowrap;background:{bg};border-right:1px solid #e2e8f0">{ex}</td>'
             f'{cells}</tr>'
         )
@@ -577,8 +577,8 @@ def render_category_panel(current_page_type="other"):
         '<div style="border-top:1px solid #e2e8f0;padding-top:20px;margin-top:8px">'
         '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">'
         '<span style="font-weight:700;color:#1e293b;font-size:0.88rem">🗂 Evaluation Scope by Page Type</span>'
-        '<span style="font-size:0.72rem;color:#94a3b8">'
-        '<span style="color:#10b981;font-weight:700">✓</span> Evaluated &nbsp;·&nbsp; '
+        '<span style="font-size:0.72rem;color:#64748b">'
+        '<span style="color:#177E42;font-weight:700">✓</span> Evaluated &nbsp;·&nbsp; '
         '<span style="color:#d1d5db;font-weight:700">—</span> Not applicable for this page type</span></div>'
         '<div style="overflow-x:auto;border-radius:10px;border:1px solid #e2e8f0;overflow:hidden">'
         '<table style="border-collapse:collapse;width:100%"><thead>'
@@ -606,7 +606,7 @@ def render_category_panel(current_page_type="other"):
         </div>'''
 
     grade_cards = ""
-    grade_colors = {"A": "#10b981", "B": "#0ea5e9", "C": "#f59e0b", "D": "#ef4444"}
+    grade_colors = {"A": "#177E42", "B": "#0269A6", "C": "#B45309", "D": "#C62828"}
     for g, (title, desc) in GRADE_GUIDE.items():
         grade_cards += f'''
         <div style="display:flex;gap:10px;align-items:flex-start;padding:10px;border-radius:8px;background:white;border:1px solid #e2e8f0">
@@ -623,7 +623,7 @@ def render_category_panel(current_page_type="other"):
     style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;background:#f8fafc;border-left:4px solid #6d28d9;cursor:pointer;user-select:none">
     <div>
       <span style="font-weight:700;color:#1e293b;font-size:0.95rem">📋 Evaluation Criteria</span>
-      <span style="margin-left:10px;font-size:0.78rem;color:#94a3b8">Samsung.com/us operator perspective — how each category impacts AI search</span>
+      <span style="margin-left:10px;font-size:0.78rem;color:#64748b">Samsung.com/us operator perspective — how each category impacts AI search</span>
     </div>
     <svg id="guide-chevron" style="width:18px;height:18px;transition:transform 0.3s;flex-shrink:0" fill="none" stroke="#6d28d9" viewBox="0 0 24 24">
       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
@@ -663,7 +663,7 @@ function toggleGuide(){{
 
 def render_result(r):
     pct = int(r["total"] / r["max"] * 100) if r.get("max") else 0
-    grade_colors = {"A": "#10b981", "B": "#0ea5e9", "C": "#f59e0b", "D": "#ef4444"}
+    grade_colors = {"A": "#177E42", "B": "#0269A6", "C": "#B45309", "D": "#C62828"}
     g_color = grade_colors.get(r["grade"], "#64748b")
 
     # Summary
@@ -682,19 +682,19 @@ def render_result(r):
         f'<div style="display:flex;align-items:center;gap:6px;padding:3px 0">'
         f'<span style="width:6px;height:6px;background:#10b981;border-radius:50%;flex-shrink:0"></span>'
         f'<span style="font-size:0.8rem;color:#374151">{_html.escape(c["label"])}</span>'
-        f'<span style="font-size:0.75rem;color:#10b981;margin-left:auto;font-weight:600">{int(c["score"]/c["max"]*100)}%</span>'
+        f'<span style="font-size:0.75rem;color:#177E42;margin-left:auto;font-weight:600">{int(c["score"]/c["max"]*100)}%</span>'
         f'</div>'
         for c in strengths
-    ) or '<span style="font-size:0.8rem;color:#94a3b8">None</span>'
+    ) or '<span style="font-size:0.8rem;color:#64748b">None</span>'
 
     weakness_items = "".join(
         f'<div style="display:flex;align-items:center;gap:6px;padding:3px 0">'
         f'<span style="width:6px;height:6px;background:#ef4444;border-radius:50%;flex-shrink:0"></span>'
         f'<span style="font-size:0.8rem;color:#374151">{_html.escape(c["label"])}</span>'
-        f'<span style="font-size:0.75rem;color:#ef4444;margin-left:auto;font-weight:600">{int(c["score"]/c["max"]*100)}%</span>'
+        f'<span style="font-size:0.75rem;color:#C62828;margin-left:auto;font-weight:600">{int(c["score"]/c["max"]*100)}%</span>'
         f'</div>'
         for c in weaknesses
-    ) or '<span style="font-size:0.8rem;color:#94a3b8">No issues found</span>'
+    ) or '<span style="font-size:0.8rem;color:#64748b">No issues found</span>'
 
     summary_html = f'''
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:24px">
@@ -736,9 +736,9 @@ def render_result(r):
     cat_rows = ""
     for idx, c in enumerate(r["categories"]):
         c_pct = int(c["score"] / c["max"] * 100) if c.get("max") else 0
-        bar_color = "#10b981" if c_pct >= 70 else "#f59e0b" if c_pct >= 40 else "#ef4444"
-        issues_html = "".join(f'<li style="color:#ef4444">⚠ {_html.escape(i)}</li>' for i in c.get("issues", []))
-        tips_html_inner = "".join(f'<li style="color:#0ea5e9">💡 {_html.escape(t)}</li>' for t in c.get("tips", []))
+        bar_color = "#177E42" if c_pct >= 70 else "#B45309" if c_pct >= 40 else "#C62828"
+        issues_html = "".join(f'<li style="color:#C62828">⚠ {_html.escape(i)}</li>' for i in c.get("issues", []))
+        tips_html_inner = "".join(f'<li style="color:#0269A6">💡 {_html.escape(t)}</li>' for t in c.get("tips", []))
 
         guide = GUIDE_MAP.get(c["label"])
         toggle_id = f"cat-guide-{idx}"
@@ -746,7 +746,7 @@ def render_result(r):
         if c.get("skipped"):
             toggle_html = ""
         elif guide:
-            tier_colors = ["#ef4444", "#f59e0b", "#10b981"]
+            tier_colors = ["#C62828", "#B45309", "#177E42"]
             criteria_html = "".join(
                 f'<div style="padding:4px 0;font-size:0.78rem;color:{tier_colors[min(i, 2)]}">'
                 f'<span style="font-weight:600">{lo}–{hi} pts</span> — {_html.escape(desc)}</div>'
@@ -763,7 +763,7 @@ def render_result(r):
               📐 View Scoring Rubric
             </button>
             <div id="{toggle_id}" style="display:none;margin-top:8px;background:#f8f7ff;border-radius:8px;padding:12px;border-left:3px solid #6d28d9">
-              <div style="font-size:0.75rem;color:#94a3b8;margin-bottom:8px;font-style:italic">This rubric explains what the category measures and why. For specific issues found on this page, see the improvement suggestions below.</div>
+              <div style="font-size:0.75rem;color:#64748b;margin-bottom:8px;font-style:italic">This rubric explains what the category measures and why. For specific issues found on this page, see the improvement suggestions below.</div>
               <div style="font-size:0.8rem;color:#475569;margin-bottom:6px"><strong>Definition:</strong> {guide["definition"]}</div>
               <div style="font-size:0.8rem;color:#475569;margin-bottom:8px"><strong>AI Search Impact:</strong> {guide["reason"]}</div>
               <div style="border-top:1px solid #e2e8f0;padding-top:8px;margin-bottom:8px"><strong style="font-size:0.75rem;color:#64748b">Score Ranges</strong>{criteria_html}</div>
@@ -776,7 +776,7 @@ def render_result(r):
         if c.get("skipped"):
             cat_rows += f'''
         <div style="background:#f8fafc;border-radius:12px;padding:14px 20px;margin-bottom:8px;border:1px dashed #e2e8f0;display:flex;align-items:center;gap:10px">
-          <span style="font-size:0.85rem;color:#94a3b8">{_html.escape(c["label"])}</span>
+          <span style="font-size:0.85rem;color:#64748b">{_html.escape(c["label"])}</span>
           <span style="font-size:0.75rem;color:#cbd5e1;background:#f1f5f9;padding:2px 8px;border-radius:10px">Not applicable for this page type</span>
         </div>'''
         else:
@@ -789,7 +789,7 @@ def render_result(r):
           <div style="background:#f1f5f9;border-radius:6px;height:8px;overflow:hidden;margin-bottom:10px">
             <div style="background:{bar_color};height:100%;width:{c_pct}%;transition:width 1s"></div>
           </div>
-          <div style="font-size:0.78rem;color:#94a3b8;margin-bottom:8px">{_html.escape(c["detail"])}</div>
+          <div style="font-size:0.78rem;color:#64748b;margin-bottom:8px">{_html.escape(c["detail"])}</div>
           {toggle_html}
           {"<ul style='font-size:0.82rem;padding-left:16px'>" + issues_html + tips_html_inner + "</ul>" if issues_html or tips_html_inner else ""}
         </div>'''
@@ -802,11 +802,11 @@ def render_result(r):
             continue
         has_any_tip = True
         c_pct = int(c["score"] / c["max"] * 100) if c.get("max") else 0
-        bar_color = "#10b981" if c_pct >= 70 else "#f59e0b" if c_pct >= 40 else "#ef4444"
+        bar_color = "#177E42" if c_pct >= 70 else "#B45309" if c_pct >= 40 else "#C62828"
         guide = GUIDE_MAP.get(c["label"])
         items_html = ""
         for issue in c.get("issues", []):
-            items_html += f'<div style="display:flex;gap:8px;padding:6px 0;border-bottom:1px solid #fef2f2"><span style="color:#ef4444;flex-shrink:0">⚠</span><span style="font-size:0.85rem;color:#374151">{_html.escape(issue)}</span></div>'
+            items_html += f'<div style="display:flex;gap:8px;padding:6px 0;border-bottom:1px solid #fef2f2"><span style="color:#C62828;flex-shrink:0">⚠</span><span style="font-size:0.85rem;color:#374151">{_html.escape(issue)}</span></div>'
         for tip in c.get("tips", []):
             items_html += f'<div style="display:flex;gap:8px;padding:6px 0;border-bottom:1px solid #f0fdf4"><span style="color:#6d28d9;flex-shrink:0">→</span><span style="font-size:0.85rem;color:#374151">{_html.escape(tip)}</span></div>'
         if guide:
@@ -821,7 +821,7 @@ def render_result(r):
         </div>'''
 
     if not has_any_tip:
-        tips_blocks = "<div style='color:#94a3b8;font-size:0.88rem;padding:16px'>All categories look good — no improvements needed.</div>"
+        tips_blocks = "<div style='color:#64748b;font-size:0.88rem;padding:16px'>All categories look good — no improvements needed.</div>"
 
     recent_data = json.dumps({"url": r["url"], "grade": r["grade"], "pct": pct}, ensure_ascii=False)
 
@@ -874,11 +874,11 @@ def render_result(r):
     {render_category_panel(r.get("page_type", "other"))}
 
     <div class="section-title">📊 Category Breakdown</div>
-    <p style="font-size:0.8rem;color:#94a3b8;margin:-8px 0 12px">Click <strong style="color:#6d28d9">📐 View Scoring Rubric</strong> on any category to see its definition, AI search impact, and score range criteria.</p>
+    <p style="font-size:0.8rem;color:#64748b;margin:-8px 0 12px">Click <strong style="color:#6d28d9">📐 View Scoring Rubric</strong> on any category to see its definition, AI search impact, and score range criteria.</p>
     {cat_rows}
 
     <div class="section-title">💡 Improvement Suggestions</div>
-    <p style="font-size:0.8rem;color:#94a3b8;margin:-8px 0 12px">Specific issues found on this page and recommended actions. For category definitions and scoring criteria, refer to the rubrics above.</p>
+    <p style="font-size:0.8rem;color:#64748b;margin:-8px 0 12px">Specific issues found on this page and recommended actions. For category definitions and scoring criteria, refer to the rubrics above.</p>
     <div style="margin-bottom:32px">{tips_blocks}</div>
   </div>
 
@@ -945,12 +945,12 @@ def render_form(error=""):
             )
             preset_html += (
                 f'<div style="margin-bottom:10px">'
-                f'<span style="font-size:0.72rem;font-weight:700;color:#94a3b8;'
+                f'<span style="font-size:0.72rem;font-weight:700;color:#64748b;'
                 f'text-transform:uppercase;letter-spacing:0.04em;display:block;margin-bottom:4px">'
                 f'{cat_en}</span>{btns}</div>'
             )
     else:
-        preset_html = '<div style="color:#94a3b8;font-size:0.82rem">Loading...</div>'
+        preset_html = '<div style="color:#64748b;font-size:0.82rem">Loading...</div>'
 
     return f'''<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8">
@@ -995,7 +995,7 @@ def render_form(error=""):
 .suggest-item{{padding:10px 14px;font-size:0.85rem;color:#374151;cursor:pointer;border-bottom:1px solid #f8fafc;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:background 0.1s}}
 .suggest-item:last-child{{border-bottom:none}}
 .suggest-item:hover,.suggest-item.active{{background:#f5f3ff;color:#6d28d9}}
-.suggest-status{{padding:8px 14px;font-size:0.78rem;color:#94a3b8;text-align:center}}
+.suggest-status{{padding:8px 14px;font-size:0.78rem;color:#64748b;text-align:center}}
 .recent-url-item{{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #f1f5f9;text-decoration:none;color:inherit}}
 .recent-url-item:last-child{{border-bottom:none}}
 .recent-url-item:hover .rupath{{color:#6d28d9}}
@@ -1046,10 +1046,10 @@ def render_form(error=""):
     <div class="feat-title">Page-Type Aware Scoring</div>
     <div class="feat-desc">Automatically detects page type (Home, PDP, Category, Support…) and evaluates only the categories relevant to that type.</div>
     <div class="grade-row">
-      <div class="g-badge" style="background:#f0fdf4;color:#10b981">A</div>
-      <div class="g-badge" style="background:#eff6ff;color:#0ea5e9">B</div>
-      <div class="g-badge" style="background:#fffbeb;color:#f59e0b">C</div>
-      <div class="g-badge" style="background:#fef2f2;color:#ef4444">D</div>
+      <div class="g-badge" style="background:#f0fdf4;color:#177E42">A</div>
+      <div class="g-badge" style="background:#eff6ff;color:#0269A6">B</div>
+      <div class="g-badge" style="background:#fffbeb;color:#B45309">C</div>
+      <div class="g-badge" style="background:#fef2f2;color:#C62828">D</div>
     </div>
   </div>
   <div class="feat-card">
@@ -1089,14 +1089,14 @@ def render_form(error=""):
     </form>
 
     <div style="margin-top:20px;padding-top:20px;border-top:1px solid #f1f5f9">
-      <p style="font-size:0.78rem;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:10px">
+      <p style="font-size:0.78rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:10px">
         Quick Select <span style="font-weight:400;letter-spacing:0">— Latest products from samsung.com/us GNB</span>
       </p>
       {preset_html}
     </div>
 
     <div id="recent-section" style="display:none;margin-top:20px;padding-top:20px;border-top:1px solid #f1f5f9">
-      <p style="font-size:0.78rem;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:10px">🕐 Recent</p>
+      <p style="font-size:0.78rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:10px">🕐 Recent</p>
       <div id="recent-url-list"></div>
     </div>
   </div>

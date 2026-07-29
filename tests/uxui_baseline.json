@@ -17,7 +17,7 @@
   },
   "services/aeo.py": {
     "mobile-bp": 1,
-    "token-color": 121
+    "token-color": 106
   },
   "services/auth.py": {
     "english-ui": 1
@@ -35,7 +35,7 @@
   "services/llm_check.py": {
     "english-ui": 14,
     "mobile-bp": 1,
-    "token-color": 147
+    "token-color": 128
   },
   "services/notebot.py": {
     "mobile-bp": 1,
