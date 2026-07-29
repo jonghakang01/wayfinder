@@ -1406,6 +1406,41 @@ def _render_review(user: str) -> str:
 .rv-gl{{font-size:.74rem;color:var(--text-muted)}}
 .rv-cash{{color:#22c55e;font-weight:700}}
 .rv-brand{{color:var(--accent);font-weight:600}}
+/* Manual-match rows: the row links the receipt, the pencil fixes what OCR read. */
+.mm-row{{border-bottom:1px solid var(--border)}}
+.mm-row:last-child{{border-bottom:0}}
+.mm-row{{display:flex;align-items:stretch;flex-wrap:wrap}}
+.mm-main{{display:flex;gap:8px;align-items:center;padding:8px 4px 8px 12px;
+  cursor:pointer;font-size:.8rem;flex:1;min-width:0}}
+.mm-main:hover{{background:var(--surface-2)}}
+.mm-merch{{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+.mm-sub{{color:var(--text-muted);font-size:.72rem}}
+.mm-amt{{font-weight:700;color:var(--accent);flex-shrink:0}}
+.mm-edit{{background:none;border:0;color:var(--text-muted);cursor:pointer;
+  padding:0 10px;font-size:.9rem;line-height:1;flex-shrink:0}}
+.mm-edit:hover{{color:var(--accent)}}
+.mm-row.mm-editing{{background:var(--surface-2)}}
+.mm-row.mm-editing .mm-main{{opacity:.6}}
+.mm-edit-form{{flex:1 0 100%;padding:10px 12px 12px;display:flex;flex-direction:column;gap:8px;
+  border-top:1px solid var(--border);background:var(--bg-deep)}}
+.mm-f{{display:flex;flex-direction:column;gap:3px;min-width:0}}
+.mm-f>span{{font-size:var(--text-xs);font-weight:var(--fw-bold);letter-spacing:.06em;
+  text-transform:uppercase;color:var(--text-muted)}}
+.mm-f input{{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);
+  color:var(--text);padding:6px 8px;font-size:.8rem;font-family:inherit;width:100%}}
+.mm-f input:focus{{outline:none;border-color:var(--accent)}}
+.mm-f2{{display:grid;grid-template-columns:1fr 1fr;gap:8px}}
+.mm-hint{{font-size:.68rem;color:var(--text-dim);line-height:1.45}}
+.mm-acts{{display:flex;gap:6px;justify-content:flex-end}}
+@media(max-width:768px){{
+  #rvMatchPop{{left:8px!important;right:8px!important;width:auto!important;
+    top:auto!important;bottom:calc(8px + env(safe-area-inset-bottom,0px))!important;
+    max-height:70vh!important}}
+  .mm-edit{{padding:0 16px;font-size:1.1rem}}
+  /* The global mobile guardrail is a 4-:not() selector, so plain .mm-f input
+     loses to its 42px floor — scope by id to clear the 44px touch target. */
+  #rvMatchPop .mm-f input{{font-size:16px;min-height:44px}}
+}}
 .rv-receipt{{flex:1;min-width:0;border-left:1px solid var(--border);padding-left:14px}}
 .rv-receipt.matched{{display:flex;gap:14px;align-items:center}}
 .rv-thumb{{width:200px;height:170px;flex:none;border-radius:8px;object-fit:cover;border:1px solid var(--border);background:var(--surface-3);cursor:zoom-in;transition:border-color .12s}}
@@ -2002,7 +2037,7 @@ function rvOpenMatchPanel(btn) {{
 
   // Position popover near the button
   var rect = btn.getBoundingClientRect();
-  var popW = 320;
+  var popW = 360;
   var left = rect.right + 8;
   if (left + popW > window.innerWidth - 8) left = rect.left - popW - 8;
   if (left < 8) left = 8;
@@ -2033,6 +2068,7 @@ function rvCloseMatchPanel() {{
 
 function rvRenderMatchList(entries) {{
   var list = document.getElementById('rvMatchList');
+  _mmEntries = entries;
   var pending = entries.filter(function(e) {{ return e.match_status !== 'matched'; }});
   if (!pending.length) {{
     list.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:.8rem">No unmatched receipts</div>';
@@ -2043,21 +2079,109 @@ function rvRenderMatchList(entries) {{
     var tn  = fid ? 'https://drive.google.com/thumbnail?id=' + fid + '&sz=w80' : '';
     var img = tn ? '<img src="' + tn + '" width="44" height="44" style="object-fit:cover;border-radius:4px;flex-shrink:0">' : '';
     var badge = e.match_status === 'pending_match' ? 'Pending' : 'Unmatched';
-    return '<div style="display:flex;gap:8px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--border);cursor:pointer;font-size:.8rem" '
-      + 'onclick="rvDoMatch(this)" data-rcpt="' + e.id.replace(/"/g, '') + '">'
-      + img
-      + '<div style="flex:1;min-width:0">'
-      +   '<div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + (e.ocr_merchant || '–') + '</div>'
-      +   '<div style="color:var(--text-muted);font-size:.72rem">' + (e.ocr_date || '–') + '  ' + badge + '</div>'
+    var rid = e.id.replace(/"/g, '');
+    // The row still matches on click — that's what the popover is for. Editing
+    // is its own control, because a misread receipt has to be fixable without
+    // first linking it to the wrong transaction.
+    return '<div class="mm-row" data-rcpt="' + rid + '">'
+      + '<div class="mm-main" onclick="rvDoMatch(this.parentNode)" title="Link this receipt to the transaction">'
+      +   img
+      +   '<div style="flex:1;min-width:0">'
+      +     '<div class="mm-merch">' + (e.ocr_merchant || '–') + '</div>'
+      +     '<div class="mm-sub">' + (e.ocr_date || '–') + '  ' + badge + '</div>'
+      +   '</div>'
+      +   '<div class="mm-amt">' + (e.ocr_amount != null ? '$' + Number(e.ocr_amount).toFixed(2) : '–') + '</div>'
       + '</div>'
-      + '<div style="font-weight:700;color:var(--accent);flex-shrink:0">' + (e.ocr_amount != null ? '$' + Number(e.ocr_amount).toFixed(2) : '–') + '</div>'
+      + '<button type="button" class="mm-edit" title="Fix what OCR read from this receipt" '
+      +   'onclick="rvToggleEdit(this.parentNode)">✏️</button>'
       + '</div>';
   }}).join('');
+}}
+
+// ---- inline edit inside the match popover ---------------------------------
+// A receipt whose OCR is wrong is exactly the one that failed to match, so the
+// fix belongs here rather than a trip to the Ledger and back.
+var _mmEntries = [];
+
+function rvEsc(v) {{
+  return String(v === null || v === undefined ? '' : v).replace(/"/g, '&quot;');
+}}
+
+function rvToggleEdit(row) {{
+  var open = row.querySelector('.mm-edit-form');
+  if (open) {{ open.remove(); row.classList.remove('mm-editing'); return; }}
+  // One editor at a time — two open forms in a 320px popover is unreadable.
+  var other = document.querySelector('#rvMatchList .mm-edit-form');
+  if (other) {{ other.parentNode.classList.remove('mm-editing'); other.remove(); }}
+
+  var id = row.dataset.rcpt;
+  var e = _mmEntries.filter(function(x) {{ return x.id === id; }})[0] || {{}};
+  var f = document.createElement('div');
+  f.className = 'mm-edit-form';
+  f.innerHTML =
+      '<label class="mm-f"><span>Date</span>'
+    +   '<input type="date" data-k="ocr_date" value="' + rvEsc(e.ocr_date) + '"></label>'
+    + '<label class="mm-f"><span>Merchant</span>'
+    +   '<input type="text" data-k="ocr_merchant" value="' + rvEsc(e.ocr_merchant) + '"></label>'
+    + '<div class="mm-f2">'
+    +   '<label class="mm-f"><span>Printed</span>'
+    +     '<input type="text" inputmode="decimal" data-k="ocr_printed_amount" value="' + rvEsc(e.ocr_printed_amount) + '"></label>'
+    +   '<label class="mm-f"><span>Handwritten</span>'
+    +     '<input type="text" inputmode="decimal" data-k="ocr_handwritten_amount" value="' + rvEsc(e.ocr_handwritten_amount) + '"></label>'
+    + '</div>'
+    + '<div class="mm-hint">Handwritten wins when both are present — that becomes the amount matched against the statement.</div>'
+    + '<div class="mm-acts">'
+    +   '<button type="button" class="btn btn-ghost btn-sm mm-cancel">Cancel</button>'
+    +   '<button type="button" class="btn btn-primary btn-sm mm-save">Save</button>'
+    + '</div>';
+  // Listeners, not inline onclick: an escaped quote inside an f-string-rendered
+  // attribute silently breaks the whole script block.
+  f.querySelector('.mm-cancel').addEventListener('click', function() {{ rvToggleEdit(row); }});
+  f.querySelector('.mm-save').addEventListener('click', function() {{ rvSaveEdit(row); }});
+  row.appendChild(f);
+  row.classList.add('mm-editing');
+  var first = f.querySelector('input');
+  if (first) first.focus();
+}}
+
+function rvSaveEdit(row) {{
+  var id = row.dataset.rcpt;
+  var form = row.querySelector('.mm-edit-form');
+  if (!id || !form) return;
+  var body = new URLSearchParams();
+  var bad = null;
+  form.querySelectorAll('input[data-k]').forEach(function(i) {{
+    var k = i.dataset.k, v = i.value.trim();
+    if (k === 'ocr_printed_amount' || k === 'ocr_handwritten_amount') {{
+      // An empty amount clears it; a non-number would silently become null and
+      // look like a successful save that lost the value.
+      if (v !== '' && isNaN(Number(v))) {{ bad = k; return; }}
+    }}
+    // Empty values are dropped by parse_qs, so a cleared field needs a sentinel.
+    body.set(k, v === '' ? '__clear__' : v);
+  }});
+  if (bad) {{ alert('Enter a number for ' + (bad === 'ocr_printed_amount' ? 'Printed' : 'Handwritten') + ', or leave it blank.'); return; }}
+  var save = form.querySelector('.btn-primary');
+  save.disabled = true; save.textContent = 'Saving…';
+  fetch('/cardconv/ledger/' + encodeURIComponent(id) + '/update', {{method: 'POST', body: body}})
+    .then(function(r) {{ return r.json(); }})
+    .then(function(d) {{
+      if (!d.ok) throw new Error(d.error || 'save failed');
+      // Re-read the list so the row shows what was actually stored, not what
+      // was typed — the server normalizes dates and amounts.
+      return fetch('/cardconv/ledger/api?status=all').then(function(r) {{ return r.json(); }});
+    }})
+    .then(function(d) {{ rvRenderMatchList(d.entries || []); }})
+    .catch(function(err) {{
+      save.disabled = false; save.textContent = 'Save';
+      alert('Save failed: ' + (err.message || err));
+    }});
 }}
 
 function rvDoMatch(el) {{
   if (!_mmTxn) return;
   var rcptId = el.dataset.rcpt;
+  if (!rcptId) return;
   fetch('/cardconv/review/match', {{
     method: 'POST',
     headers: {{'Content-Type': 'application/x-www-form-urlencoded'}},
@@ -2079,7 +2203,7 @@ document.addEventListener('click', function(e) {{
 </script>
 
 <!-- Manual match popover -->
-<div id="rvMatchPop" style="display:none;position:fixed;width:320px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-md);z-index:9999;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,.35);overflow:hidden">
+<div id="rvMatchPop" style="display:none;position:fixed;width:360px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-md);z-index:9999;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,.35);overflow:hidden">
   <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid var(--border);flex-shrink:0">
     <div id="rvPopTitle" style="font-size:.78rem;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:250px"></div>
     <button onclick="rvCloseMatchPanel()" style="background:none;border:none;color:var(--text-muted);font-size:1.2rem;cursor:pointer;line-height:1;padding:0 2px;flex-shrink:0">&times;</button>
