@@ -45,7 +45,9 @@ STYLE = """
   /* Dark foundation */
   --bg-deep:#080d14; --surface:#111827; --surface-2:#1a2537; --surface-3:#243044;
   --border:#1e293b; --border-bright:#334155;
-  --text:#f1f5f9; --text-muted:#64748b; --text-dim:#334155;
+  /* --text-muted lands on every surface from --bg-deep to --surface-3; the old
+     #64748b only reached 2.79 against the lightest of them. */
+  --text:#f1f5f9; --text-muted:#94a3b8; --text-dim:#334155;
   /* Semantic */
   --accent:#38bdf8; --accent-glow:rgba(56,189,248,0.12);
   --on-accent:#080d14;
@@ -100,6 +102,10 @@ body { font-family: 'Pretendard Variable', Pretendard, -apple-system, system-ui,
 
 /* Nav */
 nav { background: rgba(15,23,42,0.92); backdrop-filter: blur(12px); padding: 13px 32px; display: flex; align-items: center; justify-content: space-between; gap: 12px; position: sticky; top: 0; z-index: 100; border-bottom: 1px solid rgba(255,255,255,0.07); }
+/* The bar stays dark in both themes, so the palette inside it does too — under
+   the light theme the text tokens darken and disappear into their own bar
+   (.nav-user fell to 2.42). Scoped overrides, not new global values. */
+nav { --text:#f1f5f9; --text-muted:#94a3b8; --slate-400:#94a3b8; --slate-500:#94a3b8; }
 nav a { color: var(--slate-400); text-decoration: none; font-size: 0.875rem; transition: color 0.15s; }
 nav a:hover { color: white; }
 .nav-brand { color: white; font-weight: 800; font-size: 1.05rem; letter-spacing: -0.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
