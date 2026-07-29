@@ -169,14 +169,10 @@ details.bucket-section[open] .service-grid { margin-top:14px; }
 .stats { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
 .stats span { background: white; padding: 5px 12px; border-radius: 20px; border: 1px solid #e2e8f0; font-size: 0.85rem; color: #64748b; }
 .stats .done-c { color: #16a34a; }
+/* .todo-list is still worn by the notepad body; the row rules that used to go
+   with it (.todo-item/.tid/.title/.date/.actions) had no wearer left — the
+   notepad markup names its own — and were pre-dark-theme anyway. */
 .todo-list { display: flex; flex-direction: column; gap: 8px; }
-.todo-item { display: flex; align-items: center; gap: 12px; background: white; padding: 12px 16px; border-radius: 10px; border: 1px solid #e2e8f0; }
-.todo-item.done { opacity: 0.5; }
-.todo-item.done .title { text-decoration: line-through; color: #94a3b8; }
-.tid { font-size: 0.75rem; color: #cbd5e1; min-width: 28px; }
-.title { flex: 1; font-size: 0.95rem; }
-.date { font-size: 0.75rem; color: #cbd5e1; }
-.actions { display: flex; gap: 6px; }
 .btn {
   display:inline-flex; align-items:center; justify-content:center;
   height:var(--btn-h-base); padding:0 12px; border:none;
