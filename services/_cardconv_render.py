@@ -1115,6 +1115,10 @@ def _render_review(user: str) -> str:
     matched     = sum(1 for e in open_rows if e.get("matched"))
     no_rcpt_n   = sum(1 for e in open_rows if not e.get("matched") and e.get("no_receipt"))
     unmatched   = total - matched - no_rcpt_n
+    # What actually goes into the SAP upload: a transaction is ready once it
+    # either has its receipt or has been declared receipt-less. Open also holds
+    # the still-waiting ones, so exporting from there means hand-skipping them.
+    ready_n     = matched + no_rcpt_n
     inprog_n    = sum(1 for e in rows if e.get("status") == "in_progress")
     # No-receipt transactions inside In progress: shown small on the stat card
     # so the number reconciles with the Ledger's receipt-based In progress
@@ -1530,6 +1534,7 @@ body:has(.fb-menu.open) .wf-back,body:has(.fb-menu.open) #wfThemeBtn{{display:no
     <div class="stat-card stat-click" data-rvview="matched" title="Open + receipt matched"><div class="stat-value" id="rvMatched" style="color:#22c55e">{matched}</div><div class="stat-label">Matched</div></div>
     <div class="stat-card stat-click" data-rvview="unmatched" title="Open, still waiting for a receipt"><div class="stat-value" id="rvUnmatched" style="color:#ef4444">{unmatched}</div><div class="stat-label">Unmatched</div></div>
     <div class="stat-card stat-click" data-rvview="noreceipt" title="Filed as receipt-less — no receipt exists for these"><div class="stat-value" style="color:#94a3b8">{no_rcpt_n}</div><div class="stat-label">📄 No Receipt</div></div>
+    <div class="stat-card stat-click" data-rvview="ready" title="Matched + No Receipt — everything that can go in the SAP upload. Select all here to export exactly this set."><div class="stat-value" style="color:var(--accent)">{ready_n}</div><div class="stat-label">📤 Ready for SAP</div></div>
     <div class="stat-card stat-click" data-rvview="in_progress" title="Submitted to SAP, awaiting approval. Ledger's In progress counts receipts only — the difference is the no-receipt transactions shown below."><div class="stat-value" style="color:#f59e0b">{inprog_n}</div><div class="stat-label">⏳ In progress</div>{f'<div style="font-size:.66rem;color:var(--text-muted);margin-top:3px">📄 no receipt: {inprog_nr_n}</div>' if inprog_nr_n else ''}</div>
     <div class="stat-card stat-click" data-rvview="completed" title="Settlement completed"><div class="stat-value" style="color:#818cf8">{completed_n}</div><div class="stat-label">✔ Completed</div></div>
   </div>
@@ -1621,7 +1626,7 @@ function iso(d){{ return d.toISOString().slice(0,10); }}
 // View state: 'open' (default) or 'completed'. Date filters keep rows without
 // an invoice date always visible, matching Ledger.
 let rvView = 'open';
-let rvMatchedF = 'all';   // 'all' | '1' | '0' | 'nr' — set by the stat cards
+let rvMatchedF = 'all';   // 'all' | '1' | '0' | 'nr' | 'ready' — set by the stat cards
 let rvViewKey = 'open';   // which stat card is active (for state restore)
 
 // Row actions reload the page (server re-renders states) — keep the working
@@ -1643,7 +1648,8 @@ function applyFilter(){{
     const d = it.dataset.date || '';
     const show = (it.dataset.status === rvView)
       && (rvMatchedF === 'all'
-          || (rvMatchedF === 'nr' ? it.dataset.noreceipt === '1'
+          || (rvMatchedF === 'ready' ? (it.dataset.matched === '1' || it.dataset.noreceipt === '1')
+              : rvMatchedF === 'nr' ? it.dataset.noreceipt === '1'
               : rvMatchedF === '0' ? (it.dataset.matched === '0' && it.dataset.noreceipt !== '1')
               : it.dataset.matched === rvMatchedF))
       && (!from || !d || d >= from) && (!to || !d || d <= to)
@@ -1767,6 +1773,7 @@ const RV_VIEWS = {{
   matched:     {{view: 'open',        matched: '1'}},
   unmatched:   {{view: 'open',        matched: '0'}},
   noreceipt:   {{view: 'open',        matched: 'nr'}},
+  ready:       {{view: 'open',        matched: 'ready'}},
   in_progress: {{view: 'in_progress', matched: 'all'}},
   completed:   {{view: 'completed',   matched: 'all'}},
 }};
