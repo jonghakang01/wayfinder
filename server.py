@@ -105,7 +105,9 @@ nav { background: rgba(15,23,42,0.92); backdrop-filter: blur(12px); padding: 13p
 /* The bar stays dark in both themes, so the palette inside it does too — under
    the light theme the text tokens darken and disappear into their own bar
    (.nav-user fell to 2.42). Scoped overrides, not new global values. */
-nav { --text:#f1f5f9; --text-muted:#94a3b8; --slate-400:#94a3b8; --slate-500:#94a3b8; }
+/* :not(.app-tabs) — the Momentum tab bar is also a <nav>, but its desktop
+   form sits on --surface and has to follow the theme, not this override. */
+nav:not(.app-tabs) { --text:#f1f5f9; --text-muted:#94a3b8; --slate-400:#94a3b8; --slate-500:#94a3b8; }
 nav a { color: var(--slate-400); text-decoration: none; font-size: 0.875rem; transition: color 0.15s; }
 nav a:hover { color: white; }
 .nav-brand { color: white; font-weight: 800; font-size: 1.05rem; letter-spacing: -0.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
@@ -452,8 +454,8 @@ self.addEventListener('notificationclick', function(event) {{
 
 APP_TAB_CSS = """
 <style>
-.app-tabs{position:fixed!important;top:auto!important;bottom:0!important;left:0;right:0;height:auto;background:rgba(8,13,20,0.97);backdrop-filter:blur(20px);border-top:1px solid rgba(255,255,255,0.06);border-bottom:none;display:flex!important;justify-content:stretch;z-index:200;padding:8px 8px calc(8px + env(safe-area-inset-bottom,0));gap:4px}
-.app-tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:8px 4px;color:rgba(100,116,139,0.8);text-decoration:none;font-size:0.6rem;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;border-radius:12px;transition:all 0.2s}
+.app-tabs{--tab-ink:#94a3b8;position:fixed!important;top:auto!important;bottom:0!important;left:0;right:0;height:auto;background:rgba(8,13,20,0.97);backdrop-filter:blur(20px);border-top:1px solid rgba(255,255,255,0.06);border-bottom:none;display:flex!important;justify-content:stretch;z-index:200;padding:8px 8px calc(8px + env(safe-area-inset-bottom,0));gap:4px}
+.app-tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:8px 4px;color:var(--tab-ink);text-decoration:none;font-size:0.6rem;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;border-radius:12px;transition:all 0.2s}
 .app-tab:hover{color:rgba(255,255,255,0.7);background:rgba(255,255,255,0.04)}
 .app-tab.active{color:var(--accent);background:var(--accent-glow)}
 .app-tab-icon{font-size:1.3rem;line-height:1;transition:transform 0.2s}
@@ -465,7 +467,7 @@ body{padding-bottom:calc(72px + env(safe-area-inset-bottom,0px))!important}
 body:has(.app-tabs) .wf-back,body:has(.app-tabs) .wf-theme-btn{bottom:calc(80px + env(safe-area-inset-bottom,0px))}
 @media(min-width:768px){
   body:has(.app-tabs) .wf-back,body:has(.app-tabs) .wf-theme-btn{bottom:16px}
-  .app-tabs{position:sticky!important;top:0!important;bottom:auto!important;height:auto;flex-direction:row;justify-content:center;gap:6px;background:var(--surface);border-top:none;border-bottom:1px solid var(--border);padding:10px 16px;box-shadow:var(--shadow-sm)}
+  .app-tabs{--tab-ink:var(--text-muted);position:sticky!important;top:0!important;bottom:auto!important;height:auto;flex-direction:row;justify-content:center;gap:6px;background:var(--surface);border-top:none;border-bottom:1px solid var(--border);padding:10px 16px;box-shadow:var(--shadow-sm)}
   .app-tab{flex:0 0 auto;flex-direction:row;gap:8px;padding:8px 18px;border-radius:var(--radius-full);font-size:.82rem;text-transform:none;letter-spacing:0}
   .app-tab-icon{font-size:1.05rem}
   .app-tab.active{background:var(--accent);color:var(--on-accent)}
