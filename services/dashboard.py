@@ -222,93 +222,6 @@ def render(user):
     from server import app_tabs
     tabs_html = app_tabs("/dashboard", user)
 
-    # Projects section (admin only)
-    projects_html = ""
-    if user == ADMIN_USER:
-        projects = _load_projects()
-        proj_cards = ""
-        for p in projects:
-            sm = STATUS_META.get(p.get("status", "planning"), STATUS_META["planning"])
-            link_btn = f'<a href="{p["url"]}" class="btn btn-ghost btn-sm" style="font-size:0.72rem">Open →</a>' if p.get("url") else ""
-            status_opts = "".join(
-                f'<option value="{s}" {"selected" if s == p.get("status") else ""}>{STATUS_META[s]["label"]}</option>'
-                for s in STATUS_META
-            )
-            proj_cards += f'''
-<div class="proj-card">
-  <div class="proj-top">
-    <span class="proj-emoji">{p.get("emoji","📌")}</span>
-    <div class="proj-info">
-      <div class="proj-name">{p["name"]}</div>
-      <div class="proj-desc">{p.get("desc","")}</div>
-    </div>
-    <div class="proj-actions">
-      <span class="proj-badge" style="color:{sm["color"]};background:{sm["bg"]};border:1px solid {sm["border"]}">{sm["label"]}</span>
-      {link_btn}
-    </div>
-  </div>
-  <div class="proj-footer">
-    <span class="proj-date">Started {p.get("started","")}</span>
-    <form method="POST" action="/dashboard/project/status" style="display:inline-flex;align-items:center;gap:6px">
-      <input type="hidden" name="id" value="{p["id"]}">
-      <select name="status" onchange="this.form.submit()" class="proj-status-sel">{status_opts}</select>
-    </form>
-    <form method="POST" action="/dashboard/project/delete" style="display:inline" onsubmit="return confirm('Delete project?')">
-      <input type="hidden" name="id" value="{p["id"]}">
-      <button class="btn btn-danger btn-sm" style="font-size:0.72rem">✕</button>
-    </form>
-  </div>
-</div>'''
-
-        add_form = '''
-<details class="proj-add-details">
-  <summary class="btn btn-ghost btn-sm" style="list-style:none;cursor:pointer;display:inline-flex;align-items:center;gap:4px">＋ Add Project</summary>
-  <form method="POST" action="/dashboard/project/add" class="proj-add-form">
-    <input type="text" name="emoji" placeholder="Emoji" style="width:60px">
-    <input type="text" name="name" placeholder="Project name" required style="flex:1;min-width:160px">
-    <select name="status">
-      <option value="planning">Planning</option>
-      <option value="active">Active</option>
-      <option value="paused">Paused</option>
-      <option value="done">Done</option>
-    </select>
-    <input type="text" name="url" placeholder="URL (optional)" style="width:140px">
-    <input type="text" name="desc" placeholder="Description" style="flex:2;min-width:200px">
-    <button type="submit" class="btn btn-primary btn-sm">Add</button>
-  </form>
-</details>'''
-
-        projects_html = f'''
-<div class="notepad-card" style="margin-bottom:28px">
-  <div class="notepad-header">
-    <div class="notepad-title-row">
-      <span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--accent)">🗂 Projects</span>
-      <span style="font-size:var(--text-xs);color:var(--text-muted);margin-left:auto">{len(projects)} projects</span>
-    </div>
-  </div>
-  <div class="notepad-body" style="padding:12px 16px;display:flex;flex-direction:column;gap:10px">
-    {proj_cards}
-    <div style="margin-top:4px">{add_form}</div>
-  </div>
-</div>
-<style>
-.proj-card{{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md);padding:14px 16px;display:flex;flex-direction:column;gap:10px}}
-.proj-top{{display:flex;align-items:flex-start;gap:12px}}
-.proj-emoji{{font-size:1.5rem;flex-shrink:0;width:36px;text-align:center;margin-top:2px}}
-.proj-info{{flex:1;min-width:0}}
-.proj-name{{font-size:.95rem;font-weight:700;color:var(--text);margin-bottom:3px}}
-.proj-desc{{font-size:.78rem;color:var(--text-muted);line-height:1.4}}
-.proj-actions{{display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0}}
-.proj-badge{{font-size:.7rem;font-weight:700;padding:3px 10px;border-radius:var(--radius-full);white-space:nowrap}}
-.proj-footer{{display:flex;align-items:center;gap:8px;flex-wrap:wrap;border-top:1px solid var(--border);padding-top:8px}}
-.proj-date{{font-size:.72rem;color:var(--text-muted);flex:1}}
-.proj-status-sel{{font-size:.72rem;padding:3px 6px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text-muted);cursor:pointer}}
-.proj-add-details summary::marker,.proj-add-details summary::-webkit-details-marker{{display:none}}
-.proj-add-form{{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px;padding:12px;background:var(--surface-3);border-radius:var(--radius-md)}}
-.proj-add-form input,.proj-add-form select{{padding:7px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface-2);color:var(--text);font-size:.82rem}}
-.proj-add-form input:focus{{outline:none;border-color:var(--accent)}}
-@media(max-width:600px){{.proj-top{{flex-wrap:wrap}}.proj-actions{{flex-direction:row;flex-wrap:wrap}}.proj-add-form{{flex-direction:column}}.proj-add-form input,.proj-add-form select{{width:100%}}}}
-</style>'''
 
     now_hour = datetime.now().hour
     if now_hour < 6:
@@ -482,8 +395,6 @@ def render(user):
   </div>
 
   {body_html}
-
-  {projects_html}
 
 </div>
 {tabs_html}
