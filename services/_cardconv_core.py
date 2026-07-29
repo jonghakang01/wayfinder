@@ -1,4 +1,4 @@
-import csv, io, json, os, re, base64, uuid, zipfile
+import csv, io, json, os, re, sys, base64, uuid, zipfile
 from collections import Counter
 from datetime import date, datetime
 from pathlib import Path
@@ -2116,42 +2116,6 @@ def _extract_ocr_list(text: str) -> list:
     return [_normalize_ocr(item) for item in parsed if isinstance(item, dict)]
 
 
-def _ocr_receipt(file_bytes: bytes, mime_type: str) -> list:
-    """OCR receipt(s) using Claude Vision. Returns a list of receipt dicts (may be empty)."""
-    api_key = os.environ.get('ANTHROPIC_API_KEY')
-    if not api_key:
-        return []
-    try:
-        import anthropic
-        client = anthropic.Anthropic(api_key=api_key)
-        b64 = base64.standard_b64encode(file_bytes).decode()
-        if mime_type == 'application/pdf':
-            block = {
-                "type": "document",
-                "source": {"type": "base64", "media_type": "application/pdf", "data": b64}
-            }
-        else:
-            block = {
-                "type": "image",
-                "source": {"type": "base64", "media_type": mime_type, "data": b64}
-            }
-        resp = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=1024,  # room for multiple receipts in one image
-            messages=[{"role": "user", "content": [
-                block,
-                {"type": "text", "text": _OCR_PROMPT}
-            ]}]
-        )
-        results = _extract_ocr_list(resp.content[0].text)
-        for r in results:
-            r["_model"] = "Claude"
-        return results
-    except Exception:
-        pass
-    return []
-
-
 # Configurable via GEMINI_OCR_MODEL (.env). gemini-2.5-flash: fast/cheap, strong on
 # KR+EN receipts. Bump to gemini-2.5-pro if accuracy issues arise (~10x cost).
 _DEFAULT_GEMINI_OCR_MODEL = "gemini-2.5-flash"
@@ -2179,22 +2143,30 @@ def _ocr_receipt_gemini(file_bytes: bytes, mime_type: str) -> list:
         results = _extract_ocr_list(resp.text or "")
         for r in results:
             r["_model"] = "Gemini"
+        if not results:
+            # A reply that parsed to nothing is a different problem from a call
+            # that never landed, and the entry looks identical either way.
+            print(f"[ocr] gemini returned no parseable receipt "
+                  f"({model_name}, {mime_type}, {len(file_bytes)}B): "
+                  f"{(resp.text or '')[:200]!r}", file=sys.stderr, flush=True)
         return results
-    except Exception:
-        pass
+    except Exception as e:
+        # There is no second model behind this one any more — swallowing the
+        # reason leaves a failed receipt with nothing to explain it.
+        print(f"[ocr] gemini failed ({mime_type}, {len(file_bytes)}B): "
+              f"{type(e).__name__}: {e}", file=sys.stderr, flush=True)
     return []
 
 
 def _ocr_receipt_auto(file_bytes: bytes, mime_type: str) -> list:
-    """Primary OCR: Gemini first, fall back to Claude. Returns a list of receipt dicts.
+    """OCR a receipt image. Returns a list of receipt dicts — one image may hold
+    several receipts, so callers must iterate the result.
 
-    One image may contain multiple receipts, so callers must iterate the result.
+    Gemini only (강프로 2026-07-28): the Claude second pass was never reached in
+    practice — Gemini answers first and correctly — and a fallback nobody exercises
+    is a path nobody has tested.
     """
-    results = _ocr_receipt_gemini(file_bytes, mime_type)
-    if results and any(r.get("amount") is not None for r in results):
-        return results
-    claude = _ocr_receipt(file_bytes, mime_type)
-    return claude or results
+    return _ocr_receipt_gemini(file_bytes, mime_type)
 
 
 def _sub_entry_id(file_id: str, sub_index: int) -> str:
