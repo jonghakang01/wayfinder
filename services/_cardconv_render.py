@@ -1933,25 +1933,23 @@ if(rvDl){{
   }}
   rvDl.addEventListener('click', () => {{
     rvCloseExport();
-    window.location = '/cardconv/review/download?' + rvDlParams().toString();
+    wfProgress.downloadUrl('/cardconv/review/download?' + rvDlParams().toString(),
+      'Building your SAP upload file\u2026');
     rvOfferInProgress();
   }});
   $('rvDownloadReport').addEventListener('click', () => {{
     rvCloseExport();
-    window.location = '/cardconv/review/expense_report?' + rvDlParams().toString();
+    wfProgress.downloadUrl('/cardconv/review/expense_report?' + rvDlParams().toString(),
+      'Building your expense report \u2014 receipt images take about a second each\u2026');
     rvOfferInProgress();
   }});
   // Both at once: hidden iframes so the two attachment downloads don't race.
   $('rvDownloadBoth').addEventListener('click', () => {{
     rvCloseExport();
     const q = rvDlParams().toString();
-    ['/cardconv/review/download?', '/cardconv/review/expense_report?'].forEach(u => {{
-      const f = document.createElement('iframe');
-      f.style.display = 'none';
-      f.src = u + q;
-      document.body.appendChild(f);
-      setTimeout(() => f.remove(), 60000);
-    }});
+    wfProgress.downloadAll(
+      ['/cardconv/review/download?' + q, '/cardconv/review/expense_report?' + q],
+      'Building both files \u2014 receipt images take about a second each\u2026');
     rvOfferInProgress();
   }});
   // Reflect the selection count on the download buttons and the bulk bar
@@ -3962,11 +3960,13 @@ $('fReset').addEventListener('click', () => {
 // Both downloads respect the currently applied filters.
 $('fDownload').addEventListener('click', () => {
   closePops();
-  window.location = '/cardconv/ledger/download.pdf?' + filterParams().toString();
+  wfProgress.downloadUrl('/cardconv/ledger/download.pdf?' + filterParams().toString(),
+    'Building your receipt PDF \u2014 about a second per receipt\u2026');
 });
 $('fDownloadXlsx').addEventListener('click', () => {
   closePops();
-  window.location = '/cardconv/ledger/download.xlsx?' + filterParams().toString();
+  wfProgress.downloadUrl('/cardconv/ledger/download.xlsx?' + filterParams().toString(),
+    'Building your ledger export\u2026');
 });
 $('fDelete').addEventListener('click', deleteSelected);
 $('fMarkProg').addEventListener('click', () => setStatusSelected('in_progress'));

@@ -217,6 +217,37 @@ details.bucket-section[open] .service-grid { margin-top:14px; }
 a, button, select, label, input[type=checkbox], input[type=radio] { touch-action: manipulation; }
 .btn:active { transform: scale(0.97); }
 
+/* Progress — for work that runs long enough that a still screen reads as broken.
+   A receipt PDF takes ~0.7s per receipt, so a hundred of them is over a minute
+   of nothing happening. Indeterminate by design: most of our slow work cannot
+   report a percentage honestly, and a fake bar is worse than none. */
+.wf-progress { position:fixed; left:0; right:0; top:0; z-index:10000; height:3px;
+  background:var(--surface-3); overflow:hidden; display:none; }
+.wf-progress.is-on { display:block; }
+.wf-progress::after { content:""; position:absolute; inset:0 auto 0 0; width:40%;
+  background:linear-gradient(90deg,transparent,var(--accent),transparent);
+  animation:wf-progress-slide 1.1s ease-in-out infinite; }
+@keyframes wf-progress-slide { 0% { left:-40%; } 100% { left:100%; } }
+.wf-progress-note { position:fixed; left:50%; translate:-50% 0; top:16px; z-index:10000;
+  display:none; align-items:center; gap:10px; max-width:min(92vw,420px);
+  padding:10px 16px; background:var(--surface); color:var(--text);
+  border:1px solid var(--border-bright); border-radius:var(--radius-full);
+  box-shadow:var(--shadow-lg); font-size:var(--text-sm); font-weight:var(--fw-semibold); }
+.wf-progress-note.is-on { display:flex; }
+.wf-spinner { width:14px; height:14px; flex-shrink:0; border-radius:50%;
+  border:2px solid var(--border-bright); border-top-color:var(--accent);
+  animation:wf-spin .7s linear infinite; }
+@keyframes wf-spin { to { transform:rotate(360deg); } }
+/* A button that kicked off long work says so and stops taking second clicks. */
+.btn.is-busy { pointer-events:none; opacity:.72; }
+.btn.is-busy::before { content:""; width:13px; height:13px; margin-right:7px;
+  border-radius:50%; border:2px solid currentColor; border-top-color:transparent;
+  animation:wf-spin .7s linear infinite; }
+@media (prefers-reduced-motion:reduce) {
+  .wf-progress::after, .wf-spinner, .btn.is-busy::before { animation:none; }
+  .wf-progress::after { left:0; width:100%; opacity:.5; }
+}
+
 /* Floating "back to Wayfinder" pill, injected into every app page (server.py).
    Tokens, not fixed colors — a dark pill on a light page was the whole bug. */
 .wf-back { position:fixed; left:16px; bottom:16px; z-index:9999; display:inline-flex;
@@ -287,7 +318,10 @@ a, button, select, label, input[type=checkbox], input[type=radio] { touch-action
 .wf-today-item.wf-done{opacity:.5}
 .wf-today-text{flex:1;font-size:.92rem;font-weight:600;color:var(--text);text-align:left}
 .wf-today-item.wf-done .wf-today-text{text-decoration:line-through;color:var(--text-muted)}
-.wf-check{width:26px;height:26px;flex-shrink:0;border-radius:50%;border:2px solid var(--border);background:transparent;cursor:pointer;color:var(--on-accent);font-size:.85rem;font-weight:800;display:flex;align-items:center;justify-content:center;transition:.15s;padding:0}
+.wf-check{width:26px;height:26px;flex-shrink:0;border-radius:50%;border:2px solid var(--border);background:transparent;cursor:pointer;color:var(--on-accent);font-size:.85rem;font-weight:800;display:flex;align-items:center;justify-content:center;transition:.15s;padding:0;position:relative}
+/* The circle stays 26px; the tap area is extended to 44 with a pseudo
+   element so rows keep their spacing. */
+.wf-check::after{content:'';position:absolute;top:50%;left:50%;translate:-50% -50%;width:max(100%,44px);height:max(100%,44px);border-radius:50%}
 .wf-check:hover{border-color:var(--accent)}
 .wf-check--on{background:linear-gradient(135deg,var(--accent),var(--info));border-color:transparent}
 .wf-streak-chip{font-size:.72rem;color:var(--warn);font-weight:700;white-space:nowrap;background:rgba(251,191,36,.1);padding:2px 8px;border-radius:var(--radius-full);border:1px solid rgba(251,191,36,.3)}
@@ -515,6 +549,48 @@ WAYFINDER_BACK = (
     '<a href="/" class="wf-back" title="Back to Wayfinder">🧭 Wayfinder</a>'
 )
 
+# Progress bar + the helper that drives it. Downloads are the awkward case:
+# the browser handles them, so JS never sees them finish. The server stamps a
+# cookie on the response and we watch for it — the standard trick, and the only
+# one that works without buffering the whole file in memory.
+PROGRESS_INJECT = (
+    '<div class="wf-progress" id="wfProgress"></div>'
+    '<div class="wf-progress-note" id="wfProgressNote">'
+    '<span class="wf-spinner"></span><span id="wfProgressText"></span></div>'
+    "<script>"
+    "window.wfProgress={"
+    "start:function(msg){var b=document.getElementById('wfProgress'),"
+    "n=document.getElementById('wfProgressNote'),t=document.getElementById('wfProgressText');"
+    "if(b)b.classList.add('is-on');"
+    "if(n&&msg){t.textContent=msg;n.classList.add('is-on');}},"
+    "stop:function(){var b=document.getElementById('wfProgress'),"
+    "n=document.getElementById('wfProgressNote');"
+    "if(b)b.classList.remove('is-on');if(n)n.classList.remove('is-on');"
+    "document.querySelectorAll('.btn.is-busy').forEach(function(e){e.classList.remove('is-busy')});},"
+    # Watch for the server's cookie, then clear the progress UI.
+    "_watch:function(id,msg){wfProgress.start(msg||'Preparing your download\u2026');"
+    "var t0=Date.now();var iv=setInterval(function(){"
+    "if(document.cookie.indexOf('wf_dl='+id)>-1){clearInterval(iv);"
+    "document.cookie='wf_dl=;path=/;max-age=0';wfProgress.stop();}"
+    # Never leave the page stuck spinning if a download died silently.
+    "else if(Date.now()-t0>900000){clearInterval(iv);wfProgress.stop();}},400);},"
+    # For a real link.
+    "download:function(el,msg){var id='d'+Date.now();"
+    "var u=new URL(el.href,location.href);u.searchParams.set('dl',id);el.href=u.toString();"
+    "el.classList.add('is-busy');wfProgress._watch(id,msg);return true;},"
+    # For code that navigates to a download itself (window.location = ...).
+    "downloadUrl:function(url,msg){var id='d'+Date.now();"
+    "var sep=url.indexOf('?')>-1?'&':'?';wfProgress._watch(id,msg);"
+    "window.location=url+sep+'dl='+id;return id;},"
+    # Several attachments at once: one watcher, iframes share the token.
+    "downloadAll:function(urls,msg){var id='d'+Date.now();wfProgress._watch(id,msg);"
+    "urls.forEach(function(u){var sep=u.indexOf('?')>-1?'&':'?';"
+    "var f=document.createElement('iframe');f.style.display='none';"
+    "f.src=u+sep+'dl='+id;document.body.appendChild(f);"
+    "setTimeout(function(){f.remove()},900000);});return id;}};"
+    "</script>"
+)
+
 THEME_TOGGLE = (
     '<button id="wfThemeBtn" class="wf-theme-btn" title="Toggle light/dark" '
     'onclick="wfToggleTheme()"></button>'
@@ -713,6 +789,8 @@ class Handler(BaseHTTPRequestHandler):
     def send_html(self, html, code=200):
         html = html.replace('</head>', PWA_INJECT + '</head>', 1)
         if '</body>' in html:
+            html = html.replace('</body>', PROGRESS_INJECT + '</body>', 1)
+        if '</body>' in html:
             html = html.replace('</body>', THEME_TOGGLE + '</body>', 1)
         if '<!--wf-root-->' not in html and '</body>' in html:
             html = html.replace('</body>', WAYFINDER_BACK + '</body>', 1)
@@ -753,6 +831,14 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Location", url)
         self.end_headers()
 
+    def _dl_cookie(self):
+        """Echo the ?dl=<id> token back as a cookie so wfProgress can stop.
+        A file response carries no JS, so this is how the page learns the work
+        is over. Only a token that looks like one we issued is reflected."""
+        tok = (parse_qs(urlparse(self.path).query).get("dl") or [""])[0]
+        if tok and tok.isalnum() and len(tok) <= 32:
+            self.send_header("Set-Cookie", f"wf_dl={tok}; Path=/; Max-Age=60")
+
     def dispatch(self, result):
         t = result[0]
         if t == "html":
@@ -787,6 +873,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", mime)
             self.send_header("Content-Disposition", _content_disposition(fname))
             self.send_header("Content-Length", len(data))
+            self._dl_cookie()
             self.end_headers()
             self.wfile.write(data)
         elif t == "file_inline":
@@ -796,6 +883,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", mime)
             self.send_header("Content-Disposition", _content_disposition(fname))
             self.send_header("Content-Length", len(data))
+            self._dl_cookie()
             self.end_headers()
             self.wfile.write(data)
         elif t == "binary":

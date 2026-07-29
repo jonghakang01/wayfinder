@@ -45,6 +45,9 @@ DEMO_CSS = """
 .ds-sect h3{font-size:var(--text-base);font-weight:var(--fw-bold);margin:20px 0 8px}
 .ds-sect p{font-size:var(--text-sm);color:var(--text-muted);max-width:76ch;line-height:1.65;margin:0 0 10px}
 .ds-sect p b, .ds-rules li b{color:var(--text)}
+.ds-code{background:var(--bg-deep);border:1px solid var(--border);border-radius:var(--radius-md);
+  padding:12px 14px;font-size:var(--text-xs);color:var(--text);overflow-x:auto;line-height:1.7;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;margin:0 0 10px}
 .ds-rules{font-size:var(--text-sm);line-height:1.7;padding-left:20px;color:var(--text-muted)}
 .ds-rules li{margin-bottom:6px}
 code{background:var(--bg-deep);border:1px solid var(--border);border-radius:5px;
@@ -314,6 +317,36 @@ def render(user):
           <td data-label="Status"><span class="ds-chip open">OPEN</span></td></tr>
       </tbody>
     </table>
+
+    <h3>Progress — work that runs long</h3>
+    <p>Anything that keeps the user waiting past roughly two seconds says so.
+    <b>Never leave a still screen</b>: a receipt PDF takes about a second per receipt, so a
+    hundred of them is over a minute in which nothing on screen moves and the page reads as
+    broken — that is exactly what produced a 504 report from the field.</p>
+    <p>The indicator is <b>indeterminate on purpose</b>. Most of our slow work cannot report a
+    percentage honestly, and a bar that invents one is worse than no bar. Show a thin top rail
+    plus a one-line note saying what is being built and, where it is knowable, the rough rate
+    (&ldquo;about a second per receipt&rdquo;).</p>
+    <p>Downloads are the awkward case: the browser owns them, so JS never sees them finish.
+    The server stamps a <code>wf_dl</code> cookie onto the response and the helper watches for
+    it — do not buffer a file into memory just to draw a bar.</p>
+    <div class="ds-demo" style="flex-direction:column;align-items:stretch;gap:14px">
+      <div class="wf-progress is-on" style="position:relative;top:auto"></div>
+      <div class="wf-progress-note is-on" style="position:relative;top:auto;left:auto;translate:none">
+        <span class="wf-spinner"></span><span>Building your expense report — receipt images take about a second each…</span>
+      </div>
+      <div><button class="btn btn-primary is-busy">Downloading</button></div>
+    </div>
+    <p><b>How to use it.</b> Every page already has the helper injected — there is nothing to
+    import. Pick the call that matches how the download is triggered, and never wire one by
+    hand:</p>
+    <pre class="ds-code">wfProgress.downloadUrl(url, 'Building your receipt PDF…')  // window.location style
+wfProgress.download(linkEl, 'Preparing…')                  // a real &lt;a&gt; link
+wfProgress.downloadAll([urlA, urlB], 'Building both files…')  // several attachments
+wfProgress.start('Working…') / wfProgress.stop()            // anything else that is slow</pre>
+    <p>The watcher gives up after 15 minutes so a failed download never leaves the page
+    spinning, and <code>prefers-reduced-motion</code> stops the animation without hiding the
+    indicator.</p>
   </div>
 
   <div class="ds-sect"><h2>4 · Rules &amp; pitfalls</h2>
