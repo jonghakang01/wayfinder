@@ -223,6 +223,13 @@ a, button, select, label, input[type=checkbox], input[type=radio] { touch-action
   border-radius:var(--radius-full); font-size:var(--text-xs); font-weight:var(--fw-semibold);
   text-decoration:none; backdrop-filter:blur(6px); box-shadow:var(--shadow-md); }
 .wf-back:hover { color:var(--accent); border-color:var(--accent); }
+/* Same corner problem as .wf-back: inline styles could not be moved out of the
+   way of the tab bar, so the toggle is a class now too. */
+.wf-theme-btn { position:fixed; right:16px; bottom:16px; z-index:9999; width:40px; height:40px;
+  border-radius:50%; border:1px solid var(--border-bright); cursor:pointer;
+  background:var(--surface); color:var(--text); font-size:1.02rem; line-height:1;
+  box-shadow:var(--shadow-md); }
+.wf-theme-btn:hover { border-color:var(--accent); }
 @media (max-width: 768px) { .wf-back { min-height:44px; padding:8px 16px; } }
 
 /* Mobile guardrails — docs/mobile_ux_guideline.md. 768px = standard mobile breakpoint.
@@ -389,8 +396,8 @@ MANIFEST = json.dumps({
         {"src": "/icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"}
     ],
     "shortcuts": [
-        {"name": "Todo List", "url": "/todo", "description": "Task management"},
-        {"name": "Habit Tracker", "url": "/habit", "description": "Habit tracking"}
+        {"name": "Tasks", "url": "/momentum?tab=tasks", "description": "Task management"},
+        {"name": "Habits", "url": "/momentum?tab=habits", "description": "Habit tracking"}
     ]
 }, ensure_ascii=False, indent=2)
 
@@ -452,7 +459,12 @@ APP_TAB_CSS = """
 .app-tab-icon{font-size:1.3rem;line-height:1;transition:transform 0.2s}
 .app-tab.active .app-tab-icon{filter:drop-shadow(0 0 8px rgba(56,189,248,0.7));transform:translateY(-2px)}
 body{padding-bottom:calc(72px + env(safe-area-inset-bottom,0px))!important}
+/* The floating pill and the theme toggle sit at bottom:16px, which on mobile is
+   inside the tab bar — they were covering the first and last tab. Lift them
+   above it wherever the bar exists. */
+body:has(.app-tabs) .wf-back,body:has(.app-tabs) .wf-theme-btn{bottom:calc(80px + env(safe-area-inset-bottom,0px))}
 @media(min-width:768px){
+  body:has(.app-tabs) .wf-back,body:has(.app-tabs) .wf-theme-btn{bottom:16px}
   .app-tabs{position:sticky!important;top:0!important;bottom:auto!important;height:auto;flex-direction:row;justify-content:center;gap:6px;background:var(--surface);border-top:none;border-bottom:1px solid var(--border);padding:10px 16px;box-shadow:var(--shadow-sm)}
   .app-tab{flex:0 0 auto;flex-direction:row;gap:8px;padding:8px 18px;border-radius:var(--radius-full);font-size:.82rem;text-transform:none;letter-spacing:0}
   .app-tab-icon{font-size:1.05rem}
@@ -464,18 +476,22 @@ body{padding-bottom:calc(72px + env(safe-area-inset-bottom,0px))!important}
 """
 
 def app_tabs(active, user=None):
+    """Tab bar for the Work Hub.
+
+    `active` is a tab key, but the old routes still pass their own path (and
+    pov.py passes something that is not a tab at all), so those are accepted
+    and mapped. The three tabs are one service now — a single access check.
+    """
     import services.auth as auth
-    tabs = [
-        ("/todo",      "✅", "Tasks"),
-        ("/habit",     "🏃", "Habits"),
-        ("/dashboard", "📊", "Overview"),
-    ]
-    is_admin = auth.is_admin(user)
-    visible = [t for t in tabs if is_admin or auth.has_service_access(user, t[0])]
+    tabs = [("today", "📊", "Today"), ("tasks", "✅", "Tasks"), ("habits", "🏃", "Habits")]
+    active = {"/dashboard": "today", "/todo": "tasks", "/habit": "habits"}.get(active, active)
+    if not (auth.is_admin(user) or auth.has_service_access(user, "/momentum")):
+        return ""
     html = APP_TAB_CSS + '<nav class="app-tabs">'
-    for path, icon, label in visible:
-        cls = "app-tab active" if active == path else "app-tab"
-        html += f'<a href="{path}" class="{cls}"><span class="app-tab-icon">{icon}</span>{label}</a>'
+    for key, icon, label in tabs:
+        cls = "app-tab active" if active == key else "app-tab"
+        html += (f'<a href="/momentum?tab={key}" class="{cls}">'
+                 f'<span class="app-tab-icon">{icon}</span>{label}</a>')
     html += "</nav>"
     return html
 
@@ -498,11 +514,8 @@ WAYFINDER_BACK = (
 )
 
 THEME_TOGGLE = (
-    '<button id="wfThemeBtn" title="Toggle light/dark" onclick="wfToggleTheme()" '
-    'style="position:fixed;right:16px;bottom:16px;z-index:9999;width:40px;height:40px;'
-    'border-radius:50%;border:1px solid var(--border-bright,#334155);cursor:pointer;'
-    'background:var(--surface,#111827);color:var(--text,#f1f5f9);font-size:1.02rem;'
-    'line-height:1;box-shadow:0 4px 14px rgba(0,0,0,.3)"></button>'
+    '<button id="wfThemeBtn" class="wf-theme-btn" title="Toggle light/dark" '
+    'onclick="wfToggleTheme()"></button>'
     "<script>function wfThemeIcon(){var l=document.documentElement.dataset.theme==='light';"
     "var b=document.getElementById('wfThemeBtn');if(b)b.textContent=l?'🌙':'☀️';}"
     "function wfToggleTheme(){var r=document.documentElement;"
@@ -512,8 +525,8 @@ THEME_TOGGLE = (
 )
 
 CATEGORIES = {
-    "💼 업무":    ["/cardconv", "/sow", "/matters", "/aeo", "/llm-check"],
-    "🏠 개인":    ["/dashboard", "/todo", "/habit"],
+    "💼 업무":    ["/momentum", "/cardconv", "/sow", "/matters", "/aeo", "/llm-check"],
+    "🏠 개인":    [],
     "🛠 팀 도구": ["/design"],
     "⚙️ 관리":    ["/admin"],
 }
@@ -724,9 +737,9 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b)
 
-    def send_text(self, text, mime):
+    def send_text(self, text, mime, code=200):
         b = text.strip().encode()
-        self.send_response(200)
+        self.send_response(code)
         self.send_header("Content-Type", mime)
         self.send_header("Content-Length", len(b))
         self.send_header("Cache-Control", "no-cache, must-revalidate")
@@ -849,6 +862,22 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/login":
             return self.dispatch(auth.handle("POST", path, body, ctx))
+        if path == "/momentum/arrive":
+            # Called by the phone's own arrival automation, which has no session
+            # cookie — a shared secret stands in for one. Absent secret = closed.
+            from services import momentum as _mom
+            _secret = os.environ.get("MOMENTUM_ARRIVE_SECRET", "")
+            if not _secret or self.headers.get("X-Arrive-Secret", "") != _secret:
+                return self.send_text('{"error":"forbidden"}', "application/json", 403)
+            _place = (body.get("place") or body.get("place_id") or [""])
+            _place = _place[0] if isinstance(_place, list) else _place
+            _user = (body.get("user") or [auth.ADMIN_USERNAME])
+            _user = _user[0] if isinstance(_user, list) else _user
+            n, label = _mom.arrive(_user, _place)
+            if n is None:
+                return self.send_text('{"error":"unknown place"}', "application/json", 404)
+            return self.send_text(json.dumps({"place": label, "tasks": n}),
+                                  "application/json")
         if path == "/cardconv/batch/run":
             import os as _os
             from services import cardconv as _cc

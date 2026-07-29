@@ -8,6 +8,9 @@ META = {
     "path": "/todo",
     "icon": "✅",
     "description": "Task management",
+    # Reached through /work now. The route stays so that every form action and
+    # phone shortcut pointing at /todo/* keeps resolving.
+    "hidden": True,
 }
 
 
@@ -32,6 +35,45 @@ def load(user):
             return json.load(f)
     except Exception:
         return []
+
+
+PRIORITIES = {1: ("High", "--group-4"), 2: ("Normal", "--text-muted"), 3: ("Low", "--group-1")}
+DEFAULT_PRIORITY = 2
+
+
+def _priority_of(raw):
+    """Form values arrive as strings and may be blank; anything unrecognised
+    is Normal rather than an error — priority is never worth a 500."""
+    try:
+        p = int(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_PRIORITY
+    return p if p in PRIORITIES else DEFAULT_PRIORITY
+
+
+def _place_options(places, selected):
+    opts = f'<option value=""{"" if selected else " selected"}>No place</option>'
+    return opts + "".join(
+        f'<option value="{pl["id"]}"{" selected" if pl["id"] == selected else ""}>'
+        f'📍 {pl["label"]}</option>' for pl in places)
+
+
+def _prio_options(selected):
+    return "".join(
+        f'<option value="{p}"{" selected" if p == selected else ""}>{label}</option>'
+        for p, (label, _) in PRIORITIES.items()
+    )
+
+
+def projects_of(todos):
+    """Distinct project names in use, for the datalist. Free text, so the list
+    is whatever has been typed so far."""
+    seen = []
+    for t in todos:
+        pj = (t.get("project") or "").strip()
+        if pj and pj not in seen:
+            seen.append(pj)
+    return sorted(seen)
 
 
 def save(todos, user):
@@ -157,6 +199,8 @@ def handle(method, path, body, ctx=None):
                     "created_at": datetime.now().isoformat(),
                     "due_date": due_date,
                     "group": actual_group,
+                    "project": body.get("project", [""])[0].strip(),
+                    "priority": _priority_of(body.get("priority", [""])[0]),
                 })
                 save(todos, user)
         elif path == "/todo/done":
@@ -194,6 +238,20 @@ def handle(method, path, body, ctx=None):
                         })
                         save_habits(habits, user)
                         t["habit_id"] = hid
+            save(todos, user)
+        elif path == "/todo/set_meta":
+            # Project / priority / place, edited inline from the task row.
+            # Absent fields are left alone so one control can post on its own.
+            tid = int(body.get("id", [0])[0])
+            for t in todos:
+                if t["id"] != tid:
+                    continue
+                if "project" in body:
+                    t["project"] = body["project"][0].strip()
+                if "priority" in body:
+                    t["priority"] = _priority_of(body["priority"][0])
+                if "place_id" in body:
+                    t["place_id"] = body["place_id"][0].strip()
             save(todos, user)
         elif path == "/todo/reorder":
             ids_str = body.get("ids", [""])[0]
@@ -234,12 +292,16 @@ def handle(method, path, body, ctx=None):
             next_url = "/todo"
         return ("redirect", next_url)
 
-    return ("html", render(load(user), load_habits(user), user))
+    # The page itself now lives at /work; this route survives for bookmarks,
+    # phone shortcuts and the POST actions above.
+    return ("redirect", "/momentum?tab=tasks")
 
 
 def render(todos, habits, user, readonly=False):
     today_str = date.today().isoformat()
     groups = load_groups(user)
+    import services.momentum as momentum_svc
+    places = momentum_svc.load_places(user)
 
     # Sort active tasks: soonest due first, no due date → bottom
     def _due_key(t):
@@ -369,6 +431,9 @@ def render(todos, habits, user, readonly=False):
         done_at = t.get("done_at")
         habit_id = t.get("habit_id")
         t_group = t.get("group") or ""
+        t_project = (t.get("project") or "").strip()
+        t_place = (t.get("place_id") or "").strip()
+        prio_now = _priority_of(t.get("priority", DEFAULT_PRIORITY))
 
         if readonly:
             badge = early_badge(due_date, done_at) if t["done"] else due_badge(due_date, t["done"])
@@ -410,8 +475,25 @@ def render(todos, habits, user, readonly=False):
                 f'{group_opts}'
                 f'</select></form>'
             )
+            work_sel = (
+                f'<form method="POST" action="/todo/set_meta" class="group-sel-form">'
+                f'<input type="hidden" name="id" value="{t["id"]}">'
+                f'<select name="priority" onchange="this.form.submit()" '
+                f'class="group-select-inline" title="Priority">'
+                f'{_prio_options(prio_now)}</select></form>'
+                f'<form method="POST" action="/todo/set_meta" class="group-sel-form">'
+                f'<input type="hidden" name="id" value="{t["id"]}">'
+                f'<input type="text" name="project" list="wk-projects" value="{t_project}" '
+                f'placeholder="Project" class="wk-inline-project" '
+                f'onchange="this.form.submit()" title="Project"></form>'
+                + (f'<form method="POST" action="/todo/set_meta" class="group-sel-form">'
+                   f'<input type="hidden" name="id" value="{t["id"]}">'
+                   f'<select name="place_id" onchange="this.form.submit()" '
+                   f'class="group-select-inline" title="Place">'
+                   f'{_place_options(places, t_place)}</select></form>' if places else "")
+            )
             actions_html = (
-                f'{done_btn}{habit_btn}{group_sel}'
+                f'{done_btn}{habit_btn}{group_sel}{work_sel}'
                 f'<form method="POST" action="/todo/delete" style="display:inline">'
                 f'<input type="hidden" name="id" value="{t["id"]}">'
                 f'<button class="btn btn-danger">x</button></form>'
@@ -420,11 +502,20 @@ def render(todos, habits, user, readonly=False):
         drag_attr = 'draggable="true"' if not t["done"] else ""
         drag_handle = '<span class="drag-handle" title="Drag to reorder">⠿</span>' if not t["done"] else ""
         done_cls = " done" if t["done"] else ""
+        prio_label, prio_var = PRIORITIES[prio_now]
+        work_html = ""
+        if t_project:
+            work_html += f'<span class="wk-chip" title="Project">{t_project}</span>'
+        if prio_now != DEFAULT_PRIORITY:
+            work_html += (f'<span class="wk-prio" style="color:var({prio_var});'
+                          f'border-color:var({prio_var})">{prio_label}</span>')
         meta_html = ""
-        if badge or due_str:
-            meta_html = f'<div class="item-meta">{badge}<span class="item-date">{due_str}</span></div>'
+        if badge or due_str or work_html:
+            meta_html = (f'<div class="item-meta">{badge}{work_html}'
+                         f'<span class="item-date">{due_str}</span></div>')
         return f'''
-        <div class="notepad-item notepad-task{done_cls}" data-id="{t["id"]}" {drag_attr}>
+        <div class="notepad-item notepad-task{done_cls}" data-id="{t["id"]}" {drag_attr}
+             data-project="{t_project}" data-prio="{prio_now}">
           <div class="item-left">{drag_handle}<span class="item-type-dot task-dot"></span></div>
           <div class="item-content">
             <span class="item-title">{t["title"]}</span>
@@ -449,6 +540,8 @@ def render(todos, habits, user, readonly=False):
             f'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
             f'<input type="text" name="title" placeholder="Task name..." required style="flex:1;min-width:150px;padding:7px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:var(--text-sm);background:var(--surface);color:var(--text)">'
             f'<input type="date" name="due_date" style="padding:7px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:var(--text-sm);background:var(--surface);color:var(--text)">'
+            f'<input type="text" name="project" list="wk-projects" placeholder="Project" class="wk-add-input">'
+            f'<select name="priority" class="wk-add-input" title="Priority">{_prio_options(DEFAULT_PRIORITY)}</select>'
             f'<button type="submit" class="btn btn-primary btn-sm">Add</button>'
             f'<button type="button" class="btn btn-ghost btn-sm" onclick="closeInlineForm(this)">Cancel</button>'
             f'</div></form></div>'
@@ -527,6 +620,48 @@ def render(todos, habits, user, readonly=False):
         '<button type="button" onclick="toggleAddGroupCard()" class="btn btn-ghost">✕</button>'
         '</form></div>'
     )
+    all_projects = projects_of(todos)
+    project_opts = "".join(f'<option value="{pj}">{pj}</option>' for pj in all_projects)
+    work_filter_html = (
+        f'<div class="wk-filter">'
+        f'<label class="wk-filter-label">Project</label>'
+        f'<select id="wkProject" class="wf-input" onchange="wkFilter()">'
+        f'<option value="">All</option>{project_opts}</select>'
+        f'<label class="wk-filter-label">Priority</label>'
+        f'<select id="wkPrio" class="wf-input" onchange="wkFilter()">'
+        f'<option value="">All</option>{_prio_options(None)}</select>'
+        f'<button type="button" class="btn btn-ghost btn-sm" onclick="wkReset()">Reset</button>'
+        f'<span id="wkCount" class="wk-filter-count"></span>'
+        f'</div>'
+        f'<datalist id="wk-projects">{project_opts}</datalist>'
+    ) if all_projects or not readonly else ""
+
+    place_rows = "".join(
+        f'<div class="wk-place-row">'
+        f'<span class="wk-place-name">📍 {pl["label"]}</span>'
+        f'<span class="wk-place-meta">{pl["lat"]:.4f}, {pl["lon"]:.4f} · {pl["radius_m"]}m</span>'
+        f'<span class="wk-place-meta">{sum(1 for t in todos if not t.get("done") and t.get("place_id") == pl["id"])} open</span>'
+        f'<form method="POST" action="/momentum/place/delete" style="display:inline">'
+        f'<input type="hidden" name="id" value="{pl["id"]}">'
+        f'<button class="btn btn-danger btn-sm">Remove</button></form>'
+        f'</div>' for pl in places)
+    places_html = "" if readonly else (
+        f'<details class="wk-places">'
+        f'<summary>📍 Places <span class="wk-place-meta">{len(places)}</span></summary>'
+        f'<div class="wk-places-body">'
+        f'{place_rows or "<div class=\"wk-place-empty\">No places yet. Stand where you work and save it.</div>"}'
+        f'<form method="POST" action="/momentum/place/add" id="wkPlaceForm" class="wk-place-add">'
+        f'<input type="hidden" name="lat" id="wkLat"><input type="hidden" name="lon" id="wkLon">'
+        f'<input type="text" name="label" id="wkLabel" class="wf-input" placeholder="Place name (e.g. Office)" required>'
+        f'<button type="button" class="btn btn-primary btn-sm" onclick="wkSavePlace()">Use my current location</button>'
+        f'<span id="wkGeoMsg" class="wk-place-meta"></span>'
+        f'</form>'
+        f'<p class="wk-place-note">A browser cannot watch your location in the background. '
+        f'Set up an arrival automation on your phone to call <code>POST /momentum/arrive</code> '
+        f'and you will get the list in Telegram when you get there.</p>'
+        f'</div></details>'
+    )
+
     todo_header_btns = "" if readonly else (
         '<div style="display:flex;gap:8px">'
         '<button type="button" onclick="toggleAddGroupCard()" class="btn btn-primary btn-lg">＋ New Group</button>'
@@ -545,6 +680,50 @@ def render(todos, habits, user, readonly=False):
 .badge-overdue {{ background:rgba(248,113,113,0.12); color:var(--danger); border:1px solid rgba(248,113,113,0.3); }}
 .badge-dday    {{ background:rgba(251,191,36,0.1);   color:var(--warn); border:1px solid rgba(251,191,36,0.3); }}
 .badge-early   {{ background:rgba(52,211,153,0.1);   color:var(--success); }}
+
+/* Work axes — project chip, priority badge, filter toolbar */
+.wk-chip {{ display:inline-flex; align-items:center; height:20px; padding:0 8px; border-radius:var(--radius-full);
+  background:var(--surface-3); color:var(--text); font-size:var(--text-xs); font-weight:var(--fw-semibold); }}
+.wk-prio {{ display:inline-flex; align-items:center; height:20px; padding:0 8px; border-radius:var(--radius-full);
+  border:1px solid; font-size:var(--text-xs); font-weight:var(--fw-bold); background:transparent; }}
+.wk-add-input {{ padding:7px 10px; border:1px solid var(--border); border-radius:var(--radius-sm);
+  font-size:var(--text-sm); background:var(--surface); color:var(--text); min-width:110px; }}
+.wk-inline-project {{ width:96px; padding:3px 6px; border:1px solid var(--border); border-radius:var(--radius-sm);
+  font-size:var(--text-xs); background:var(--surface-2); color:var(--text); }}
+.wk-filter {{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:10px 14px; margin-bottom:12px;
+  background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-lg); }}
+.wk-filter-label {{ font-size:var(--text-xs); font-weight:var(--fw-bold); letter-spacing:.06em;
+  text-transform:uppercase; color:var(--text-muted); }}
+.wk-filter .wf-input {{ width:auto; min-width:120px; }}
+.wk-filter-count {{ font-size:var(--text-xs); color:var(--text-muted); margin-left:auto; }}
+@media (max-width:768px) {{
+  .wk-filter {{ display:grid; grid-template-columns:auto 1fr; }}
+  .wk-filter .btn, .wk-filter-count {{ grid-column:1 / -1; }}
+  .wk-filter-count {{ margin-left:0; }}
+  .wk-inline-project {{ width:100%; min-height:44px; }}
+}}
+
+/* Places */
+.wk-places {{ background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-lg);
+  margin-bottom:12px; overflow:hidden; }}
+.wk-places > summary {{ padding:12px 16px; cursor:pointer; font-size:var(--text-sm);
+  font-weight:var(--fw-semibold); color:var(--text); list-style:none; }}
+.wk-places > summary::-webkit-details-marker {{ display:none; }}
+.wk-places-body {{ padding:0 16px 16px; display:flex; flex-direction:column; gap:10px; }}
+.wk-place-row {{ display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+  padding:8px 0; border-top:1px solid var(--border); }}
+.wk-place-name {{ font-size:var(--text-sm); font-weight:var(--fw-semibold); color:var(--text); }}
+.wk-place-meta {{ font-size:var(--text-xs); color:var(--text-muted); }}
+.wk-place-empty {{ font-size:var(--text-sm); color:var(--text-muted); padding:8px 0; }}
+.wk-place-add {{ display:flex; gap:8px; align-items:center; flex-wrap:wrap;
+  padding-top:10px; border-top:1px solid var(--border); }}
+.wk-place-add .wf-input {{ width:auto; min-width:180px; flex:1; }}
+.wk-place-note {{ font-size:var(--text-xs); color:var(--text-muted); line-height:1.6; }}
+.wk-place-note code {{ background:var(--surface-2); padding:1px 5px; border-radius:var(--radius-sm); }}
+@media (max-width:768px) {{
+  .wk-place-add {{ flex-direction:column; align-items:stretch; }}
+  .wk-place-add .wf-input, .wk-place-add .btn {{ width:100%; min-height:44px; }}
+}}
 
 /* Notepad card */
 .notepad-card {{ background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-lg); margin-bottom:16px; box-shadow:var(--shadow-sm); overflow:hidden; }}
@@ -633,9 +812,16 @@ def render(todos, habits, user, readonly=False):
 
 @media (max-width:600px) {{
   .notepad-item {{ flex-wrap:wrap; }}
-  .item-actions {{ width:100%; justify-content:flex-end; margin-top:6px; }}
+  /* Four controls (group, priority, place, project) cannot share one row at
+     390px — they collapse to slivers. Two per row, each full width. */
+  .item-actions {{ width:100%; justify-content:flex-end; margin-top:6px; flex-wrap:wrap; gap:6px; }}
+  .item-actions .group-sel-form {{ flex:1 1 46%; min-width:0; }}
+  .item-actions .group-select-inline, .item-actions .wk-inline-project {{ width:100%; }}
+  .wk-inline-project {{ min-height:44px; }}
   .group-sel-form {{ order:10; width:100%; }}
-  .group-select-inline {{ width:100%; min-height:40px; font-size:0.88rem; padding:8px 10px; }}
+  /* 44px, not 40 — the guideline's floor, and this class now carries the
+     priority and place pickers too. */
+  .group-select-inline {{ width:100%; min-height:44px; font-size:0.88rem; padding:8px 10px; }}
   .habit-item {{ flex-wrap:wrap; gap:8px; padding:10px 12px; }}
   .h-actions {{ width:100%; justify-content:flex-end; margin-top:4px; flex-wrap:wrap; gap:6px; }}
   .add-form {{ flex-direction:column; gap:8px; }}
@@ -656,11 +842,50 @@ def render(todos, habits, user, readonly=False):
     </div>
     {todo_header_btns}
   </div>
+  {work_filter_html}
+  {places_html}
   {todo_sections}
   {habit_section}
 </div>
 {tabs_html}
 <script>
+function wkFilter() {{
+  var pj = document.getElementById('wkProject').value;
+  var pr = document.getElementById('wkPrio').value;
+  var shown = 0;
+  document.querySelectorAll('.notepad-task').forEach(function(row) {{
+    var ok = (!pj || row.dataset.project === pj) && (!pr || row.dataset.prio === pr);
+    row.style.display = ok ? '' : 'none';
+    if (ok) shown++;
+  }});
+  // A group whose every task is filtered out would otherwise sit there empty.
+  document.querySelectorAll('.notepad-card').forEach(function(card) {{
+    var tasks = card.querySelectorAll('.notepad-task');
+    var vis = card.querySelectorAll('.notepad-task:not([style*="display: none"])');
+    card.style.display = (tasks.length && !vis.length && (pj || pr)) ? 'none' : '';
+  }});
+  var c = document.getElementById('wkCount');
+  if (c) c.textContent = (pj || pr) ? shown + ' shown' : '';
+}}
+function wkSavePlace() {{
+  var msg = document.getElementById('wkGeoMsg');
+  var label = document.getElementById('wkLabel');
+  if (!label.value.trim()) {{ msg.textContent = 'Name it first.'; label.focus(); return; }}
+  if (!navigator.geolocation) {{ msg.textContent = 'This browser has no geolocation.'; return; }}
+  msg.textContent = 'Locating…';
+  navigator.geolocation.getCurrentPosition(function(pos) {{
+    document.getElementById('wkLat').value = pos.coords.latitude;
+    document.getElementById('wkLon').value = pos.coords.longitude;
+    document.getElementById('wkPlaceForm').submit();
+  }}, function(err) {{
+    msg.textContent = 'Could not get location: ' + err.message;
+  }}, {{ enableHighAccuracy: true, timeout: 10000 }});
+}}
+function wkReset() {{
+  document.getElementById('wkProject').value = '';
+  document.getElementById('wkPrio').value = '';
+  wkFilter();
+}}
 function toggleAddGroupCard() {{
   var card = document.getElementById('addGroupCard');
   if (!card) return;

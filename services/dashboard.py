@@ -40,6 +40,7 @@ META = {
     "path": "/dashboard",
     "icon": "📊",
     "description": "Today at a glance",
+    "hidden": True,   # see todo.py
 }
 
 
@@ -122,7 +123,7 @@ def handle(method, path, body, ctx=None):
             _save_projects(projects)
         return ("redirect", "/dashboard")
 
-    return ("html", render(user))
+    return ("redirect", "/momentum?tab=today")   # see todo.py
 
 
 def render(user):

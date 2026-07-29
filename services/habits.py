@@ -8,6 +8,7 @@ META = {
     "path": "/habit",
     "icon": "🏃",
     "description": "Build lasting habits",
+    "hidden": True,   # see todo.py
 }
 
 FREQ_LABEL = {"daily": "Daily", "weekly": "Weekly"}
@@ -315,7 +316,7 @@ def handle(method, path, body, ctx=None):
         habit = find_habit(habits, int(parts[2]))
         return ("html", render_detail(habit, user)) if habit else ("redirect", "/habit")
 
-    return ("html", render_list(habits, user))
+    return ("redirect", "/momentum?tab=habits")   # see todo.py
 
 
 _CSS = """

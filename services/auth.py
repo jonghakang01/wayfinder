@@ -276,6 +276,12 @@ def is_blocked(username):
     return load_users().get(username, {}).get("blocked", False)
 
 
+# Momentum absorbed three services. Existing accounts were granted "todo" /
+# "habit" / "dashboard" individually, so the hub honours any of them — nobody
+# loses access to a page they already had.
+_ACCESS_ALIASES = {"momentum": ("momentum", "todo", "habit", "dashboard")}
+
+
 def has_service_access(username, service_path):
     service_name = service_path.lstrip("/").split("/")[0]
     # Admin sees everything; everyone else only reaches explicitly granted services.
@@ -284,7 +290,8 @@ def has_service_access(username, service_path):
     users = load_users()
     if users.get(username, {}).get("blocked"):
         return False
-    return service_name in users.get(username, {}).get("services", [])
+    granted = users.get(username, {}).get("services", [])
+    return any(n in granted for n in _ACCESS_ALIASES.get(service_name, (service_name,)))
 
 
 def block_user(username):
