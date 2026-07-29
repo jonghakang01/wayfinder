@@ -68,6 +68,10 @@ def _strip_token_defs(src):
 # are not CSS at all — the PWA icon, the manifest, the browser theme color.
 _HEX_OK = (
     r"var\(\s*--[a-z0-9-]+\s*,\s*#[0-9a-fA-F]{3,6}\s*\)",
+    # Declaring a custom property is where a hex has to live — a token cannot
+    # define itself with var(). True at :root and equally true in a scoped
+    # override (nav keeps the dark palette while the page turns light).
+    r"--[a-z0-9-]+\s*:\s*#[0-9a-fA-F]{3,6}",
     r'(?:fill|stroke|stop-color)="#[0-9a-fA-F]{3,6}"',
     r'name="theme-color"[^>]*content="#[0-9a-fA-F]{3,6}"',
     r'"(?:background_color|theme_color)"\s*:\s*"#[0-9a-fA-F]{3,6}"',

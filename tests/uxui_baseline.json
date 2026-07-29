@@ -30,7 +30,7 @@
   "services/design.py": {},
   "services/habits.py": {
     "mobile-bp": 1,
-    "token-color": 3
+    "token-color": 1
   },
   "services/llm_check.py": {
     "english-ui": 14,
