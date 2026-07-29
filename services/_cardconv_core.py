@@ -331,6 +331,10 @@ def _migrate_entry(e: dict) -> dict:
     # receipts sideways and a receipt laid down rotated has no EXIF to
     # fix it, so the reader has to be able to turn it and have that stick.
     e.setdefault("img_rotate", 0)
+    # v2.11: set when the user un-matches by hand. Without it the next pool
+    # rebuild re-links the very pair they just separated, so the undo lasts
+    # until the next sync and no longer. 🔗 Rematch clears it.
+    e.setdefault("match_locked", False)
     # v2.4: foreign-currency receipts (KRW/INR business trips) — OCR currency +
     # USD estimate for band-matching against the USD AMEX statement.
     e.setdefault("ocr_currency", None)
@@ -1155,6 +1159,26 @@ def _rematch_pool(username: str, only_receipt_ids=None) -> dict:
     return {"matched": matched}
 
 
+def _release_tx_links(username: str, receipt_id: str) -> int:
+    """Let go of every pool transaction still pointing at this receipt.
+
+    The inverse of the link half of _apply_receipt_match. `no_receipt` stays
+    False — the transaction is open and wants a receipt again, which is not the
+    same as having been filed as receipt-less.
+    """
+    pool = _load_tx_pool(username)
+    released = 0
+    for e in pool.get("entries", []):
+        if (e.get("receipt") or {}).get("id") != receipt_id:
+            continue
+        e["matched"] = False
+        e["receipt"] = None
+        released += 1
+    if released:
+        _save_tx_pool(username, pool)
+    return released
+
+
 def _heal_orphan_matches(username: str):
     """Lazy self-heal for one-sided match links: a pool rebuild can drop the
     transaction-side link while the receipt keeps its matched flags, so the
@@ -1166,10 +1190,24 @@ def _heal_orphan_matches(username: str):
     pool = _load_tx_pool(username)
     linked = {(e.get("receipt") or {}).get("id")
               for e in pool.get("entries", []) if e.get("matched")}
-    receipt_ids = {r.get("id") for r in receipts}
+    by_id = {r.get("id"): r for r in receipts}
+    receipt_ids = set(by_id)
     receipt_orphan = any(r.get("matched") and r.get("id") not in linked
                          for r in receipts)
     ghost_tx = any(rid and rid not in receipt_ids for rid in linked)
+    # Third shape, and the one an un-match used to leave behind: the receipt
+    # exists and says it is not matched, while the transaction still holds the
+    # link. Neither check above sees it — the id resolves, and the receipt
+    # isn't claiming a link it lacks — so it sat there until some unrelated
+    # pool rebuild happened to clear it.
+    stale_link = any(rid and (r := by_id.get(rid)) is not None and not r.get("matched")
+                     for rid in linked)
+    if stale_link:
+        # _rematch_pool preserves an existing pool link, so it cannot repair
+        # this one — the release has to be explicit.
+        for rid in {rid for rid in linked
+                    if rid and (r := by_id.get(rid)) is not None and not r.get("matched")}:
+            _release_tx_links(username, rid)
     if receipt_orphan or ghost_tx:
         _rematch_pool(username)
 
@@ -1184,6 +1222,10 @@ def _build_receipt_index(receipts: list, username: str):
         # statement line by date+amount coincidence silently flipped it to AMEX
         # (2026-07-21 mirroring incident). Rule: cash can't match; matched ⇒ AMEX.
         if (r.get("card_brand") or "") == "other":
+            continue
+        # Un-matched by hand: the automatic matcher would pair it straight back
+        # up with the line it was just separated from.
+        if r.get("match_locked"):
             continue
         rdate = r.get("ocr_date")
         if rdate == "YYYY-MM-DD":
@@ -1342,6 +1384,7 @@ def _sync_cash_pool(username: str) -> None:
 
 def _apply_receipt_match(entry: dict, receipt: dict, receipts: list):
     """Flag the ledger receipt + attach match info to the pool entry."""
+    receipt['match_locked'] = False   # this pair was chosen, not guessed
     if not receipt.get('matched'):
         receipt['matched'] = True
         receipt['match_status'] = 'matched'
@@ -2912,10 +2955,29 @@ def _handle_status_change(username: str, entry_id: str, body: dict):
                 # Matched ⇒ AMEX unconditionally: the statement being matched
                 # against IS the AMEX statement (cash can never match).
                 e["card_brand"] = "amex"
-            else:
-                e["usd_settled"] = None  # settled figure came from the link
+                _save_ledger(username, ledger)
+                return ("json", {"ok": True})
+            # Un-matching has to undo everything the match wrote, on both
+            # sides. Clearing the receipt's flags alone leaves the transaction
+            # still holding the link, so the Ledger reads unmatched while
+            # Review still shows the pair — bound to something the other half
+            # has already let go of.
+            e["usd_settled"] = None       # the settled figure came from the link
+            e["match_locked"] = True      # 🔗 Rematch is how you re-arm it
+            e["matched_at"] = None
+            e["matched_transaction"] = None
+            if "ocr_date_original" in e:
+                # The match backfilled a missing date from the statement line.
+                # Presence of the key is the marker, not its value — when OCR
+                # read no date at all the stored original is None, which is
+                # exactly the case the restore exists for.
+                e["ocr_date"] = e.pop("ocr_date_original")
+            # card_brand stays as-is: the match forced it to 'amex' without
+            # recording what it had been, so there is nothing to restore. The
+            # Card column still edits it.
             _save_ledger(username, ledger)
-            return ("json", {"ok": True})
+            released = _release_tx_links(username, entry_id)
+            return ("json", {"ok": True, "released": released})
     return ("json", {"error": "not found"}, 404)
 
 
@@ -2927,6 +2989,8 @@ def _handle_rematch(username: str, entry_id: str):
     if not entry:
         return ("json", {"error": "not found"}, 404)
 
+    # Asking for a rematch is the explicit undo of an undo.
+    entry["match_locked"] = False
     rdate = entry.get("ocr_date")
     if rdate == "YYYY-MM-DD":
         rdate = None
