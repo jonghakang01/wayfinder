@@ -218,7 +218,7 @@ a, button, select, label, input[type=checkbox], input[type=radio] { touch-action
    undersized checkboxes without touching per-component CSS. */
 @media (max-width: 768px) {
   input:not([type=checkbox]):not([type=radio]):not([type=file]):not([type=range]),
-  select, textarea { font-size: 16px !important; min-height: 42px; }
+  select, textarea { font-size: 16px !important; min-height: 44px; }
   input[type=checkbox], input[type=radio] { min-width: 20px; min-height: 20px; }
   .nav-brand { font-size: 0.95rem; }
 }
