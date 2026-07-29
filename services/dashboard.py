@@ -340,7 +340,7 @@ def render(user):
 <html lang="ko"><head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>📊 Overview · Wayfinder</title>
+<title>Today · Momentum</title>
 <link rel="stylesheet" href="/static/style.css">
 <style>
 .db-hero{{background:var(--surface);background-image:radial-gradient(at 0% 0%,rgba(56,189,248,.18) 0,transparent 55%),radial-gradient(at 100% 100%,rgba(129,140,248,.18) 0,transparent 55%);border-radius:var(--radius-xl);padding:32px 36px;color:var(--text);margin-bottom:28px;border:1px solid var(--border)}}
@@ -385,7 +385,7 @@ def render(user):
 </style>
 </head><body>
 <nav>
-  <span class="nav-brand">📊 Overview</span>
+  <span class="nav-brand">⚡ Momentum</span>
   <span class="nav-user">👤 {user} &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
 </nav>
 <div class="container">

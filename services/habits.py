@@ -872,13 +872,13 @@ def render_list(habits, user, readonly=False):
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>🏃 Habits</title>
+<title>Habits · Momentum</title>
 <link rel="stylesheet" href="/static/style.css">
 <style>{_CSS}</style>
 </head>
 <body>
 <nav>
-  <span class="nav-brand">🏃 Habits</span>
+  <span class="nav-brand">⚡ Momentum</span>
   <span class="nav-user">👤 {user} &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
 </nav>
 <div class="container">
@@ -1234,7 +1234,7 @@ def render_detail(habit, user):
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{habit_icon} {habit_name}</title>
+<title>{habit_name} · Momentum</title>
 <link rel="stylesheet" href="/static/style.css">
 <style>{_CSS}</style>
 </head>

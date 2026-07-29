@@ -671,7 +671,7 @@ def render(todos, habits, user, readonly=False):
     return f'''<!DOCTYPE html>
 <html lang="ko"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>✅ Tasks</title>
+<title>Tasks · Momentum</title>
 <link rel="stylesheet" href="/static/style.css">
 <style>
 /* Badge */
@@ -830,7 +830,7 @@ def render(todos, habits, user, readonly=False):
 </style>
 </head><body>
 <nav>
-  <span class="nav-brand">✅ Tasks</span>
+  <span class="nav-brand">⚡ Momentum</span>
   <span class="nav-user">👤 {user} &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
 </nav>
 <div class="container">
