@@ -7,3 +7,5 @@ __pycache__/
 *.log
 design_*.md
 services/cardconv_design.md
+scripts/design-sync/dist/
+scripts/design-sync/shots/
