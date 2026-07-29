@@ -213,6 +213,16 @@ details.bucket-section[open] .service-grid { margin-top:14px; }
 a, button, select, label, input[type=checkbox], input[type=radio] { touch-action: manipulation; }
 .btn:active { transform: scale(0.97); }
 
+/* Floating "back to Wayfinder" pill, injected into every app page (server.py).
+   Tokens, not fixed colors — a dark pill on a light page was the whole bug. */
+.wf-back { position:fixed; left:16px; bottom:16px; z-index:9999; display:inline-flex;
+  align-items:center; gap:6px; padding:8px 14px; background:var(--surface);
+  color:var(--text-muted); border:1px solid var(--border-bright);
+  border-radius:var(--radius-full); font-size:var(--text-xs); font-weight:var(--fw-semibold);
+  text-decoration:none; backdrop-filter:blur(6px); box-shadow:var(--shadow-md); }
+.wf-back:hover { color:var(--accent); border-color:var(--accent); }
+@media (max-width: 768px) { .wf-back { min-height:44px; padding:8px 16px; } }
+
 /* Mobile guardrails — docs/mobile_ux_guideline.md. 768px = standard mobile breakpoint.
    16px input floor kills iOS focus auto-zoom; min-width beats any width:Npx on
    undersized checkboxes without touching per-component CSS. */
@@ -482,12 +492,7 @@ PWA_INJECT = (
 # Small floating "back to home" link injected into every app page (not the home/login,
 # which carry the <!--wf-root--> sentinel).
 WAYFINDER_BACK = (
-    '<a href="/" class="wf-back" title="Back to Wayfinder" '
-    'style="position:fixed;left:16px;bottom:16px;z-index:9999;display:inline-flex;'
-    'align-items:center;gap:6px;padding:8px 14px;background:rgba(17,24,39,.92);'
-    'color:#cbd5e1;border:1px solid #334155;border-radius:99px;font-size:.78rem;'
-    'font-weight:600;text-decoration:none;backdrop-filter:blur(6px);'
-    'box-shadow:0 4px 14px rgba(0,0,0,.35)">🧭 Wayfinder</a>'
+    '<a href="/" class="wf-back" title="Back to Wayfinder">🧭 Wayfinder</a>'
 )
 
 THEME_TOGGLE = (

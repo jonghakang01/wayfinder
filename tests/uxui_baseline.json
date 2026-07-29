@@ -1,6 +1,6 @@
 {
   "server.py": {
-    "token-color": 9
+    "token-color": 7
   },
   "services/_cardconv_core.py": {},
   "services/_cardconv_render.py": {
