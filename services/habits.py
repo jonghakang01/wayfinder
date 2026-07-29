@@ -497,7 +497,7 @@ h1{font-size:20px;font-weight:700;color:var(--text)}
   h2{font-size:16px}
   .habit-row{flex-wrap:wrap;gap:8px;padding:12px 0}
   .habit-actions{width:100%;justify-content:flex-end;margin-top:4px}
-  .btn-sm{min-height:40px;padding:8px 14px;font-size:13px}
+  .btn-sm{min-height:44px;padding:8px 14px;font-size:13px}
   .btn-detail{min-height:40px;padding:8px 14px;font-size:13px}
   .add-form{flex-direction:column}
   .add-form label{width:100%}

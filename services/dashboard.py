@@ -241,8 +241,8 @@ def render(user):
         done = t.get("done")
         cls = "wf-today-item wf-done" if done else "wf-today-item"
         action = "/todo/undone" if done else "/todo/done"
-        check = ('<button type="submit" class="wf-check wf-check--on" aria-label="되돌리기">✓</button>'
-                 if done else '<button type="submit" class="wf-check" aria-label="완료"></button>')
+        check = ('<button type="submit" class="wf-check wf-check--on" aria-label="Undo">✓</button>'
+                 if done else '<button type="submit" class="wf-check" aria-label="Mark done"></button>')
         return (f'<form method="POST" action="{action}" class="{cls}">'
                 f'<input type="hidden" name="id" value="{t["id"]}">'
                 f'<input type="hidden" name="next" value="/dashboard">'
@@ -251,8 +251,8 @@ def render(user):
     def _habit_item(r):
         done = r["checked"]
         cls = "wf-today-item wf-done" if done else "wf-today-item"
-        check = ('<button type="submit" class="wf-check wf-check--on" aria-label="체크 해제">✓</button>'
-                 if done else '<button type="submit" class="wf-check" aria-label="습관 체크"></button>')
+        check = ('<button type="submit" class="wf-check wf-check--on" aria-label="Uncheck">✓</button>'
+                 if done else '<button type="submit" class="wf-check" aria-label="Check in"></button>')
         chip = f'<span class="wf-streak-chip">🔥 {r["streak"]}d</span>' if r["streak"] >= 1 else ""
         return (f'<form method="POST" action="/habit/{r["id"]}/checkin" class="{cls}">'
                 f'<input type="hidden" name="toggle" value="1">'
@@ -273,21 +273,21 @@ def render(user):
         body_html = '''<div class="wf-home-empty">
   <div class="notepad-card wf-empty-card">
     <div class="wf-empty-icon">✅</div>
-    <div class="wf-empty-title">첫 할일 추가</div>
+    <div class="wf-empty-title">Add your first task</div>
     <form method="POST" action="/todo/add" class="wf-empty-form">
       <input type="hidden" name="next" value="/dashboard">
-      <input type="text" name="title" placeholder="예: 이메일 정리하기" required class="wf-empty-input">
-      <button type="submit" class="btn btn-primary">추가</button>
+      <input type="text" name="title" placeholder="e.g. Clear the inbox" required class="wf-empty-input">
+      <button type="submit" class="btn btn-primary">Add</button>
     </form>
   </div>
   <div class="notepad-card wf-empty-card">
     <div class="wf-empty-icon">🔄</div>
-    <div class="wf-empty-title">첫 습관 추가</div>
+    <div class="wf-empty-title">Add your first habit</div>
     <form method="POST" action="/habit/add" class="wf-empty-form">
-      <input type="text" name="name" placeholder="예: 물 2L 마시기" required class="wf-empty-input">
+      <input type="text" name="name" placeholder="e.g. Drink 2L of water" required class="wf-empty-input">
       <input type="hidden" name="freq" value="daily">
       <input type="hidden" name="target" value="1">
-      <button type="submit" class="btn btn-primary">추가</button>
+      <button type="submit" class="btn btn-primary">Add</button>
     </form>
   </div>
 </div>'''
@@ -297,11 +297,11 @@ def render(user):
         items += "".join(_todo_item(t) for t in done_todos_today)
         items += "".join(_habit_item(r) for r in habit_rows if r["checked"])
         if not items:
-            items = '<div class="wf-next-cta">오늘 할 일이 비었어요 — 위 탭에서 할일이나 습관을 추가해볼까요?</div>'
+            items = '<div class="wf-next-cta">Nothing due today — add a task or a habit from the tabs above.</div>'
         body_html = f'''<div class="notepad-card" style="padding:18px 20px;margin-bottom:24px">
   <div class="wf-today-head">
-    <span class="wf-today-title">☀️ 오늘 할 것</span>
-    <span class="badge">{done_today + done_habits_today} 완료</span>
+    <span class="wf-today-title">☀️ Today</span>
+    <span class="badge">{done_today + done_habits_today} done</span>
   </div>
   <div class="wf-today-list">{items}</div>
 </div>'''
@@ -310,17 +310,17 @@ def render(user):
         focus = ("".join(_todo_item(t) for t in active_todos[:3])
                  + "".join(_habit_item(r) for r in unchecked_habits[:3]))
         if not focus:
-            focus = '<div class="wf-next-cta">오늘 할 일을 다 했어요! 🎉</div>'
+            focus = '<div class="wf-next-cta">Everything for today is done. 🎉</div>'
         body_html = f'''<div class="wf-stat-grid">
-  <div class="wf-stat"><div class="wf-stat-value">{total_active}</div><div class="wf-stat-label">남은 할일</div></div>
-  <div class="wf-stat"><div class="wf-stat-value">{done_today}</div><div class="wf-stat-label">오늘 완료</div></div>
-  <div class="wf-stat"><div class="wf-stat-value">{done_habits_today}<span class="wf-stat-sub">/{total_habits}</span></div><div class="wf-stat-label">오늘 습관</div></div>
-  <div class="wf-stat"><div class="wf-stat-value">🔥{max_streak}<span class="wf-stat-sub">d</span></div><div class="wf-stat-label">최장 연속</div></div>
+  <div class="wf-stat"><div class="wf-stat-value">{total_active}</div><div class="wf-stat-label">Tasks Left</div></div>
+  <div class="wf-stat"><div class="wf-stat-value">{done_today}</div><div class="wf-stat-label">Done Today</div></div>
+  <div class="wf-stat"><div class="wf-stat-value">{done_habits_today}<span class="wf-stat-sub">/{total_habits}</span></div><div class="wf-stat-label">Habits Today</div></div>
+  <div class="wf-stat"><div class="wf-stat-value">🔥{max_streak}<span class="wf-stat-sub">d</span></div><div class="wf-stat-label">Best Streak</div></div>
 </div>
 <div class="notepad-card" style="padding:18px 20px;margin-bottom:20px">
   <div class="wf-today-head">
-    <span class="wf-today-title">🎯 오늘 포커스</span>
-    <a href="/todo" class="btn btn-ghost btn-sm">전체 보기 →</a>
+    <span class="wf-today-title">🎯 Today's Focus</span>
+    <a href="/momentum?tab=tasks" class="btn btn-ghost btn-sm">View all →</a>
   </div>
   <div class="wf-today-list">{focus}</div>
 </div>

@@ -23,7 +23,6 @@
     "english-ui": 1
   },
   "services/dashboard.py": {
-    "english-ui": 2,
     "mobile-bp": 1,
     "token-color": 4
   },
