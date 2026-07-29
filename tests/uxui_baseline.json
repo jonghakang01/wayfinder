@@ -20,8 +20,7 @@
     "token-color": 121
   },
   "services/auth.py": {
-    "english-ui": 1,
-    "global-css": 1
+    "english-ui": 1
   },
   "services/dashboard.py": {
     "english-ui": 2,

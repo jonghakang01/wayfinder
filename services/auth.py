@@ -450,14 +450,14 @@ def render_login(error="", register_error="", app="", change_error="", change_ok
         live = live_services()
         if live:
             checks = "".join(
-                f'<label class="svc-check"><input type="checkbox" name="svc" '
+                f'<label class="wf-checkbox"><input type="checkbox" name="svc" '
                 f'value="{s}" checked> {svc_labels.get(s, s)}</label>'
                 for s in live
             )
-            svc_html = ('<label style="margin-top:6px">가입할 서비스</label>'
-                        f'<div class="svc-checks">{checks}</div>')
+            svc_html = ('<div class="wf-field"><label class="wf-label">가입할 서비스</label>'
+                        f'<div class="svc-checks">{checks}</div></div>')
         else:
-            svc_html = ('<div class="app-scope" style="color:#6e7681">'
+            svc_html = ('<div class="app-scope">'
                         '서비스별 가입 링크로 들어오면 해당 서비스 권한이 부여됩니다.</div>')
         signup_title = "새 계정 만들기"
         app_hidden = ""
@@ -466,17 +466,17 @@ def render_login(error="", register_error="", app="", change_error="", change_ok
     office_default = "— Select office —" if t["lang"] == "en" else "— 소속 선택 —"
     office_opts = f'<option value="">{office_default}</option>' + "".join(
         f'<option value="{o}">{o}</option>' for o in OFFICES)
-    office_html = (f'<div class="field"><label>{office_label}</label>'
-                   f'<select name="company" class="office-sel">{office_opts}</select></div>')
+    office_html = (f'<div class="wf-field"><label class="wf-label">{office_label}</label>'
+                   f'<select name="company" class="wf-input office-sel">{office_opts}</select></div>')
     if t["lang"] == "en":
         g_label, g_ph = "Google account (for Drive sync, optional)", "you@gmail.com"
     else:
         g_label, g_ph = "Google 계정 (Drive 연동용, 선택)", "you@gmail.com"
-    office_html += (f'<div class="field"><label>{g_label}</label>'
-                    f'<input type="email" name="google_account" placeholder="{g_ph}"></div>')
+    office_html += (f'<div class="wf-field"><label class="wf-label">{g_label}</label>'
+                    f'<input class="wf-input" type="email" name="google_account" placeholder="{g_ph}"></div>')
 
-    err = f'<div class="error">{error}</div>' if error else ""
-    reg_err = f'<div class="error">{register_error}</div>' if register_error else ""
+    err = f'<div class="auth-msg is-error">{error}</div>' if error else ""
+    reg_err = f'<div class="auth-msg is-error">{register_error}</div>' if register_error else ""
 
     if t["lang"] == "en":
         c_title, c_cur, c_new, c_btn = ("Forgot or want to change your password?",
@@ -488,83 +488,87 @@ def render_login(error="", register_error="", app="", change_error="", change_ok
                                         "현재(또는 임시) 비밀번호",
                                         "새 비밀번호 (6자 이상)", "비밀번호 변경")
         c_hint = "현재 비밀번호도 잊으셨다면 관리자에게 임시 비밀번호 발급을 요청하세요."
-    c_msg = (f'<div class="error">{change_error}</div>' if change_error else
-             f'<div class="chg-ok">{change_ok}</div>' if change_ok else "")
-    change_html = f'''<details class="box chg-box"{" open" if (change_error or change_ok) else ""}>
+    c_msg = (f'<div class="auth-msg is-error">{change_error}</div>' if change_error else
+             f'<div class="auth-msg is-ok">{change_ok}</div>' if change_ok else "")
+    change_html = f'''<details class="auth-card chg-box"{" open" if (change_error or change_ok) else ""}>
     <summary>{c_title}</summary>
     {c_msg}
-    <form method="POST" action="/login" style="margin-top:14px">
+    <form class="auth-form" method="POST" action="/login" style="margin-top:14px">
       <input type="hidden" name="action" value="change_pw">
       {app_hidden}
-      <div class="field"><label>{t["email"]}</label><input type="email" name="email" autocomplete="email" placeholder="you@example.com"></div>
-      <div class="field"><label>{c_cur}</label><input type="password" name="password" autocomplete="current-password" placeholder="••••••••"></div>
-      <div class="field"><label>{c_new}</label><input type="password" name="new_password" autocomplete="new-password" placeholder="••••••••"></div>
-      <button class="btn-register" type="submit">{c_btn}</button>
+      <div class="wf-field"><label class="wf-label">{t["email"]}</label><input class="wf-input" type="email" name="email" autocomplete="email" placeholder="you@example.com"></div>
+      <div class="wf-field"><label class="wf-label">{c_cur}</label><input class="wf-input" type="password" name="password" autocomplete="current-password" placeholder="••••••••"></div>
+      <div class="wf-field"><label class="wf-label">{c_new}</label><input class="wf-input" type="password" name="new_password" autocomplete="new-password" placeholder="••••••••"></div>
+      <button class="btn btn-secondary btn-lg" type="submit">{c_btn}</button>
       <div class="chg-hint">{c_hint}</div>
     </form>
   </details>'''
 
+    from server import CSS_VER
     return f'''<!DOCTYPE html>
 <html lang="{t['lang']}"><head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{t['title']}</title>
+<link rel="stylesheet" href="/static/style.css?v={CSS_VER}">
 <style>
-*,*::before,*::after{{box-sizing:border-box;margin:0;padding:0}}
-body{{background:#0d1117;color:#e6edf3;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:40px 16px}}
-.wrap{{width:100%;max-width:380px;display:flex;flex-direction:column;gap:16px}}
-.box{{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:32px}}
-h1{{font-size:22px;font-weight:700;margin-bottom:24px;text-align:center}}
-h2{{font-size:15px;font-weight:600;color:#8b949e;margin-bottom:20px}}
-.field{{margin-bottom:14px}}
-label{{display:block;font-size:13px;color:#8b949e;margin-bottom:6px}}
-input[type=text],input[type=password],input[type=email]{{width:100%;padding:10px 14px;background:#0d1117;border:1px solid #30363d;border-radius:8px;color:#e6edf3;font-size:14px;outline:none;transition:border-color .15s}}
-input[type=text]:focus,input[type=password]:focus,input[type=email]:focus{{border-color:#58a6ff}}
-select.office-sel{{width:100%;padding:10px 14px;background:#0d1117;border:1px solid #30363d;border-radius:8px;color:#e6edf3;font-size:14px;outline:none}}
-select.office-sel:focus{{border-color:#58a6ff}}
-.btn-login{{width:100%;padding:11px;background:linear-gradient(135deg,#1f6feb,#388bfd);color:#fff;border:none;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;margin-top:4px;transition:filter .15s}}
-.btn-register{{width:100%;padding:11px;background:#21262d;color:#e6edf3;border:1px solid #30363d;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;margin-top:4px;transition:filter .15s}}
-.btn-login:hover,.btn-register:hover{{filter:brightness(1.15)}}
-.error{{background:rgba(248,81,73,.12);border:1px solid rgba(248,81,73,.4);color:#f85149;border-radius:6px;padding:10px 14px;font-size:13px;margin-bottom:14px}}
-.divider{{border:none;border-top:1px solid #21262d;margin:0}}
-.svc-checks{{display:flex;gap:12px;flex-wrap:wrap;margin-top:6px}}
-.svc-check{{display:flex;align-items:center;gap:6px;font-size:13px;color:#c9d1d9;cursor:pointer}}
-.svc-check input{{width:auto}}
-.app-scope{{font-size:13px;color:#c9d1d9;background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:10px 14px;margin-bottom:14px}}
-.app-scope b{{color:#58a6ff}}
+/* Login shell only — everything else (tokens, .wf-field/.wf-input, .btn) is
+   inherited from the global sheet so the first screen a user sees is inside
+   the design system and follows the light/dark toggle. */
+.auth-shell{{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:40px 16px}}
+.auth-wrap{{width:100%;max-width:380px;display:flex;flex-direction:column;gap:16px}}
+.auth-card{{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:32px;box-shadow:var(--shadow-md)}}
+.auth-title{{font-size:1.375rem;font-weight:var(--fw-extrabold);color:var(--text);margin-bottom:24px;text-align:center;letter-spacing:-.02em}}
+.auth-sub{{font-size:var(--text-md);font-weight:var(--fw-semibold);color:var(--text-muted);margin-bottom:20px}}
+.auth-form{{display:flex;flex-direction:column;gap:14px}}
+.auth-form .btn{{width:100%;margin-top:4px}}
+.auth-msg{{border-radius:var(--radius-sm);padding:10px 14px;font-size:var(--text-sm);margin-bottom:14px}}
+.auth-msg.is-error{{background:rgba(248,113,113,.12);border:1px solid rgba(248,113,113,.4);color:var(--danger)}}
+.auth-msg.is-ok{{background:rgba(52,211,153,.12);border:1px solid rgba(52,211,153,.4);color:var(--success);margin:12px 0 0}}
+.auth-divider{{border:none;border-top:1px solid var(--border);margin:0}}
+.svc-checks{{display:flex;gap:12px;flex-wrap:wrap}}
+.app-scope{{font-size:var(--text-sm);color:var(--text);background:var(--bg-deep);border:1px solid var(--border);border-radius:var(--radius-md);padding:10px 14px}}
+.app-scope b{{color:var(--accent)}}
 .chg-box{{padding:18px 24px}}
-.chg-box summary{{font-size:13px;color:#8b949e;cursor:pointer;font-weight:600}}
-.chg-box summary:hover{{color:#e6edf3}}
-.chg-hint{{font-size:12px;color:#6e7681;margin-top:10px}}
-.chg-ok{{background:rgba(63,185,80,.12);border:1px solid rgba(63,185,80,.4);color:#3fb950;border-radius:6px;padding:10px 14px;font-size:13px;margin-top:12px}}
+.chg-box summary{{font-size:var(--text-sm);color:var(--text-muted);cursor:pointer;font-weight:var(--fw-semibold);list-style:none}}
+.chg-box summary::-webkit-details-marker{{display:none}}
+.chg-box summary:hover{{color:var(--text)}}
+.chg-hint{{font-size:var(--text-xs);color:var(--text-muted);margin-top:10px}}
+@media (max-width:768px){{
+  .auth-shell{{padding:24px 12px}}
+  .auth-card{{padding:24px 20px}}
+  .chg-box{{padding:16px 18px}}
+}}
 </style>
 </head><body>
 <!--wf-root-->
-<div class="wrap">
-  <div class="box">
-    <h1>🧭 Wayfinder</h1>
+<div class="auth-shell">
+<div class="auth-wrap">
+  <div class="auth-card">
+    <h1 class="auth-title">🧭 Wayfinder</h1>
     {err}
-    <form method="POST" action="/login">
+    <form class="auth-form" method="POST" action="/login">
       <input type="hidden" name="action" value="login">
       {app_hidden}
-      <div class="field"><label>{t["email"]}</label><input type="email" name="email" autofocus autocomplete="email" placeholder="you@example.com"></div>
-      <div class="field"><label>{t["pw"]}</label><input type="password" name="password" autocomplete="current-password" placeholder="••••••••"></div>
-      <button class="btn-login" type="submit">{t["login"]}</button>
+      <div class="wf-field"><label class="wf-label">{t["email"]}</label><input class="wf-input" type="email" name="email" autofocus autocomplete="email" placeholder="you@example.com"></div>
+      <div class="wf-field"><label class="wf-label">{t["pw"]}</label><input class="wf-input" type="password" name="password" autocomplete="current-password" placeholder="••••••••"></div>
+      <button class="btn btn-primary btn-lg" type="submit">{t["login"]}</button>
     </form>
   </div>
-  <hr class="divider">
-  <div class="box">
-    <h2>{signup_title}</h2>
+  <hr class="auth-divider">
+  <div class="auth-card">
+    <h2 class="auth-sub">{signup_title}</h2>
     {reg_err}
-    <form method="POST" action="/login">
+    <form class="auth-form" method="POST" action="/login">
       <input type="hidden" name="action" value="register">
-      <div class="field"><label>{t["email"]}</label><input type="email" name="email" autocomplete="email" placeholder="you@example.com"></div>
-      <div class="field"><label>{t["pw"]}</label><input type="password" name="password" autocomplete="new-password" placeholder="••••••••"></div>
+      <div class="wf-field"><label class="wf-label">{t["email"]}</label><input class="wf-input" type="email" name="email" autocomplete="email" placeholder="you@example.com"></div>
+      <div class="wf-field"><label class="wf-label">{t["pw"]}</label><input class="wf-input" type="password" name="password" autocomplete="new-password" placeholder="••••••••"></div>
       {office_html}
       {svc_html}
-      <button class="btn-register" type="submit">{t["signup"]}</button>
+      <button class="btn btn-secondary btn-lg" type="submit">{t["signup"]}</button>
     </form>
   </div>
   {change_html}
+</div>
 </div>
 </body></html>'''
