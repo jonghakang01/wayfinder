@@ -7,8 +7,41 @@ With nothing behind Gemini, swallowing the exception leaves a failed receipt
 with nothing to explain it, so the reason goes to stderr.
 """
 import importlib
+import sys
+import types as _types
+
+import pytest
 
 core = importlib.import_module("services._cardconv_core")
+
+
+@pytest.fixture
+def fake_genai(monkeypatch):
+    """Stand in for google-genai.
+
+    These tests check our error handling, not Google's SDK, so CI should not
+    have to install it — and a test that imports it directly fails on the
+    runner while passing locally, which is how it reaches main.
+    """
+    def install(client_cls):
+        google = _types.ModuleType("google")
+        genai = _types.ModuleType("google.genai")
+        gtypes = _types.ModuleType("google.genai.types")
+
+        class _Part:
+            @staticmethod
+            def from_bytes(**kw):
+                return kw
+
+        gtypes.Part = _Part
+        genai.Client = client_cls
+        genai.types = gtypes
+        google.genai = genai
+        monkeypatch.setitem(sys.modules, "google", google)
+        monkeypatch.setitem(sys.modules, "google.genai", genai)
+        monkeypatch.setitem(sys.modules, "google.genai.types", gtypes)
+
+    return install
 
 
 def test_no_claude_pass_remains():
@@ -28,21 +61,20 @@ def test_auto_passes_an_amountless_result_through(monkeypatch):
     assert core._ocr_receipt_auto(b"x", "image/jpeg") == [{"amount": None, "_model": "Gemini"}]
 
 
-def test_a_failed_call_is_empty_and_explains_itself(monkeypatch, capsys):
+def test_a_failed_call_is_empty_and_explains_itself(monkeypatch, capsys, fake_genai):
     monkeypatch.setenv("GEMINI_API_KEY", "k")
 
     class _Boom:
         def __init__(self, **kw):
             raise RuntimeError("quota exhausted")
 
-    import google.genai as genai
-    monkeypatch.setattr(genai, "Client", _Boom)
+    fake_genai(_Boom)
     assert core._ocr_receipt_gemini(b"x", "image/jpeg") == []
     err = capsys.readouterr().err
     assert "gemini failed" in err and "quota exhausted" in err
 
 
-def test_an_unparseable_reply_is_reported_too(monkeypatch, capsys):
+def test_an_unparseable_reply_is_reported_too(monkeypatch, capsys, fake_genai):
     monkeypatch.setenv("GEMINI_API_KEY", "k")
 
     class _Resp:
@@ -56,8 +88,7 @@ def test_an_unparseable_reply_is_reported_too(monkeypatch, capsys):
         def __init__(self, **kw):
             self.models = _Models()
 
-    import google.genai as genai
-    monkeypatch.setattr(genai, "Client", _Client)
+    fake_genai(_Client)
     assert core._ocr_receipt_gemini(b"x", "image/jpeg") == []
     assert "no parseable receipt" in capsys.readouterr().err
 
