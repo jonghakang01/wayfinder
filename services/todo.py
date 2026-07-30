@@ -356,12 +356,59 @@ def render(todos, habits, user, readonly=False):
     for k in buckets:
         buckets[k].sort(key=_order)
 
+    # Today's habits ride in the list as things to do today — that is what the
+    # Today tab was for, and a habit is a task you do again tomorrow.
+    def _habit_row(h):
+        checkins = h.get("checkins", {})
+        if isinstance(checkins, list):
+            checkins = {d: 1 for d in checkins}
+        target = h.get("target", 1) or 1
+        got = checkins.get(today_str, 0)
+        if isinstance(got, list):
+            got = sum(e.get("count", 1) if isinstance(e, dict) else 1 for e in got)
+        done = got >= target
+        streak = 0
+        d = today
+        while checkins.get(d.isoformat()):
+            streak += 1
+            d -= timedelta(days=1)
+        chips = '<span class="tk-chip tk-chip--habit">🔁 Habit</span>'
+        if target > 1:
+            chips += f'<span class="tk-chip">{got}/{target} {h.get("unit","")}</span>'
+        if streak:
+            chips += f'<span class="tk-chip">🔥 {streak}d</span>'
+        check = "" if readonly else (
+            f'<form method="POST" action="/habit/{h["id"]}/checkin" class="tk-check-form" '
+            f'onclick="event.stopPropagation()">'
+            f'<input type="hidden" name="next" value="/momentum?tab=tasks">'
+            f'<input type="hidden" name="toggle" value="1">'
+            f'<button class="tk-check{" tk-check--on" if done else ""}" type="submit" '
+            f'aria-label="{"Undo check-in" if done else "Check in"}">{"✓" if done else ""}</button>'
+            f'</form>')
+        return (f'<a class="tk-row tk-row--habit{" tk-row--done" if done else ""}" '
+                f'href="/habit/{h["id"]}">'
+                f'{check}<div class="tk-main"><div class="tk-title">{h.get("name","")}</div>'
+                f'<div class="tk-meta">{chips}</div></div>'
+                f'<span class="tk-open">›</span></a>')
+
+    def _habit_done_today(h):
+        checkins = h.get("checkins", {})
+        if isinstance(checkins, list):
+            checkins = {d: 1 for d in checkins}
+        got = checkins.get(today_str, 0)
+        if isinstance(got, list):
+            got = sum(e.get("count", 1) if isinstance(e, dict) else 1 for e in got)
+        return got >= (h.get("target", 1) or 1)
+
+    habits_today = [h for h in (habits or []) if h.get("freq", "daily") == "daily"]
+    habit_open = [h for h in habits_today if not _habit_done_today(h)]
+    habit_done = [h for h in habits_today if _habit_done_today(h)]
+
     n_active = len(active)
     all_projects = projects_of(todos)
     # Controls appear when there is something to control. An empty list showing
     # filters was the single worst thing about the old screen.
     show_filter = n_active >= 8 and len(all_projects) > 1
-    show_places = bool(places)
 
     def _row(t):
         tid = t["id"]
@@ -427,18 +474,25 @@ def render(todos, habits, user, readonly=False):
                 f'<span class="tk-section-n">{len(items)}</span></div>'
                 f'{"".join(_row(t) for t in items)}</div>')
 
-    list_html = (_section("now", "Overdue &amp; today", buckets["now"])
+    now_html = ("".join(_habit_row(h) for h in habit_open)
+                + "".join(_row(t) for t in buckets["now"]))
+    now_n = len(habit_open) + len(buckets["now"])
+    list_html = ((f'<div class="tk-section" data-bucket="now">'
+                  f'<div class="tk-section-head"><span>Today</span>'
+                  f'<span class="tk-section-n">{now_n}</span></div>{now_html}</div>'
+                  if now_n else "")
                  + _section("week", "This week", buckets["week"])
                  + _section("later", "Later", buckets["later"]))
 
-    if done_list:
-        done_rows = "".join(_row(t) for t in sorted(
-            done_list, key=lambda x: x.get("done_at") or "", reverse=True)[:50])
+    if done_list or habit_done:
+        done_rows = ("".join(_habit_row(h) for h in habit_done)
+                     + "".join(_row(t) for t in sorted(
+                         done_list, key=lambda x: x.get("done_at") or "", reverse=True)[:50]))
         list_html += (f'<details class="tk-done"><summary>Completed '
-                      f'<span class="tk-section-n">{len(done_list)}</span></summary>'
-                      f'{done_rows}</details>')
+                      f'<span class="tk-section-n">{len(done_list) + len(habit_done)}</span>'
+                      f'</summary>{done_rows}</details>')
 
-    if not active:
+    if not active and not habit_open:
         list_html = ('<div class="tk-empty">Nothing on the list.<br>'
                      '<span>Type above to add your first task.</span></div>') + list_html
 
@@ -480,7 +534,7 @@ def render(todos, habits, user, readonly=False):
         f'<p class="tk-place-note">A browser cannot watch your location in the background. '
         f'Set an arrival automation on your phone to call <code>POST /momentum/arrive</code> '
         f'and the list arrives in Telegram when you get there.</p>'
-        f'</div></details>') if (show_places or n_active) else ""
+        f'</div></details>')
 
     place_opts = _place_options(places, "")
     sheet_html = "" if readonly else f'''
@@ -503,12 +557,25 @@ def render(todos, habits, user, readonly=False):
         <input class="wf-input" type="text" name="project" id="tkSproject"
                list="tk-projects" placeholder="e.g. Samsung AEO"></div>
       <div class="wf-field"><label class="wf-label">Place</label>
-        <select class="wf-input" name="place_id" id="tkSplace">{place_opts}</select></div>
+        <select class="wf-input" name="place_id" id="tkSplace" onchange="tkPlacePick()">
+          {place_opts}<option value="__new__">＋ Save current location…</option>
+        </select></div>
     </div>
     <div class="tk-sheet-actions">
       <button class="btn btn-primary btn-lg" type="submit">Save</button>
       <button class="btn btn-ghost btn-lg" type="button" id="tkCancel" onclick="tkClose()">Cancel</button>
     </div>
+  </form>
+  <form method="POST" action="/momentum/place/add" id="tkNewPlaceForm" class="tk-newplace" hidden>
+    <input type="hidden" name="lat" id="tkNpLat"><input type="hidden" name="lon" id="tkNpLon">
+    <input type="hidden" name="task_id" id="tkNpTask">
+    <label class="wf-label">New place</label>
+    <div class="tk-newplace-row">
+      <input class="wf-input" type="text" name="label" id="tkNpLabel"
+             placeholder="e.g. Office" required>
+      <button class="btn btn-secondary" type="button" onclick="tkAddPlace()">Use my location</button>
+    </div>
+    <span id="tkNpMsg" class="tk-place-meta"></span>
   </form>
   <form method="POST" action="/todo/delete" class="tk-sheet-delete"
         onsubmit="return confirm('Delete this task?')">
@@ -579,6 +646,8 @@ def render(todos, habits, user, readonly=False):
   font-size:var(--text-xs);font-weight:var(--fw-semibold)}}
 .tk-due{{font-weight:var(--fw-bold)}}
 .tk-chip--high{{border-color:var(--group-4);color:var(--group-4)}}
+.tk-chip--habit{{border-color:var(--group-3);color:var(--group-3)}}
+a.tk-row{{text-decoration:none;color:inherit}}
 .tk-due--over{{border-color:var(--danger);color:var(--danger)}}
 .tk-due--today{{border-color:var(--warn);color:var(--warn)}}
 .tk-due--soon{{border-color:var(--accent);color:var(--accent)}}
@@ -625,6 +694,11 @@ def render(todos, habits, user, readonly=False):
 .tk-sheet-actions .btn{{flex:1}}
 .tk-sheet-delete{{margin-top:14px;padding-top:14px;border-top:1px solid var(--border);
   display:flex;justify-content:center}}
+.tk-newplace{{margin-top:12px;padding-top:12px;border-top:1px solid var(--border);
+  display:flex;flex-direction:column;gap:8px}}
+.tk-newplace[hidden]{{display:none}}
+.tk-newplace-row{{display:flex;gap:8px;flex-wrap:wrap}}
+.tk-newplace-row .wf-input{{flex:1;min-width:150px;min-height:44px}}
 @media (min-width:768px){{
   .tk-sheet{{bottom:auto;top:50%;translate:-50% -50%;border-radius:var(--radius-xl)}}
 }}
@@ -636,7 +710,7 @@ def render(todos, habits, user, readonly=False):
 </style>
 </head><body>
 <nav>
-  <span class="nav-brand">⚡ Momentum</span>
+  <a href="/momentum" class="nav-brand">⚡ Momentum</a>
   <span class="nav-user">👤 {user} &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
 </nav>
 <div class="tk-wrap">
@@ -663,8 +737,35 @@ function tkOpen(row, isNew) {{
   $('tkSproject').value = row.dataset.project || '';
   var place = $('tkSplace');
   if (place) place.value = row.dataset.place || '';
+  var np = $('tkNewPlaceForm');
+  if (np) {{ np.hidden = true; $('tkNpLabel').value = ''; $('tkNpMsg').textContent = ''; }}
   $('tkBackdrop').classList.add('is-on');
   $('tkSheet').classList.add('is-on');
+}}
+function tkPlacePick() {{
+  // "Save current location" is not a place you can pick — it is a place you make.
+  var sel = document.getElementById('tkSplace');
+  var box = document.getElementById('tkNewPlaceForm');
+  var isNew = sel.value === '__new__';
+  box.hidden = !isNew;
+  if (isNew) {{
+    document.getElementById('tkNpTask').value = document.getElementById('tkSid').value;
+    document.getElementById('tkNpLabel').focus();
+  }}
+}}
+function tkAddPlace() {{
+  var msg = document.getElementById('tkNpMsg');
+  var label = document.getElementById('tkNpLabel');
+  if (!label.value.trim()) {{ msg.textContent = 'Name it first.'; label.focus(); return; }}
+  if (!navigator.geolocation) {{ msg.textContent = 'This browser has no geolocation.'; return; }}
+  msg.textContent = 'Locating…';
+  navigator.geolocation.getCurrentPosition(function(pos) {{
+    document.getElementById('tkNpLat').value = pos.coords.latitude;
+    document.getElementById('tkNpLon').value = pos.coords.longitude;
+    document.getElementById('tkNewPlaceForm').submit();
+  }}, function(err) {{
+    msg.textContent = 'Could not get location: ' + err.message;
+  }}, {{ enableHighAccuracy: true, timeout: 10000 }});
 }}
 function tkClose() {{
   document.getElementById('tkBackdrop').classList.remove('is-on');

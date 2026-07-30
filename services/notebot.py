@@ -249,7 +249,7 @@ if(j.state!==document.body.dataset.nbstate)location.reload();}catch(e){}},4000);
 <title>{esc(title)}</title><link rel="stylesheet" href="/static/style.css">
 <style>{CSS}</style></head>
 <body data-nbstate="{body[0]}">
-<nav><span class="nav-brand">🎙️ Notebot</span>
+<nav><a href="/notebot" class="nav-brand">🎙️ Notebot</a>
 <span class="nav-user"><a class="nav-back" href="/">← Home</a></span></nav>
 <div class="container nb-wrap">{body[1]}</div>{js}</body></html>"""
 

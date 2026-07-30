@@ -847,7 +847,7 @@ def render_result(r):
 @media(max-width:900px){{.recent-sidebar{{display:none}}}}
 </style></head><body>
 <nav>
-  <a href="/" style="color:white;font-weight:600;text-decoration:none">🧭 Wayfinder</a>
+  <a href="/aeo" class="nav-brand">🔍 AEO Analysis</a>
   <div style="display:flex;gap:16px">
     <a href="/aeo">← Analyze Again</a>
     <a href="/aeo/results">Batch Results</a>
@@ -1001,7 +1001,7 @@ def render_form(error=""):
 .recent-url-item:hover .rupath{{color:#6d28d9}}
 </style></head><body>
 <nav>
-  <a href="/" style="color:white;font-weight:600;text-decoration:none">🧭 Wayfinder</a>
+  <a href="/aeo" class="nav-brand">🔍 AEO Analysis</a>
   <a href="/">← Home</a>
 </nav>
 

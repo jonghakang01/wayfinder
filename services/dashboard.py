@@ -123,7 +123,7 @@ def handle(method, path, body, ctx=None):
             _save_projects(projects)
         return ("redirect", "/dashboard")
 
-    return ("redirect", "/momentum?tab=today")   # see todo.py
+    return ("redirect", "/momentum?tab=tasks")   # Today was folded into Tasks
 
 
 def render(user):
@@ -385,7 +385,7 @@ def render(user):
 </style>
 </head><body>
 <nav>
-  <span class="nav-brand">⚡ Momentum</span>
+  <a href="/momentum" class="nav-brand">⚡ Momentum</a>
   <span class="nav-user">👤 {user} &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
 </nav>
 <div class="container">

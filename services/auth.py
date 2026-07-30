@@ -14,12 +14,17 @@ SESSIONS = {}  # token -> username  (persisted to SESSIONS_FILE)
 # never moved. Login is by email — _resolve_login maps an email to its key.
 ADMIN_USERNAME    = "jongha.kang"          # admin's data_key (legacy, preserves data)
 ADMIN_EMAIL       = "jongha.kang01@gmail.com"
-CONTROLLED_SERVICES = {"todo", "cardconv", "aeo", "llm-check"}
+# Services the admin hands out per person (/admin) and that a new account can
+# pick at signup. "todo" is deliberately absent: the app moved to /momentum, and
+# accounts still holding the old grant keep working through _ACCESS_ALIASES —
+# listing both would show one app twice.
+CONTROLLED_SERVICES = {"momentum", "cardconv", "sow", "aeo", "llm-check"}
 APP_LABELS = {
-    "todo":      "📋 Daily Task",
+    "momentum":  "⚡ Momentum — Tasks & Habits",
     "cardconv":  "💳 Cheil AMEX Expense Assistant",
+    "sow":       "🤝 Deal Desk",
     "aeo":       "🔍 AEO Analysis",
-    "llm-check": "🤖 AEO 페이지 진단",
+    "llm-check": "🤖 AEO Page Diagnostic",
 }
 
 

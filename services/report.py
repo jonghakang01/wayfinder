@@ -244,7 +244,7 @@ def render(log, user):
 </style>
 </head><body>
 <nav>
-  <span class="nav-brand">📓 Dev Log</span>
+  <a href="/report" class="nav-brand">📓 Dev Log</a>
   <span class="nav-user">👤 {user} &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
 </nav>
 <div class="container">

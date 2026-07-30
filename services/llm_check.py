@@ -970,7 +970,7 @@ def render_progress(already_running=False):
 .done-count{{font-size:2rem;font-weight:700;color:#6d28d9}}
 </style></head><body>
 <nav>
-  <a href="/" style="color:white;font-weight:600;text-decoration:none">🧭 Wayfinder</a>
+  <a href="/llm-check" class="nav-brand">🤖 AEO Page Diagnostic</a>
   <a href="/llm-check">← 돌아가기</a>
 </nav>
 <div class="container">
@@ -1068,7 +1068,7 @@ tbody td{{padding:10px 16px;vertical-align:middle}}
 input[type=text]{{padding:8px 14px;border:1px solid #e2e8f0;border-radius:8px;font-size:0.85rem;outline:none;width:220px}}
 </style></head><body>
 <nav>
-  <a href="/" style="color:white;font-weight:600;text-decoration:none">🧭 Wayfinder</a>
+  <a href="/llm-check" class="nav-brand">🤖 AEO Page Diagnostic</a>
   <div style="display:flex;gap:12px;align-items:center">
     <form method="POST" action="/llm-check/batch" style="display:inline">
       <button type="submit" style="padding:6px 14px;background:#6d28d9;color:white;border:none;border-radius:8px;cursor:pointer;font-size:0.82rem">🔄 재분석</button>
@@ -1199,7 +1199,7 @@ def render_form(error=""):
 .recent-url-item:hover .rupath{{color:#6d28d9}}
 </style></head><body>
 <nav>
-  <a href="/" style="color:white;font-weight:600;text-decoration:none">🧭 Wayfinder</a>
+  <a href="/llm-check" class="nav-brand">🤖 AEO Page Diagnostic</a>
   <a href="/">← 홈</a>
 </nav>
 
@@ -1895,7 +1895,7 @@ def render_result(r):
 @media(max-width:900px){{.recent-sidebar{{display:none}}}}
 </style></head><body>
 <nav>
-  <a href="/" style="color:white;font-weight:600;text-decoration:none">🧭 Wayfinder</a>
+  <a href="/llm-check" class="nav-brand">🤖 AEO Page Diagnostic</a>
   <div style="display:flex;gap:16px">
     <a href="/llm-check">← 다시 분석</a>
     <a href="/llm-check/results">배치 결과</a>

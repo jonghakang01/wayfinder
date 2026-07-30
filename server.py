@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import importlib, os, sys, json, hashlib
+import importlib, os, re, sys, json, hashlib
 from http.server import HTTPServer, BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs, quote
 
@@ -522,8 +522,8 @@ def app_tabs(active, user=None):
     and mapped. The three tabs are one service now — a single access check.
     """
     import services.auth as auth
-    tabs = [("today", "📊", "Today"), ("tasks", "✅", "Tasks"), ("habits", "🏃", "Habits")]
-    active = {"/dashboard": "today", "/todo": "tasks", "/habit": "habits"}.get(active, active)
+    tabs = [("tasks", "✅", "Tasks"), ("habits", "🏃", "Habits")]
+    active = {"/dashboard": "tasks", "/todo": "tasks", "/habit": "habits"}.get(active, active)
     if not (auth.is_admin(user) or auth.has_service_access(user, "/momentum")):
         return ""
     html = APP_TAB_CSS + '<nav class="app-tabs">'
@@ -534,6 +534,10 @@ def app_tabs(active, user=None):
     html += "</nav>"
     return html
 
+
+VIEWPORT_META = ('<meta name="viewport" content="width=device-width,'
+                'initial-scale=1,viewport-fit=cover">')
+_VIEWPORT_RE = re.compile(r'<meta\s+name="viewport"[^>]*>', re.I)
 
 PWA_INJECT = (
     '<link rel="manifest" href="/manifest.json">'
@@ -790,6 +794,10 @@ class Handler(BaseHTTPRequestHandler):
             pass
 
     def send_html(self, html, code=200):
+        # Normalise the viewport meta for every page. Without viewport-fit=cover
+        # iOS reports env(safe-area-inset-*) as 0, so the bottom tab bar sits
+        # under Safari's toolbar and only appears once you scroll and it shrinks.
+        html = _VIEWPORT_RE.sub(VIEWPORT_META, html, count=1)
         html = html.replace('</head>', PWA_INJECT + '</head>', 1)
         if '</body>' in html:
             html = html.replace('</body>', PROGRESS_INJECT + '</body>', 1)

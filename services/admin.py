@@ -164,7 +164,7 @@ def _forbidden():
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
         '<title>Admin · Wayfinder</title>'
         '<link rel="stylesheet" href="/static/style.css"></head><body>'
-        '<nav><span class="nav-brand">⚙️ Admin</span>'
+        '<nav><a href="/admin" class="nav-brand">⚙️ Admin</a>'
         '<span class="nav-user"><a class="nav-back" href="/">← Home</a></span></nav>'
         '<div class="container"><div class="wf-empty-card" '
         'style="padding:40px 24px;text-align:center">'
@@ -176,7 +176,10 @@ def _forbidden():
     )
 
 
-_VISIBLE_SERVICES = ["cardconv"]  # per-user 권한 UI에 노출할 서비스
+# Services shown in the per-user permission UI. Anything a person can be given
+# individually belongs here; grants outside this list survive untouched
+# (see the scope field) so trimming it never revokes anything.
+_VISIBLE_SERVICES = ["momentum", "cardconv", "sow", "aeo", "llm-check"]
 
 
 def _drive_token_exists(username):
@@ -454,8 +457,8 @@ tr.row-blocked td{{opacity:.65;background:#fff5f5}}
 </style>
 </head><body>
 <nav>
-  <a href="/">← Wayfinder</a>
-  <span class="nav-user">🔑 {current_user} &nbsp;·&nbsp; <a href="/logout">로그아웃</a></span>
+  <a href="/admin" class="nav-brand">⚙️ Admin</a>
+  <span class="nav-user">🔑 {current_user} &nbsp;·&nbsp; <a href="/">← Wayfinder</a> &nbsp;·&nbsp; <a href="/logout">로그아웃</a></span>
 </nav>
 <div class="container">
   <h1>⚙️ 관리자 페이지</h1>

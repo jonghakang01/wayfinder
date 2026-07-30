@@ -147,7 +147,7 @@ def render(user):
 <title>Design System · Wayfinder</title><link rel="stylesheet" href="/static/style.css">
 <style>{DEMO_CSS}</style></head>
 <body>
-<nav><span class="nav-brand">🎨 Design System</span>
+<nav><a href="/design" class="nav-brand">🎨 Design System</a>
 <span class="nav-user"><a class="nav-back" href="/">← Home</a></span></nav>
 <div class="ds-wrap">
   <h1>Wayfinder Design System</h1>

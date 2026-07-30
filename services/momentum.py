@@ -17,7 +17,9 @@ import os
 import urllib.parse
 import urllib.request
 
-import services.dashboard as dashboard
+# dashboard.py is no longer rendered — Today folded into Tasks — but the file
+# stays: the home page still reads its projects, and its weekly charts are
+# worth reusing somewhere else.
 import services.habits as habits
 import services.todo as todo
 from services._paths import DATA_ROOT
@@ -30,12 +32,13 @@ META = {
 }
 
 # tab key -> the old path it replaced, used for both rendering and redirects
+# Today is gone: habits now appear inside the task list as things to do today,
+# which is what a "today" screen was for. /dashboard still redirects here.
 TABS = {
-    "today": "/dashboard",
     "tasks": "/todo",
     "habits": "/habit",
 }
-DEFAULT_TAB = "today"
+DEFAULT_TAB = "tasks"
 
 # How far from a saved point still counts as "here", when the caller does not say.
 DEFAULT_RADIUS_M = 200
@@ -158,10 +161,20 @@ def handle(method, path, body, ctx=None):
             lon = (body.get("lon") or [""])[0].strip()
             if label and lat and lon:
                 try:
-                    add_place(user, label, lat, lon,
-                              (body.get("radius_m") or [DEFAULT_RADIUS_M])[0])
+                    pid = add_place(user, label, lat, lon,
+                                    (body.get("radius_m") or [DEFAULT_RADIUS_M])[0])
                 except ValueError:
-                    pass          # a non-numeric coordinate just does not save
+                    pid = None    # a non-numeric coordinate just does not save
+                # Created from a task's detail sheet: pin that task to it, or the
+                # place exists and the task still has nowhere.
+                task_id = (body.get("task_id") or [""])[0].strip()
+                if pid and task_id:
+                    ts = todo.load(user)   # module-level import; a local one here
+                    # would shadow it and break the whole handler
+                    for t in ts:
+                        if str(t.get("id")) == task_id:
+                            t["place_id"] = pid
+                    todo.save(ts, user)
             return ("redirect", "/momentum?tab=tasks")
 
         if path == "/momentum/place/delete":
@@ -172,8 +185,6 @@ def handle(method, path, body, ctx=None):
         return ("redirect", "/momentum")
 
     tab = (body.get("tab") or [DEFAULT_TAB])[0]
-    if tab == "tasks":
-        return ("html", todo.render(todo.load(user), todo.load_habits(user), user))
     if tab == "habits":
         return ("html", habits.render_list(habits.load(user), user))
-    return ("html", dashboard.render(user))
+    return ("html", todo.render(todo.load(user), habits.load(user), user))

@@ -17,7 +17,7 @@ def _render_drive_connect(username: str, auth_url: str, requested: bool = False)
 <link rel="stylesheet" href="/static/style.css?v={CSS_VER}">
 </head><body>
 <nav>
-  <span class="nav-brand">🔗 Connect Google Drive</span>
+  <a href="/cardconv" class="nav-brand">🔗 Connect Google Drive</a>
   <span class="nav-user"><a href="/cardconv/ledger" class="nav-back">← Back to Ledger</a></span>
 </nav>
 <div class="container" style="max-width:640px">
@@ -80,7 +80,7 @@ def _render_drive_connected(folder_url: str = "") -> str:
 <link rel="stylesheet" href="/static/style.css?v={CSS_VER}">
 </head><body>
 <nav>
-  <span class="nav-brand">✅ Google Drive Connected</span>
+  <a href="/cardconv" class="nav-brand">✅ Google Drive Connected</a>
   <span class="nav-user"><a href="/cardconv/ledger" class="nav-back">← Back to Ledger</a></span>
 </nav>
 <div class="container" style="max-width:640px">
@@ -558,7 +558,7 @@ def _render_drm_alert(user: str, filename: str, context: str = "convert") -> str
 <style>{_CC_TAB_CSS}{_UPLOAD_CSS}</style>
 </head><body>
 <nav>
-  <span class="nav-brand">💳 Cheil AMEX Expense Assistant</span>
+  <a href="/cardconv" class="nav-brand">💳 Cheil AMEX Expense Assistant</a>
   <span class="nav-user">👤 {_esc(user)} &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
 </nav>
 <div class="container" style="max-width:1100px">
@@ -720,7 +720,7 @@ history.replaceState({{}}, '', '/cardconv/convert');
 <style>{_CC_TAB_CSS}{_UPLOAD_CSS}</style>
 </head><body>
 <nav>
-  <span class="nav-brand">💳 Cheil AMEX Expense Assistant</span>
+  <a href="/cardconv" class="nav-brand">💳 Cheil AMEX Expense Assistant</a>
   <span class="nav-user">👤 {user} &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
 </nav>
 <div class="container" style="max-width:1100px">
@@ -962,7 +962,7 @@ def _render_history(user: str) -> str:
 <style>{_CC_TAB_CSS}</style>
 </head><body>
 <nav>
-  <span class="nav-brand">💳 Cheil AMEX Expense Assistant</span>
+  <a href="/cardconv" class="nav-brand">💳 Cheil AMEX Expense Assistant</a>
   <span class="nav-user">👤 {user} &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
 </nav>
 <div class="container" style="max-width:1100px">
@@ -1048,7 +1048,7 @@ def _render_keywords(user: str) -> str:
 </style>
 </head><body>
 <nav>
-  <span class="nav-brand">💳 Cheil AMEX Expense Assistant</span>
+  <a href="/cardconv" class="nav-brand">💳 Cheil AMEX Expense Assistant</a>
   <span class="nav-user">👤 {user} &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
 </nav>
 <div class="container" style="max-width:1100px">
@@ -1519,7 +1519,7 @@ body:has(.fb-menu.open) .wf-back,body:has(.fb-menu.open) #wfThemeBtn{{display:no
 </style>
 </head><body>
 <nav>
-  <span class="nav-brand">💳 Cheil AMEX Expense Assistant</span>
+  <a href="/cardconv" class="nav-brand">💳 Cheil AMEX Expense Assistant</a>
   <span class="nav-user">👤 {user} &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
 </nav>
 <div class="container" style="max-width:1100px">
@@ -2381,7 +2381,7 @@ def _render_ocr_staging_review(user: str) -> str:
 </style>
 </head><body>
 <nav>
-  <span class="nav-brand">💳 Cheil AMEX Expense Assistant</span>
+  <a href="/cardconv" class="nav-brand">💳 Cheil AMEX Expense Assistant</a>
   <span class="nav-user">👤 {user} &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
 </nav>
 {_tab_bar("ocr_review", user)}
@@ -2782,7 +2782,7 @@ body:has(.fb-selbar.show) .wf-back,body:has(.fb-selbar.show) #wfThemeBtn{display
 </style>
 </head><body>
 <nav>
-  <span class="nav-brand">💳 Cheil AMEX Expense Assistant</span>
+  <a href="/cardconv" class="nav-brand">💳 Cheil AMEX Expense Assistant</a>
   <span class="nav-user">👤 __USER__ &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
 </nav>
 <div class="container" style="max-width:1100px">

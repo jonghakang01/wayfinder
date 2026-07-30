@@ -878,7 +878,7 @@ def render_list(habits, user, readonly=False):
 </head>
 <body>
 <nav>
-  <span class="nav-brand">⚡ Momentum</span>
+  <a href="/momentum" class="nav-brand">⚡ Momentum</a>
   <span class="nav-user">👤 {user} &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
 </nav>
 <div class="container">

@@ -1267,7 +1267,7 @@ def _shell(user, title, body, wide=False, tab=None):
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>🤝 {_esc(title)} · Wayfinder</title><link rel="stylesheet" href="/static/style.css">
 <style>{_CSS}{_CTR_CSS}</style></head><body>
-<nav><span class="nav-brand">🤝 Deal Desk</span>
+<nav><a href="/sow" class="nav-brand">🤝 Deal Desk</a>
 <span class="nav-user">👤 {_esc(user)} &nbsp;·&nbsp; <a href="/logout">Logout</a></span></nav>
 <div class="container" style="max-width:{'1800px' if wide else '1000px'}">{tabs}{body}</div></body></html>"""
 
