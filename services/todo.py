@@ -333,7 +333,7 @@ def _absorb_group(t):
     return t
 
 
-def render(todos, habits, user, readonly=False):
+def render(todos, habits, user, readonly=False, group_by="date"):
     today = date.today()
     today_str = today.isoformat()
     week_str = (today + timedelta(days=7)).isoformat()
@@ -380,7 +380,7 @@ def render(todos, habits, user, readonly=False):
         check = "" if readonly else (
             f'<form method="POST" action="/habit/{h["id"]}/checkin" class="tk-check-form" '
             f'onclick="event.stopPropagation()">'
-            f'<input type="hidden" name="next" value="/momentum?tab=tasks">'
+            f'<input type="hidden" name="next" value="{back}">'
             f'<input type="hidden" name="toggle" value="1">'
             f'<button class="tk-check{" tk-check--on" if done else ""}" type="submit" '
             f'aria-label="{"Undo check-in" if done else "Check in"}">{"✓" if done else ""}</button>'
@@ -409,6 +409,10 @@ def render(todos, habits, user, readonly=False):
     # Controls appear when there is something to control. An empty list showing
     # filters was the single worst thing about the old screen.
     show_filter = n_active >= 8 and len(all_projects) > 1
+    # Grouping by project needs a project to group by, and two rows to reorder.
+    show_group = bool(all_projects) and n_active >= 2
+    by_project = group_by == "project" and show_group
+    back = "/momentum?tab=tasks" + ("&by=project" if by_project else "")
 
     def _row(t):
         tid = t["id"]
@@ -447,7 +451,7 @@ def render(todos, habits, user, readonly=False):
             f'<form method="POST" action="{check_action}" class="tk-check-form" '
             f'onclick="event.stopPropagation()">'
             f'<input type="hidden" name="id" value="{tid}">'
-            f'<input type="hidden" name="next" value="/momentum?tab=tasks">'
+            f'<input type="hidden" name="next" value="{back}">'
             f'<button class="{check_cls}" type="submit" '
             f'aria-label="{"Mark not done" if done else "Mark done"}">'
             f'{"✓" if done else ""}</button></form>')
@@ -474,15 +478,43 @@ def render(todos, habits, user, readonly=False):
                 f'<span class="tk-section-n">{len(items)}</span></div>'
                 f'{"".join(_row(t) for t in items)}</div>')
 
-    now_html = ("".join(_habit_row(h) for h in habit_open)
-                + "".join(_row(t) for t in buckets["now"]))
-    now_n = len(habit_open) + len(buckets["now"])
-    list_html = ((f'<div class="tk-section" data-bucket="now">'
-                  f'<div class="tk-section-head"><span>Today</span>'
-                  f'<span class="tk-section-n">{now_n}</span></div>{now_html}</div>'
-                  if now_n else "")
-                 + _section("week", "This week", buckets["week"])
-                 + _section("later", "Later", buckets["later"]))
+    if by_project:
+        # The list's spine becomes the project. Dates do not disappear — they
+        # stay on each row as the due chip, which is where a date belongs once
+        # it is no longer the thing you are sorting by.
+        by_pj = {}
+        for t in active:
+            by_pj.setdefault((t.get("project") or "").strip(), []).append(t)
+        # Busiest project first; ties alphabetical. "No project" always last —
+        # it is a leftover bin, not a project, and habits live there because a
+        # habit belongs to no project.
+        named = sorted((pj for pj in by_pj if pj),
+                       key=lambda pj: (-len(by_pj[pj]), pj.lower()))
+        list_html = "".join(
+            f'<div class="tk-section" data-project="{_attr(pj)}">'
+            f'<div class="tk-section-head tk-section-head--project"><span>{pj}</span>'
+            f'<span class="tk-section-n">{len(by_pj[pj])}</span></div>'
+            f'{"".join(_row(t) for t in sorted(by_pj[pj], key=_order))}</div>'
+            for pj in named)
+        loose = sorted(by_pj.get("", []), key=_order)
+        if loose or habit_open:
+            list_html += (
+                f'<div class="tk-section" data-project="">'
+                f'<div class="tk-section-head tk-section-head--project">'
+                f'<span>No project</span>'
+                f'<span class="tk-section-n">{len(loose) + len(habit_open)}</span></div>'
+                f'{"".join(_habit_row(h) for h in habit_open)}'
+                f'{"".join(_row(t) for t in loose)}</div>')
+    else:
+        now_html = ("".join(_habit_row(h) for h in habit_open)
+                    + "".join(_row(t) for t in buckets["now"]))
+        now_n = len(habit_open) + len(buckets["now"])
+        list_html = ((f'<div class="tk-section" data-bucket="now">'
+                      f'<div class="tk-section-head"><span>Today</span>'
+                      f'<span class="tk-section-n">{now_n}</span></div>{now_html}</div>'
+                      if now_n else "")
+                     + _section("week", "This week", buckets["week"])
+                     + _section("later", "Later", buckets["later"]))
 
     if done_list or habit_done:
         done_rows = ("".join(_habit_row(h) for h in habit_done)
@@ -498,18 +530,32 @@ def render(todos, habits, user, readonly=False):
 
     quick_add = "" if readonly else (
         '<form class="tk-quick" method="POST" action="/todo/add" autocomplete="off">'
-        '<input type="hidden" name="next" value="/momentum?tab=tasks">'
+        f'<input type="hidden" name="next" value="{back}">'
         '<input class="tk-quick-input" type="text" name="title" required '
         'placeholder="Add a task…" aria-label="Add a task">'
         '<button class="btn btn-primary" type="submit">Add</button>'
         '</form>')
 
+    # Pill toggle, the same shape cardconv uses for its view tabs. Links, not
+    # script, so the choice survives a reload and can be bookmarked.
+    group_html = "" if not show_group else (
+        f'<div class="tk-group" role="group" aria-label="Group tasks by">'
+        f'<a class="tk-gtab{"" if by_project else " active"}" href="/momentum?tab=tasks"'
+        f'{"" if by_project else " aria-current=\'true\'"}>By date</a>'
+        f'<a class="tk-gtab{" active" if by_project else ""}" '
+        f'href="/momentum?tab=tasks&amp;by=project"'
+        f'{" aria-current=\'true\'" if by_project else ""}>By project</a>'
+        f'</div>')
+
     project_opts = "".join(f'<option value="{_attr(pj)}">{pj}</option>'
                            for pj in all_projects)
-    filter_html = "" if not show_filter else (
-        f'<div class="tk-filter">'
+    # Grouped by project, a project dropdown says the same thing the headings
+    # already say — so it steps aside and only the priority filter remains.
+    project_sel = "" if by_project else (
         f'<select id="tkFProject" class="wf-input" onchange="tkFilter()" aria-label="Project">'
-        f'<option value="">All projects</option>{project_opts}</select>'
+        f'<option value="">All projects</option>{project_opts}</select>')
+    filter_html = "" if not show_filter else (
+        f'<div class="tk-filter">{project_sel}'
         f'<select id="tkFPrio" class="wf-input" onchange="tkFilter()" aria-label="Priority">'
         f'<option value="">Any priority</option>{_prio_options(None)}</select>'
         f'<span id="tkFCount" class="tk-filter-n"></span></div>')
@@ -518,6 +564,7 @@ def render(todos, habits, user, readonly=False):
         f'<div class="tk-place-row"><span class="tk-place-name">📍 {pl["label"]}</span>'
         f'<span class="tk-place-meta">{sum(1 for t in active if t.get("place_id") == pl["id"])} open</span>'
         f'<form method="POST" action="/momentum/place/delete" style="display:inline">'
+        f'<input type="hidden" name="next" value="{back}">'
         f'<input type="hidden" name="id" value="{pl["id"]}">'
         f'<button class="btn btn-danger btn-sm">Remove</button></form></div>'
         for pl in places)
@@ -527,6 +574,7 @@ def render(todos, habits, user, readonly=False):
         f'<div class="tk-places-body">'
         f'{place_rows or "<div class=\'tk-place-meta\'>No places yet — stand where you work and save it.</div>"}'
         f'<form method="POST" action="/momentum/place/add" id="tkPlaceForm" class="tk-place-add">'
+        f'<input type="hidden" name="next" value="{back}">'
         f'<input type="hidden" name="lat" id="tkLat"><input type="hidden" name="lon" id="tkLon">'
         f'<input type="text" name="label" id="tkLabel" class="wf-input" placeholder="Place name (e.g. Office)" required>'
         f'<button type="button" class="btn btn-secondary btn-sm" onclick="tkSavePlace()">Use my current location</button>'
@@ -543,7 +591,7 @@ def render(todos, habits, user, readonly=False):
   <div class="tk-sheet-grip"></div>
   <form method="POST" action="/todo/set_meta" class="tk-sheet-form">
     <input type="hidden" name="id" id="tkSid">
-    <input type="hidden" name="next" value="/momentum?tab=tasks">
+    <input type="hidden" name="next" value="{back}">
     <div class="wf-field"><label class="wf-label">Task</label>
       <input class="wf-input" type="text" name="title" id="tkStitle" required></div>
     <div class="tk-sheet-grid">
@@ -567,6 +615,7 @@ def render(todos, habits, user, readonly=False):
     </div>
   </form>
   <form method="POST" action="/momentum/place/add" id="tkNewPlaceForm" class="tk-newplace" hidden>
+    <input type="hidden" name="next" value="{back}">
     <input type="hidden" name="lat" id="tkNpLat"><input type="hidden" name="lon" id="tkNpLon">
     <input type="hidden" name="task_id" id="tkNpTask">
     <label class="wf-label">New place</label>
@@ -580,7 +629,7 @@ def render(todos, habits, user, readonly=False):
   <form method="POST" action="/todo/delete" class="tk-sheet-delete"
         onsubmit="return confirm('Delete this task?')">
     <input type="hidden" name="id" id="tkDid">
-    <input type="hidden" name="next" value="/momentum?tab=tasks">
+    <input type="hidden" name="next" value="{back}">
     <button class="btn btn-danger" type="submit">Delete task</button>
   </form>
 </div>
@@ -612,10 +661,26 @@ def render(todos, habits, user, readonly=False):
 .tk-filter .wf-input{{width:auto;flex:1;min-width:140px;min-height:44px}}
 .tk-filter-n{{font-size:var(--text-xs);color:var(--text-muted)}}
 
+/* Pill toggle — cardconv's view tabs, same tokens and same active treatment. */
+.tk-group{{display:inline-flex;align-items:center;gap:2px;padding:3px;margin-bottom:14px;
+  max-width:100%;overflow-x:auto;scrollbar-width:none;
+  background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md)}}
+.tk-group::-webkit-scrollbar{{display:none}}
+.tk-gtab{{display:inline-flex;align-items:center;flex:0 0 auto;min-height:38px;
+  padding:7px 16px;font-size:var(--text-sm);font-weight:var(--fw-semibold);
+  color:var(--text-muted);border-radius:var(--radius-sm);text-decoration:none;
+  transition:background .15s,color .15s}}
+.tk-gtab:hover{{color:var(--text)}}
+.tk-gtab.active{{background:var(--accent);color:var(--on-accent)}}
+
 .tk-section{{margin-bottom:22px}}
 .tk-section-head{{display:flex;align-items:center;gap:8px;margin:0 2px 8px;
   font-size:var(--text-xs);font-weight:var(--fw-bold);letter-spacing:.06em;
   text-transform:uppercase;color:var(--text-muted)}}
+/* A project name is something the user typed — shouting it back in caps is not
+   ours to do, so this heading keeps the case it was written in. */
+.tk-section-head--project{{text-transform:none;letter-spacing:0;
+  font-size:var(--text-sm);color:var(--text)}}
 .tk-section-n{{background:var(--surface-2);color:var(--text-muted);border-radius:var(--radius-full);
   padding:1px 8px;font-size:var(--text-xs);font-weight:var(--fw-bold)}}
 
@@ -706,6 +771,8 @@ a.tk-row{{text-decoration:none;color:inherit}}
   .tk-sheet-grid{{grid-template-columns:1fr}}
   .tk-quick-input{{font-size:16px}}
   .tk-row{{padding:14px}}
+  .tk-group{{display:flex;width:100%}}
+  .tk-gtab{{flex:1;justify-content:center;min-height:44px;padding:10px 14px}}
 }}
 </style>
 </head><body>
@@ -716,6 +783,7 @@ a.tk-row{{text-decoration:none;color:inherit}}
 <div class="tk-wrap">
   {quick_add}
   {summary}
+  {group_html}
   {filter_html}
   <div id="tkList">{list_html}</div>
   {places_html}
@@ -777,10 +845,14 @@ document.addEventListener('keydown', function(e) {{
 // Just added something? Finish setting it up right here, then drop the ?new=
 // so a refresh does not reopen the sheet.
 (function() {{
-  var nid = new URLSearchParams(location.search).get('new');
+  var qs = new URLSearchParams(location.search);
+  var nid = qs.get('new');
   if (!nid) return;
   var row = document.querySelector('.tk-row[data-id="' + nid + '"]');
-  history.replaceState({{}}, '', location.pathname + '?tab=tasks');
+  // Drop only ?new= — anything else in the URL (the grouping choice) stays.
+  qs.delete('new');
+  if (!qs.get('tab')) qs.set('tab', 'tasks');
+  history.replaceState({{}}, '', location.pathname + '?' + qs.toString());
   if (!row) return;
   tkOpen(row, true);
   row.scrollIntoView({{block: 'center'}});
@@ -788,7 +860,9 @@ document.addEventListener('keydown', function(e) {{
   if (t) t.focus();
 }})();
 function tkFilter() {{
-  var pj = document.getElementById('tkFProject').value;
+  // The project select is absent while the list is grouped by project.
+  var pjEl = document.getElementById('tkFProject');
+  var pj = pjEl ? pjEl.value : '';
   var pr = document.getElementById('tkFPrio').value;
   var shown = 0;
   document.querySelectorAll('.tk-row').forEach(function(r) {{

@@ -150,6 +150,16 @@ def arrive(user, place_id):
     return (len(tasks), place["label"])
 
 
+def _next_of(body):
+    """Where a place action returns to — the task list, keeping whichever
+    grouping was on screen. Same-site paths only, so a posted `next` cannot
+    bounce the user off to another host."""
+    nxt = (body.get("next") or [""])[0].strip()
+    if nxt.startswith("/") and not nxt.startswith("//"):
+        return nxt
+    return "/momentum?tab=tasks"
+
+
 def handle(method, path, body, ctx=None):
     user = (ctx or {}).get("user", "guest")
     body = body or {}
@@ -175,16 +185,18 @@ def handle(method, path, body, ctx=None):
                         if str(t.get("id")) == task_id:
                             t["place_id"] = pid
                     todo.save(ts, user)
-            return ("redirect", "/momentum?tab=tasks")
+            return ("redirect", _next_of(body))
 
         if path == "/momentum/place/delete":
             pid = (body.get("id") or [""])[0]
             save_places([p for p in load_places(user) if p["id"] != pid], user)
-            return ("redirect", "/momentum?tab=tasks")
+            return ("redirect", _next_of(body))
 
         return ("redirect", "/momentum")
 
     tab = (body.get("tab") or [DEFAULT_TAB])[0]
     if tab == "habits":
         return ("html", habits.render_list(habits.load(user), user))
-    return ("html", todo.render(todo.load(user), habits.load(user), user))
+    group_by = (body.get("by") or ["date"])[0]
+    return ("html", todo.render(todo.load(user), habits.load(user), user,
+                                group_by=group_by))
