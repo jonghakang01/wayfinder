@@ -318,6 +318,43 @@ def render(user):
       </tbody>
     </table>
 
+    <h3>List row + detail sheet</h3>
+    <p>A row people scan is <b>not a form</b>. Momentum Tasks used to put every editable
+    field inline — fourteen controls per row, over a hundred on one screen, with the project
+    and the priority printed twice: once as a chip to read, once as a control to change.
+    The list became unreadable and the width went to controls nobody was using.</p>
+    <p>The row carries a <b>checkbox, a title and its chips</b>. Tapping anywhere else opens a
+    sheet that edits everything — including the title. Bottom sheet under 768px, centred dialog
+    above. Reference: <code>services/todo.py</code> (<code>.tk-row</code> / <code>.tk-sheet</code>).</p>
+    <div class="ds-demo" style="flex-direction:column;align-items:stretch;gap:10px">
+      <div style="display:flex;align-items:flex-start;gap:12px;padding:12px 14px;background:var(--surface);
+                  border:1px solid var(--border);border-radius:var(--radius-md)">
+        <span style="width:24px;height:24px;border-radius:50%;border:2px solid var(--border-bright);flex-shrink:0"></span>
+        <span style="flex:1">
+          <span style="display:block;color:var(--text)">Client feedback pass</span>
+          <span style="display:flex;gap:6px;margin-top:6px">
+            <span class="ds-chip" style="border:1px solid var(--danger);color:var(--danger);background:transparent">1d overdue</span>
+            <span class="ds-chip" style="border:1px solid var(--border-bright);color:var(--text-muted);background:transparent">Samsung AEO</span>
+          </span>
+        </span>
+        <span style="color:var(--text-dim)">›</span>
+      </div>
+    </div>
+    <p><b>Chips carry no fill.</b> A tinted background put every one of ours under AA in the light
+    theme (measured 4.13–4.49). On the card surface the same colors clear it in both themes, and
+    an outline still reads as a chip.</p>
+
+    <h3>Adaptive disclosure — and its trap</h3>
+    <p>Controls appear when there is something to control. An empty Tasks screen used to show
+    six blocks of management furniture — stats, a group button, two filters, a reset — before it
+    showed any way to add a task. Filters now appear at eight open items, the completed list when
+    something is completed.</p>
+    <p><b>The trap: never hide the way to create the thing you have none of.</b> Places was hidden
+    when the list was empty, which is exactly the state where you need to add one — the only route
+    to a first place had been removed. Hide the <i>management</i> of a set, never its <i>entry point</i>.</p>
+    <p>And the primary action gets the primary button. Ours was <code>+ New Group</code> — big and
+    blue and making a folder — while <code>+ Task</code> sat at the bottom in small grey.</p>
+
     <h3>Progress — work that runs long</h3>
     <p>Anything that keeps the user waiting past roughly two seconds says so.
     <b>Never leave a still screen</b>: a receipt PDF takes about a second per receipt, so a
@@ -363,11 +400,37 @@ wfProgress.start('Working…') / wfProgress.stop()            // anything else t
           overwrite a newer filter click.</li>
       <li><b>Buttons say what they download</b> — <code>⬇ xlsx (SAP)</code> vs
           <code>⬇ xlsx (ledger)</code>, never two identical labels.</li>
+      <li><b>Wording follows state</b> — on a task that was just created, "Cancel" claims to undo
+          an add that already happened. It reads "Later" there. A label that lies about what a
+          button does costs more than a longer label.</li>
+      <li><b>One axis of classification</b> — groups and projects were two names for the same
+          thing, so every new task made you choose which one to use. Collapse them; a second axis
+          has to earn itself.</li>
+      <li><b>Sort answers "what now"</b> — due-date-only ordering puts a Low above a High.
+          Bucket by urgency (overdue/today → this week → later), then priority inside each.</li>
+      <li><b>Fixed elements at the bottom compete</b> — tab bar, back pill, theme toggle and any
+          sheet all want <code>bottom:0</code>. Decide the stack once: the pill and toggle lift
+          above the tab bar and hide entirely while a sheet is open.</li>
+      <li><b>A hex inline on an element cannot be themed</b> — the toggle and the back pill were
+          inline-styled, so no media query or theme rule could reach them. Anything that might
+          move or change color needs a class.</li>
     </ul>
   </div>
 
   <div class="ds-sect"><h2>5 · Mobile UX standard <span style="font-size:.7rem;color:var(--text-muted);font-weight:500">(2026-07-22 · full spec: docs/mobile_ux_guideline.md · reference impl: cardconv)</span></h2>
     <ul class="ds-rules">
+      <li><b>Check at 425px, not 390</b> — that is the width this is actually used at, and the
+          narrower one hides problems rather than exposing them. <b>Check the empty state too</b>:
+          "the management UI fills a screen with nothing in it" is invisible when you only ever
+          look at a screen with data.</li>
+      <li><b><code>viewport-fit=cover</code> or safe-area is zero</b> — without it iOS reports
+          <code>env(safe-area-inset-*)</code> as 0, so a bar pinned to <code>bottom:0</code> sits
+          under Safari's toolbar and only appears once you scroll and the toolbar shrinks. The
+          meta is normalised for every page in <code>send_html</code>; do not hand-write it.</li>
+      <li><b>Tap area ≠ visual size</b> — keep the 24px circle and grow the hit box to 44 with a
+          pseudo element (<code>::after</code> at <code>width:max(100%,44px)</code>). Rows keep
+          their spacing and the target still passes. Verify by clicking 20px off-centre;
+          <code>getBoundingClientRect</code> does not see the pseudo element.</li>
       <li><b>Breakpoints</b> — mobile <code>@media(max-width:768px)</code> (standard for all new rules),
           small <code>480px</code> density-only. Assume touch from 768 down; hover needs a visible non-hover twin.</li>
       <li><b>Chrome budget ≤ 25% of viewport</b> — nav is one line (<code>.nav-brand</code> ellipsis, never wraps);
