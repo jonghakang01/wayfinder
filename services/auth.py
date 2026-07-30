@@ -362,9 +362,9 @@ def handle(method, path, body, ctx=None):
             app = ""
 
         if not email or not password:
-            return ("html", render_login("이메일과 비밀번호를 입력하세요.", app=app))
+            return ("html", render_login("Enter your email and password.", app=app))
         if "@" not in email or "." not in email.split("@")[-1]:
-            return ("html", render_login("올바른 이메일을 입력하세요.", app=app))
+            return ("html", render_login("Enter a valid email address.", app=app))
 
         users   = load_users()
         pw_hash = hash_pw(password)
@@ -376,19 +376,19 @@ def handle(method, path, body, ctx=None):
             key = _resolve_login(email)
             if not key or users[key]["pw"] != pw_hash:
                 return ("html", render_login(
-                    change_error="계정 또는 현재 비밀번호가 올바르지 않습니다.", app=app))
+                    change_error="That account or current password is not right.", app=app))
             if len(new_pw) < 6:
                 return ("html", render_login(
-                    change_error="새 비밀번호는 6자 이상이어야 합니다.", app=app))
+                    change_error="The new password needs at least 6 characters.", app=app))
             users[key]["pw"] = hash_pw(new_pw)
             save_users(users)
             return ("html", render_login(
-                change_ok="비밀번호가 변경되었습니다. 새 비밀번호로 로그인하세요.", app=app))
+                change_ok="Password changed. Log in with the new one.", app=app))
 
         if action == "register":
             if _resolve_login(email):
                 return ("html", render_login(
-                    register_error="이미 가입된 이메일입니다. 로그인하세요.", app=app))
+                    register_error="That email is already registered — log in instead.", app=app))
             role = "admin" if email == ADMIN_EMAIL else "user"
             office = body.get("company", [""])[0].strip()
             if office not in OFFICES:
@@ -414,9 +414,9 @@ def handle(method, path, body, ctx=None):
         else:
             key = _resolve_login(email)
             if not key:
-                return ("html", render_login("존재하지 않는 계정입니다.", app=app))
+                return ("html", render_login("No account with that email.", app=app))
             if users[key]["pw"] != pw_hash:
-                return ("html", render_login("비밀번호가 틀렸습니다.", app=app))
+                return ("html", render_login("That password is not right.", app=app))
             # Accumulate: logging in through an app link grants that app (password
             # was just verified, so this is safe self-service access).
             if app and app not in users[key].get("services", []):
@@ -441,12 +441,12 @@ def render_login(error="", register_error="", app="", change_error="", change_ok
     svc_labels = APP_LABELS
     app = app if app in CONTROLLED_SERVICES else ""
 
-    # App-scoped links are shared with US colleagues → English copy.
-    # The bare login page is internal → Korean stays.
-    t = ({"email": "Email", "pw": "Password", "login": "Log in", "signup": "Sign up",
-          "lang": "en", "title": "Log in · Wayfinder"} if app else
-         {"email": "이메일", "pw": "비밀번호", "login": "로그인", "signup": "가입",
-          "lang": "ko", "title": "로그인 · Wayfinder"})
+    # One language, because this is the first screen every user sees and the
+    # design system asks for English copy everywhere. The page used to fork
+    # ko/en on whether the link was app-scoped; the bare page is no longer
+    # internal-only now that it answers on the public host.
+    t = {"email": "Email", "pw": "Password", "login": "Log in", "signup": "Sign up",
+         "lang": "en", "title": "Log in · Wayfinder"}
 
     # App-scoped signup: the link (/login?app=cardconv) fixes which service the new
     # account gets, so we drop the service picker and show the app name instead.
@@ -466,40 +466,30 @@ def render_login(error="", register_error="", app="", change_error="", change_ok
                 f'value="{s}" checked> {svc_labels.get(s, s)}</label>'
                 for s in live
             )
-            svc_html = ('<div class="wf-field"><label class="wf-label">가입할 서비스</label>'
+            svc_html = ('<div class="wf-field"><label class="wf-label">Services to join</label>'
                         f'<div class="svc-checks">{checks}</div></div>')
         else:
             svc_html = ('<div class="app-scope">'
-                        '서비스별 가입 링크로 들어오면 해당 서비스 권한이 부여됩니다.</div>')
-        signup_title = "새 계정 만들기"
+                        'Use a service\'s own sign-up link and that service is '
+                        'granted to your account.</div>')
+        signup_title = "Create an account"
         app_hidden = ""
 
-    office_label = "Office" if t["lang"] == "en" else "소속 (오피스)"
-    office_default = "— Select office —" if t["lang"] == "en" else "— 소속 선택 —"
-    office_opts = f'<option value="">{office_default}</option>' + "".join(
+    office_opts = '<option value="">— Select office —</option>' + "".join(
         f'<option value="{o}">{o}</option>' for o in OFFICES)
-    office_html = (f'<div class="wf-field"><label class="wf-label">{office_label}</label>'
+    office_html = ('<div class="wf-field"><label class="wf-label">Office</label>'
                    f'<select name="company" class="wf-input office-sel">{office_opts}</select></div>')
-    if t["lang"] == "en":
-        g_label, g_ph = "Google account (for Drive sync, optional)", "you@gmail.com"
-    else:
-        g_label, g_ph = "Google 계정 (Drive 연동용, 선택)", "you@gmail.com"
+    g_label, g_ph = "Google account (for Drive sync, optional)", "you@gmail.com"
     office_html += (f'<div class="wf-field"><label class="wf-label">{g_label}</label>'
                     f'<input class="wf-input" type="email" name="google_account" placeholder="{g_ph}"></div>')
 
     err = f'<div class="auth-msg is-error">{error}</div>' if error else ""
     reg_err = f'<div class="auth-msg is-error">{register_error}</div>' if register_error else ""
 
-    if t["lang"] == "en":
-        c_title, c_cur, c_new, c_btn = ("Forgot or want to change your password?",
-                                        "Current (or temporary) password",
-                                        "New password (6+ chars)", "Change password")
-        c_hint = "Lost the current password too? Ask the admin to issue a temporary one."
-    else:
-        c_title, c_cur, c_new, c_btn = ("비밀번호 변경 (임시 비밀번호 받은 경우 포함)",
-                                        "현재(또는 임시) 비밀번호",
-                                        "새 비밀번호 (6자 이상)", "비밀번호 변경")
-        c_hint = "현재 비밀번호도 잊으셨다면 관리자에게 임시 비밀번호 발급을 요청하세요."
+    c_title, c_cur, c_new, c_btn = ("Forgot or want to change your password?",
+                                    "Current (or temporary) password",
+                                    "New password (6+ chars)", "Change password")
+    c_hint = "Lost the current password too? Ask the admin to issue a temporary one."
     c_msg = (f'<div class="auth-msg is-error">{change_error}</div>' if change_error else
              f'<div class="auth-msg is-ok">{change_ok}</div>' if change_ok else "")
     change_html = f'''<details class="auth-card chg-box"{" open" if (change_error or change_ok) else ""}>
