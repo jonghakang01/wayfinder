@@ -152,6 +152,7 @@ def early_badge(due_date_str, done_at_str):
 def handle(method, path, body, ctx=None):
     user = (ctx or {}).get("user", "guest")
     todos = load(user)
+    created_id = None   # set by /todo/add so the caller can open its sheet
 
     if method == "POST":
         if path == "/todo/memo/add":
@@ -191,8 +192,9 @@ def handle(method, path, body, ctx=None):
                     groups.append(new_group)
                     save_groups(groups, user)
             if title:
+                created_id = next_id(todos)
                 todos.append({
-                    "id": next_id(todos),
+                    "id": created_id,
                     "type": "task",
                     "title": title,
                     "done": False,
@@ -296,6 +298,10 @@ def handle(method, path, body, ctx=None):
         next_url = (body.get("next") or ["/todo"])[0]
         if not next_url.startswith("/"):
             next_url = "/todo"
+        if created_id:
+            # A task typed into the quick field has nothing but a title. Hand the
+            # new id back so the page can open its sheet and let you finish it.
+            next_url += ("&" if "?" in next_url else "?") + f"new={created_id}"
         return ("redirect", next_url)
 
     # The page itself now lives at /work; this route survives for bookmarks,
@@ -501,7 +507,7 @@ def render(todos, habits, user, readonly=False):
     </div>
     <div class="tk-sheet-actions">
       <button class="btn btn-primary btn-lg" type="submit">Save</button>
-      <button class="btn btn-ghost btn-lg" type="button" onclick="tkClose()">Cancel</button>
+      <button class="btn btn-ghost btn-lg" type="button" id="tkCancel" onclick="tkClose()">Cancel</button>
     </div>
   </form>
   <form method="POST" action="/todo/delete" class="tk-sheet-delete"
@@ -643,8 +649,12 @@ def render(todos, habits, user, readonly=False):
 {sheet_html}
 {tabs_html}
 <script>
-function tkOpen(row) {{
+function tkOpen(row, isNew) {{
   var $ = function(i) {{ return document.getElementById(i); }};
+  // On a task that was just created, "Cancel" would read as "undo the add" —
+  // but it is already saved. Nothing is lost by closing, so say that.
+  var c = $('tkCancel');
+  if (c) c.textContent = isNew ? 'Later' : 'Cancel';
   $('tkSid').value = row.dataset.id;
   $('tkDid').value = row.dataset.id;
   $('tkStitle').value = row.dataset.title || '';
@@ -663,6 +673,19 @@ function tkClose() {{
 document.addEventListener('keydown', function(e) {{
   if (e.key === 'Escape') tkClose();
 }});
+// Just added something? Finish setting it up right here, then drop the ?new=
+// so a refresh does not reopen the sheet.
+(function() {{
+  var nid = new URLSearchParams(location.search).get('new');
+  if (!nid) return;
+  var row = document.querySelector('.tk-row[data-id="' + nid + '"]');
+  history.replaceState({{}}, '', location.pathname + '?tab=tasks');
+  if (!row) return;
+  tkOpen(row, true);
+  row.scrollIntoView({{block: 'center'}});
+  var t = document.getElementById('tkSdue');
+  if (t) t.focus();
+}})();
 function tkFilter() {{
   var pj = document.getElementById('tkFProject').value;
   var pr = document.getElementById('tkFPrio').value;
