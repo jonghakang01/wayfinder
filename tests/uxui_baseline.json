@@ -49,7 +49,5 @@
     "token-color": 7
   },
   "services/sow.py": {},
-  "services/todo.py": {
-    "token-color": 1
-  }
+  "services/todo.py": {}
 }

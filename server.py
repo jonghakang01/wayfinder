@@ -488,10 +488,10 @@ self.addEventListener('notificationclick', function(event) {{
 
 APP_TAB_CSS = """
 <style>
-.app-tabs{--tab-ink:#94a3b8;position:fixed!important;top:auto!important;bottom:0!important;left:0;right:0;height:auto;background:rgba(8,13,20,0.97);backdrop-filter:blur(20px);border-top:1px solid rgba(255,255,255,0.06);border-bottom:none;display:flex!important;justify-content:stretch;z-index:200;padding:8px 8px calc(8px + env(safe-area-inset-bottom,0));gap:4px}
+.app-tabs{--tab-ink:#94a3b8;--tab-accent:#38bdf8;position:fixed!important;top:auto!important;bottom:0!important;left:0;right:0;height:auto;background:rgba(8,13,20,0.97);backdrop-filter:blur(20px);border-top:1px solid rgba(255,255,255,0.06);border-bottom:none;display:flex!important;justify-content:stretch;z-index:200;padding:8px 8px calc(8px + env(safe-area-inset-bottom,0));gap:4px}
 .app-tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:8px 4px;color:var(--tab-ink);text-decoration:none;font-size:0.6rem;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;border-radius:12px;transition:all 0.2s}
 .app-tab:hover{color:rgba(255,255,255,0.7);background:rgba(255,255,255,0.04)}
-.app-tab.active{color:var(--accent);background:var(--accent-glow)}
+.app-tab.active{color:var(--tab-accent);background:rgba(56,189,248,0.12)}
 .app-tab-icon{font-size:1.3rem;line-height:1;transition:transform 0.2s}
 .app-tab.active .app-tab-icon{filter:drop-shadow(0 0 8px rgba(56,189,248,0.7));transform:translateY(-2px)}
 body{padding-bottom:calc(72px + env(safe-area-inset-bottom,0px))!important}
@@ -499,9 +499,12 @@ body{padding-bottom:calc(72px + env(safe-area-inset-bottom,0px))!important}
    inside the tab bar — they were covering the first and last tab. Lift them
    above it wherever the bar exists. */
 body:has(.app-tabs) .wf-back,body:has(.app-tabs) .wf-theme-btn{bottom:calc(80px + env(safe-area-inset-bottom,0px))}
+/* A sheet owns the bottom of the screen while it is open — the pill and the
+   toggle sat on top of its Save button. */
+body:has(.tk-sheet.is-on) .wf-back,body:has(.tk-sheet.is-on) .wf-theme-btn{display:none}
 @media(min-width:768px){
   body:has(.app-tabs) .wf-back,body:has(.app-tabs) .wf-theme-btn{bottom:16px}
-  .app-tabs{--tab-ink:var(--text-muted);position:sticky!important;top:0!important;bottom:auto!important;height:auto;flex-direction:row;justify-content:center;gap:6px;background:var(--surface);border-top:none;border-bottom:1px solid var(--border);padding:10px 16px;box-shadow:var(--shadow-sm)}
+  .app-tabs{--tab-ink:var(--text-muted);--tab-accent:var(--accent);position:sticky!important;top:0!important;bottom:auto!important;height:auto;flex-direction:row;justify-content:center;gap:6px;background:var(--surface);border-top:none;border-bottom:1px solid var(--border);padding:10px 16px;box-shadow:var(--shadow-sm)}
   .app-tab{flex:0 0 auto;flex-direction:row;gap:8px;padding:8px 18px;border-radius:var(--radius-full);font-size:.82rem;text-transform:none;letter-spacing:0}
   .app-tab-icon{font-size:1.05rem}
   .app-tab.active{background:var(--accent);color:var(--on-accent)}

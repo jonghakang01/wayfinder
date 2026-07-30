@@ -252,6 +252,12 @@ def handle(method, path, body, ctx=None):
                     t["priority"] = _priority_of(body["priority"][0])
                 if "place_id" in body:
                     t["place_id"] = body["place_id"][0].strip()
+                if "due_date" in body:
+                    # An empty date field clears the deadline; parse_qs keeps the
+                    # key because the form always submits it.
+                    t["due_date"] = body["due_date"][0].strip() or None
+                if "title" in body and body["title"][0].strip():
+                    t["title"] = body["title"][0].strip()
             save(todos, user)
         elif path == "/todo/reorder":
             ids_str = body.get("ids", [""])[0]
@@ -296,536 +302,330 @@ def handle(method, path, body, ctx=None):
     # phone shortcuts and the POST actions above.
     return ("redirect", "/momentum?tab=tasks")
 
+def _attr(v):
+    """Quote-safe value for a data-* attribute."""
+    return str(v or "").replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;")
+
+def _bucket_of(t, today_str, week_str):
+    """Which section a task belongs to. Dateless work is 'later' — it is not
+    urgent by omission, and putting it up top drowns the things that are."""
+    d = t.get("due_date")
+    if not d:
+        return "later"
+    if d <= today_str:
+        return "now"
+    if d <= week_str:
+        return "week"
+    return "later"
+
+
+def _absorb_group(t):
+    """Groups and projects said the same thing twice, so groups are gone. A task
+    that only ever had a group reads as if that group were its project."""
+    if not (t.get("project") or "").strip() and (t.get("group") or "").strip():
+        return dict(t, project=t["group"])
+    return t
+
 
 def render(todos, habits, user, readonly=False):
-    today_str = date.today().isoformat()
-    groups = load_groups(user)
+    today = date.today()
+    today_str = today.isoformat()
+    week_str = (today + timedelta(days=7)).isoformat()
     import services.momentum as momentum_svc
     places = momentum_svc.load_places(user)
 
-    # Sort active tasks: soonest due first, no due date → bottom
-    def _due_key(t):
-        d = t.get("due_date")
-        return d if d else "9999-99-99"
-
-    active = sorted([t for t in todos if not t.get("done")], key=_due_key)
+    todos = [_absorb_group(t) for t in todos]
+    active = [t for t in todos if not t.get("done")]
     done_list = [t for t in todos if t.get("done")]
-    total = len(todos)
-    done_count = len(done_list)
 
-    # Group active tasks
-    task_by_group = {}
-    ungrouped = []
-    seen_groups = []
+    # Highest priority first, then soonest deadline. This is the whole answer to
+    # "what do I do now", and the old due-date-only sort could not give it.
+    def _order(t):
+        return (_priority_of(t.get("priority")), t.get("due_date") or "9999-99-99",
+                -(t.get("id") or 0))
+
+    buckets = {"now": [], "week": [], "later": []}
     for t in active:
-        g = t.get("group") or ""
-        if g:
-            if g not in task_by_group:
-                task_by_group[g] = []
-                if g not in seen_groups:
-                    seen_groups.append(g)
-            task_by_group[g].append(t)
-        else:
-            ungrouped.append(t)
+        buckets[_bucket_of(t, today_str, week_str)].append(t)
+    for k in buckets:
+        buckets[k].sort(key=_order)
 
-    all_groups = groups + [g for g in seen_groups if g not in groups]
-
-    # Separate done tasks: group-members go inside their group, rest go to global done
-    done_by_group = {}
-    ungrouped_done = []
-    for t in done_list:
-        g = t.get("group") or ""
-        if g and g in all_groups:
-            done_by_group.setdefault(g, []).append(t)
-        else:
-            ungrouped_done.append(t)
-
-    # ── Habit section (at BOTTOM of page) ─────────────────────
-    habit_index = {h["id"]: h for h in habits}
-    if habits:
-        habit_rows = ""
-        checked_count = sum(1 for h in habits if today_str in h.get("checkins", []))
-        for h in habits:
-            checked = today_str in h.get("checkins", [])
-            streak = 0
-            d = date.today()
-            cs = set(h.get("checkins", []) if isinstance(h.get("checkins"), list) else h.get("checkins", {}).keys())
-            while d.isoformat() in cs:
-                streak += 1
-                d -= timedelta(days=1)
-            if checked:
-                checkin_html = '<span class="hb-done">✓ Done</span>'
-            elif readonly:
-                checkin_html = '<span class="hb-done" style="color:#94a3b8">Not done</span>'
-            else:
-                checkin_html = (
-                    f'<form method="POST" action="/habit/{h["id"]}/checkin" style="display:inline">'
-                    f'<input type="hidden" name="next" value="/todo">'
-                    f'<button class="btn btn-primary btn-sm">Check in</button></form>'
-                )
-            habit_rows += f'''
-            <div class="habit-item {"habit-checked" if checked else ""}">
-              <span class="h-icon">{h.get("icon","✅")}</span>
-              <span class="h-name">{h["name"]}</span>
-              <span class="h-streak">🔥 {streak}d</span>
-              <div class="h-actions">
-                {checkin_html}
-                <a href="/habit/{h["id"]}" class="btn btn-ghost btn-sm">Detail</a>
-              </div>
-            </div>'''
-        habit_section = f'''
-        <details class="habits-accordion">
-          <summary class="habits-header">
-            <span class="habits-title">🔄 Today\'s Habits</span>
-            <span class="habits-meta">{today_str} &nbsp;·&nbsp; {checked_count}/{len(habits)} done</span>
-          </summary>
-          <div class="habit-items">{habit_rows}</div>
-          <a href="/habit" class="habits-link">+ Manage Habits →</a>
-        </details>'''
-    else:
-        habit_section = f'''
-        <div class="habits-section habits-empty">
-          <span>🔄 Today\'s Habits</span>
-          <a href="/habit" class="habits-link">Add Habit →</a>
-        </div>'''
-
-    # ── Item renderer ──────────────────────────────────────────
-    def item_html(t):
-        t.setdefault("type", "task")
-        item_type = t["type"]
-        item_id = t["id"]
-
-        if item_type == "memo":
-            body_text = t.get("body", t.get("title", ""))
-            if readonly:
-                actions_html = ""
-            else:
-                actions_html = (
-                    f'<button class="btn btn-ghost btn-sm" '
-                    f'onclick="openMemoEdit({item_id},this)" type="button">Edit</button>'
-                    f'<form method="POST" action="/todo/delete" style="display:inline">'
-                    f'<input type="hidden" name="id" value="{item_id}">'
-                    f'<button class="btn btn-danger btn-sm">x</button></form>'
-                )
-            return f'''
-        <div class="notepad-item notepad-memo" data-id="{t["id"]}">
-          <div class="item-left"><span class="item-type-dot memo-dot"></span></div>
-          <div class="item-content">
-            <span class="memo-text" id="memo-text-{t["id"]}">{body_text}</span>
-            <form method="POST" action="/todo/memo/edit" class="memo-edit-form" id="memo-edit-{t["id"]}" style="display:none;margin-top:6px">
-              <input type="hidden" name="id" value="{t["id"]}">
-              <textarea name="body" class="memo-textarea" rows="2">{body_text}</textarea>
-              <div style="display:flex;gap:4px;margin-top:4px">
-                <button type="submit" class="btn btn-primary btn-sm">Save</button>
-                <button type="button" class="btn btn-ghost btn-sm" onclick="closeMemoEdit({t["id"]})">Cancel</button>
-              </div>
-            </form>
-          </div>
-          <div class="item-actions">{actions_html}</div>
-        </div>'''
-
-        # task type
-        created = t.get("created_at", "")[:10]
-        due_date = t.get("due_date")
-        due_str = due_date or ""
-        done_at = t.get("done_at")
-        habit_id = t.get("habit_id")
-        t_group = t.get("group") or ""
-        t_project = (t.get("project") or "").strip()
-        t_place = (t.get("place_id") or "").strip()
-        prio_now = _priority_of(t.get("priority", DEFAULT_PRIORITY))
-
-        if readonly:
-            badge = early_badge(due_date, done_at) if t["done"] else due_badge(due_date, t["done"])
-            actions_html = ""
-        elif t["done"]:
-            badge = early_badge(due_date, done_at)
-            actions_html = (
-                f'<form method="POST" action="/todo/undone" style="display:inline">'
-                f'<input type="hidden" name="id" value="{t["id"]}">'
-                f'<button class="btn btn-warn">Restore</button></form>'
-                f'<form method="POST" action="/todo/delete" style="display:inline">'
-                f'<input type="hidden" name="id" value="{t["id"]}">'
-                f'<button class="btn btn-danger">x</button></form>'
-            )
-        else:
-            badge = due_badge(due_date, t["done"])
-            done_btn = (
-                f'<form method="POST" action="/todo/done" style="display:inline">'
-                f'<input type="hidden" name="id" value="{t["id"]}">'
-                f'<button class="btn btn-secondary">Done</button></form>'
-            )
-            habit_exists = habit_id and habit_id in habit_index
-            if habit_exists:
-                habit_btn = f'<a href="/habit/{habit_id}" class="btn btn-ghost linked">🏃 View</a>'
-            else:
-                habit_btn = (
-                    f'<form method="POST" action="/todo/to_habit" style="display:inline">'
-                    f'<input type="hidden" name="id" value="{t["id"]}">'
-                    f'<button class="btn btn-ghost">Habit</button></form>'
-                )
-            group_opts = '<option value="">No group</option>' + "".join(
-                f'<option value="{g}" {"selected" if g == t_group else ""}>{g}</option>'
-                for g in all_groups
-            )
-            group_sel = (
-                f'<form method="POST" action="/todo/set_group" class="group-sel-form">'
-                f'<input type="hidden" name="id" value="{t["id"]}">'
-                f'<select name="group" onchange="this.form.submit()" class="group-select-inline" title="Move to group">'
-                f'{group_opts}'
-                f'</select></form>'
-            )
-            work_sel = (
-                f'<form method="POST" action="/todo/set_meta" class="group-sel-form">'
-                f'<input type="hidden" name="id" value="{t["id"]}">'
-                f'<select name="priority" onchange="this.form.submit()" '
-                f'class="group-select-inline" title="Priority">'
-                f'{_prio_options(prio_now)}</select></form>'
-                f'<form method="POST" action="/todo/set_meta" class="group-sel-form">'
-                f'<input type="hidden" name="id" value="{t["id"]}">'
-                f'<input type="text" name="project" list="wk-projects" value="{t_project}" '
-                f'placeholder="Project" class="wk-inline-project" '
-                f'onchange="this.form.submit()" title="Project"></form>'
-                + (f'<form method="POST" action="/todo/set_meta" class="group-sel-form">'
-                   f'<input type="hidden" name="id" value="{t["id"]}">'
-                   f'<select name="place_id" onchange="this.form.submit()" '
-                   f'class="group-select-inline" title="Place">'
-                   f'{_place_options(places, t_place)}</select></form>' if places else "")
-            )
-            actions_html = (
-                f'{done_btn}{habit_btn}{group_sel}{work_sel}'
-                f'<form method="POST" action="/todo/delete" style="display:inline">'
-                f'<input type="hidden" name="id" value="{t["id"]}">'
-                f'<button class="btn btn-danger">x</button></form>'
-            )
-
-        drag_attr = 'draggable="true"' if not t["done"] else ""
-        drag_handle = '<span class="drag-handle" title="Drag to reorder">⠿</span>' if not t["done"] else ""
-        done_cls = " done" if t["done"] else ""
-        prio_label, prio_var = PRIORITIES[prio_now]
-        work_html = ""
-        if t_project:
-            work_html += f'<span class="wk-chip" title="Project">{t_project}</span>'
-        if prio_now != DEFAULT_PRIORITY:
-            work_html += (f'<span class="wk-prio" style="color:var({prio_var});'
-                          f'border-color:var({prio_var})">{prio_label}</span>')
-        meta_html = ""
-        if badge or due_str or work_html:
-            meta_html = (f'<div class="item-meta">{badge}{work_html}'
-                         f'<span class="item-date">{due_str}</span></div>')
-        return f'''
-        <div class="notepad-item notepad-task{done_cls}" data-id="{t["id"]}" {drag_attr}
-             data-project="{t_project}" data-prio="{prio_now}">
-          <div class="item-left">{drag_handle}<span class="item-type-dot task-dot"></span></div>
-          <div class="item-content">
-            <span class="item-title">{t["title"]}</span>
-            {meta_html}
-          </div>
-          <div class="item-actions">{actions_html}</div>
-        </div>'''
-
-    # ── Build task sections ────────────────────────────────────
-    todo_sections = ""
-
-    def _notepad_card(g, tasks, done_tasks, group_id="", group_idx=-1):
-        count = len(tasks)
-        add_btns = "" if readonly else (
-            f'<div class="notepad-footer">'
-            f'<button type="button" class="btn btn-ghost btn-sm" onclick="openAddTask(this)">+ Task</button>'
-            f'<button type="button" class="btn btn-ghost btn-sm" onclick="openAddMemo(this)">+ Memo</button>'
-            f'</div>'
-            f'<div class="inline-task-form inline-add-form" style="display:none;padding:10px 12px;background:var(--surface-2);border-top:1px solid var(--notepad-line)">'
-            f'<form method="POST" action="/todo/add">'
-            f'<input type="hidden" name="group" value="{g}">'
-            f'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
-            f'<input type="text" name="title" placeholder="Task name..." required style="flex:1;min-width:150px;padding:7px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:var(--text-sm);background:var(--surface);color:var(--text)">'
-            f'<input type="date" name="due_date" style="padding:7px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:var(--text-sm);background:var(--surface);color:var(--text)">'
-            f'<input type="text" name="project" list="wk-projects" placeholder="Project" class="wk-add-input">'
-            f'<select name="priority" class="wk-add-input" title="Priority">{_prio_options(DEFAULT_PRIORITY)}</select>'
-            f'<button type="submit" class="btn btn-primary btn-sm">Add</button>'
-            f'<button type="button" class="btn btn-ghost btn-sm" onclick="closeInlineForm(this)">Cancel</button>'
-            f'</div></form></div>'
-            f'<div class="inline-memo-form inline-add-form" style="display:none;padding:10px 12px;background:var(--surface-2);border-top:1px solid var(--notepad-line)">'
-            f'<form method="POST" action="/todo/memo/add">'
-            f'<input type="hidden" name="group" value="{g}">'
-            f'<div style="display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap">'
-            f'<textarea name="body" placeholder="Memo..." rows="2" required style="flex:1;min-width:150px;padding:7px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:var(--text-sm);resize:vertical;background:var(--surface);color:var(--text)"></textarea>'
-            f'<div style="display:flex;gap:4px">'
-            f'<button type="submit" class="btn btn-primary btn-sm">Add</button>'
-            f'<button type="button" class="btn btn-ghost btn-sm" onclick="closeInlineForm(this)">Cancel</button>'
-            f'</div></div></form></div>'
-        )
-        del_btn = "" if readonly else (
-            f'<form method="POST" action="/todo/group/delete" style="display:inline" '
-            f'onsubmit="return confirm(\'Delete group &quot;{g}&quot;?\')">'
-            f'<input type="hidden" name="name" value="{g}">'
-            f'<button class="notepad-del-btn" type="submit" title="Delete group">x</button></form>'
-        )
-        active_html = "".join(item_html(t) for t in tasks)
-        done_html = ""
-        if done_tasks:
-            done_items_g = "".join(item_html(t) for t in done_tasks)
-            done_html = (
-                f'<details class="sub-done-accordion">'
-                f'<summary class="sub-done-summary"><span class="sub-done-chevron">▶</span>'
-                f' ✓ Completed ({len(done_tasks)})</summary>'
-                f'<div class="sub-done-body">{done_items_g}</div>'
-                f'</details>'
-            )
-        body_content = active_html + done_html
-        if not body_content:
-            body_content = '<div class="group-empty">No items in this group</div>'
-        data_attr = f'data-group="{g}"'
-        group_color = f"var(--group-{(group_idx % 5) + 1})" if group_idx >= 0 else "var(--text-muted)"
-        return f'''
-        <div class="notepad-card" style="--group-color:{group_color}">
-          <div class="notepad-header">
-            <div class="notepad-title-row">
-              <span class="notepad-chevron" onclick="toggleNotepad(this)">▼</span>
-              <span class="notepad-name">{g if g else "Ungrouped"}</span>
-              <span class="notepad-count">{count}</span>
-              <div class="notepad-header-actions">{del_btn}</div>
-            </div>
-          </div>
-          <div class="notepad-body todo-list" {data_attr}>{body_content}</div>
-          {add_btns}
-        </div>'''
-
-    # Ungrouped tasks
-    if ungrouped or ungrouped_done or (not active and not done_list and not all_groups):
-        if not ungrouped and not ungrouped_done:
-            todo_sections += '<div class="empty">No tasks yet 🎉</div>'
-        else:
-            todo_sections += _notepad_card("", ungrouped, ungrouped_done)
-
-    # Named groups
-    for idx, g in enumerate(all_groups):
-        tasks = task_by_group.get(g, [])
-        done_tasks = done_by_group.get(g, [])
-        todo_sections += _notepad_card(g, tasks, done_tasks, group_idx=idx)
-
-    # ── Add form ───────────────────────────────────────────────
-    add_form = ""
-
-    from server import app_tabs
-    tabs_html = app_tabs("/todo", user)
-
-    todo_add_group_card = "" if readonly else (
-        '<div id="addGroupCard" style="display:none;background:var(--surface);border:1px solid var(--border);'
-        'border-radius:var(--radius-lg);padding:16px;margin-bottom:12px;box-shadow:var(--shadow-md)">'
-        '<form method="POST" action="/todo/group/add" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
-        '<input type="text" name="name" id="newGroupNameInput" placeholder="Group name..." '
-        'style="flex:1;min-width:160px;padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:14px;background:var(--surface-2);color:var(--text)">'
-        '<button type="submit" class="btn btn-primary">Add</button>'
-        '<button type="button" onclick="toggleAddGroupCard()" class="btn btn-ghost">✕</button>'
-        '</form></div>'
-    )
+    n_active = len(active)
     all_projects = projects_of(todos)
-    project_opts = "".join(f'<option value="{pj}">{pj}</option>' for pj in all_projects)
-    work_filter_html = (
-        f'<div class="wk-filter">'
-        f'<label class="wk-filter-label">Project</label>'
-        f'<select id="wkProject" class="wf-input" onchange="wkFilter()">'
-        f'<option value="">All</option>{project_opts}</select>'
-        f'<label class="wk-filter-label">Priority</label>'
-        f'<select id="wkPrio" class="wf-input" onchange="wkFilter()">'
-        f'<option value="">All</option>{_prio_options(None)}</select>'
-        f'<button type="button" class="btn btn-ghost btn-sm" onclick="wkReset()">Reset</button>'
-        f'<span id="wkCount" class="wk-filter-count"></span>'
-        f'</div>'
-        f'<datalist id="wk-projects">{project_opts}</datalist>'
-    ) if all_projects or not readonly else ""
+    # Controls appear when there is something to control. An empty list showing
+    # filters was the single worst thing about the old screen.
+    show_filter = n_active >= 8 and len(all_projects) > 1
+    show_places = bool(places)
+
+    def _row(t):
+        tid = t["id"]
+        is_memo = t.get("type") == "memo"
+        prio = _priority_of(t.get("priority"))
+        project = (t.get("project") or "").strip()
+        due = t.get("due_date") or ""
+        place_id = (t.get("place_id") or "").strip()
+        place = next((p for p in places if p["id"] == place_id), None)
+
+        chips = ""
+        if due:
+            n = days_left(due)
+            if n is None:
+                lbl, cls = due, "tk-due"
+            elif n < 0:
+                lbl, cls = f"{abs(n)}d overdue", "tk-due tk-due--over"
+            elif n == 0:
+                lbl, cls = "Today", "tk-due tk-due--today"
+            elif n == 1:
+                lbl, cls = "Tomorrow", "tk-due tk-due--soon"
+            else:
+                lbl, cls = f"in {n}d", "tk-due"
+            chips += f'<span class="{cls}">{lbl}</span>'
+        if project:
+            chips += f'<span class="tk-chip">{project}</span>'
+        if place:
+            chips += f'<span class="tk-chip">📍 {place["label"]}</span>'
+        if prio == 1:
+            chips += '<span class="tk-chip tk-chip--high">High</span>'
+
+        done = bool(t.get("done"))
+        check_action = "/todo/undone" if done else "/todo/done"
+        check_cls = "tk-check tk-check--on" if done else "tk-check"
+        check = "" if readonly else (
+            f'<form method="POST" action="{check_action}" class="tk-check-form" '
+            f'onclick="event.stopPropagation()">'
+            f'<input type="hidden" name="id" value="{tid}">'
+            f'<input type="hidden" name="next" value="/momentum?tab=tasks">'
+            f'<button class="{check_cls}" type="submit" '
+            f'aria-label="{"Mark not done" if done else "Mark done"}">'
+            f'{"✓" if done else ""}</button></form>')
+        opener = "" if readonly else f'onclick="tkOpen(this)"'
+        return (
+            f'<div class="tk-row{" tk-row--done" if done else ""}" {opener} '
+            f'data-id="{tid}" data-title="{_attr(t.get("title",""))}" '
+            f'data-project="{_attr(project)}" data-prio="{prio}" '
+            f'data-due="{due}" data-place="{_attr(place_id)}" '
+            f'data-memo="{"1" if is_memo else ""}">'
+            f'{check}'
+            f'<div class="tk-main">'
+            f'<div class="tk-title">{t.get("title","")}</div>'
+            f'{f"<div class=\'tk-meta\'>{chips}</div>" if chips else ""}'
+            f'</div>'
+            f'{"" if readonly else "<span class=\'tk-open\'>›</span>"}'
+            f'</div>')
+
+    def _section(key, label, items):
+        if not items:
+            return ""
+        return (f'<div class="tk-section" data-bucket="{key}">'
+                f'<div class="tk-section-head"><span>{label}</span>'
+                f'<span class="tk-section-n">{len(items)}</span></div>'
+                f'{"".join(_row(t) for t in items)}</div>')
+
+    list_html = (_section("now", "Overdue &amp; today", buckets["now"])
+                 + _section("week", "This week", buckets["week"])
+                 + _section("later", "Later", buckets["later"]))
+
+    if done_list:
+        done_rows = "".join(_row(t) for t in sorted(
+            done_list, key=lambda x: x.get("done_at") or "", reverse=True)[:50])
+        list_html += (f'<details class="tk-done"><summary>Completed '
+                      f'<span class="tk-section-n">{len(done_list)}</span></summary>'
+                      f'{done_rows}</details>')
+
+    if not active:
+        list_html = ('<div class="tk-empty">Nothing on the list.<br>'
+                     '<span>Type above to add your first task.</span></div>') + list_html
+
+    quick_add = "" if readonly else (
+        '<form class="tk-quick" method="POST" action="/todo/add" autocomplete="off">'
+        '<input type="hidden" name="next" value="/momentum?tab=tasks">'
+        '<input class="tk-quick-input" type="text" name="title" required '
+        'placeholder="Add a task…" aria-label="Add a task">'
+        '<button class="btn btn-primary" type="submit">Add</button>'
+        '</form>')
+
+    project_opts = "".join(f'<option value="{_attr(pj)}">{pj}</option>'
+                           for pj in all_projects)
+    filter_html = "" if not show_filter else (
+        f'<div class="tk-filter">'
+        f'<select id="tkFProject" class="wf-input" onchange="tkFilter()" aria-label="Project">'
+        f'<option value="">All projects</option>{project_opts}</select>'
+        f'<select id="tkFPrio" class="wf-input" onchange="tkFilter()" aria-label="Priority">'
+        f'<option value="">Any priority</option>{_prio_options(None)}</select>'
+        f'<span id="tkFCount" class="tk-filter-n"></span></div>')
 
     place_rows = "".join(
-        f'<div class="wk-place-row">'
-        f'<span class="wk-place-name">📍 {pl["label"]}</span>'
-        f'<span class="wk-place-meta">{pl["lat"]:.4f}, {pl["lon"]:.4f} · {pl["radius_m"]}m</span>'
-        f'<span class="wk-place-meta">{sum(1 for t in todos if not t.get("done") and t.get("place_id") == pl["id"])} open</span>'
+        f'<div class="tk-place-row"><span class="tk-place-name">📍 {pl["label"]}</span>'
+        f'<span class="tk-place-meta">{sum(1 for t in active if t.get("place_id") == pl["id"])} open</span>'
         f'<form method="POST" action="/momentum/place/delete" style="display:inline">'
         f'<input type="hidden" name="id" value="{pl["id"]}">'
-        f'<button class="btn btn-danger btn-sm">Remove</button></form>'
-        f'</div>' for pl in places)
+        f'<button class="btn btn-danger btn-sm">Remove</button></form></div>'
+        for pl in places)
     places_html = "" if readonly else (
-        f'<details class="wk-places">'
-        f'<summary>📍 Places <span class="wk-place-meta">{len(places)}</span></summary>'
-        f'<div class="wk-places-body">'
-        f'{place_rows or "<div class=\"wk-place-empty\">No places yet. Stand where you work and save it.</div>"}'
-        f'<form method="POST" action="/momentum/place/add" id="wkPlaceForm" class="wk-place-add">'
-        f'<input type="hidden" name="lat" id="wkLat"><input type="hidden" name="lon" id="wkLon">'
-        f'<input type="text" name="label" id="wkLabel" class="wf-input" placeholder="Place name (e.g. Office)" required>'
-        f'<button type="button" class="btn btn-primary btn-sm" onclick="wkSavePlace()">Use my current location</button>'
-        f'<span id="wkGeoMsg" class="wk-place-meta"></span>'
-        f'</form>'
-        f'<p class="wk-place-note">A browser cannot watch your location in the background. '
-        f'Set up an arrival automation on your phone to call <code>POST /momentum/arrive</code> '
-        f'and you will get the list in Telegram when you get there.</p>'
-        f'</div></details>'
-    )
+        f'<details class="tk-places"{" open" if not places else ""}>'
+        f'<summary>📍 Places <span class="tk-section-n">{len(places)}</span></summary>'
+        f'<div class="tk-places-body">'
+        f'{place_rows or "<div class=\'tk-place-meta\'>No places yet — stand where you work and save it.</div>"}'
+        f'<form method="POST" action="/momentum/place/add" id="tkPlaceForm" class="tk-place-add">'
+        f'<input type="hidden" name="lat" id="tkLat"><input type="hidden" name="lon" id="tkLon">'
+        f'<input type="text" name="label" id="tkLabel" class="wf-input" placeholder="Place name (e.g. Office)" required>'
+        f'<button type="button" class="btn btn-secondary btn-sm" onclick="tkSavePlace()">Use my current location</button>'
+        f'<span id="tkGeoMsg" class="tk-place-meta"></span></form>'
+        f'<p class="tk-place-note">A browser cannot watch your location in the background. '
+        f'Set an arrival automation on your phone to call <code>POST /momentum/arrive</code> '
+        f'and the list arrives in Telegram when you get there.</p>'
+        f'</div></details>') if (show_places or n_active) else ""
 
-    todo_header_btns = "" if readonly else (
-        '<div style="display:flex;gap:8px">'
-        '<button type="button" onclick="toggleAddGroupCard()" class="btn btn-primary btn-lg">＋ New Group</button>'
-        '</div>'
-    )
+    place_opts = _place_options(places, "")
+    sheet_html = "" if readonly else f'''
+<div class="tk-backdrop" id="tkBackdrop" onclick="tkClose()"></div>
+<div class="tk-sheet" id="tkSheet" role="dialog" aria-label="Task details">
+  <div class="tk-sheet-grip"></div>
+  <form method="POST" action="/todo/set_meta" class="tk-sheet-form">
+    <input type="hidden" name="id" id="tkSid">
+    <input type="hidden" name="next" value="/momentum?tab=tasks">
+    <div class="wf-field"><label class="wf-label">Task</label>
+      <input class="wf-input" type="text" name="title" id="tkStitle" required></div>
+    <div class="tk-sheet-grid">
+      <div class="wf-field"><label class="wf-label">Due</label>
+        <input class="wf-input" type="date" name="due_date" id="tkSdue"></div>
+      <div class="wf-field"><label class="wf-label">Priority</label>
+        <select class="wf-input" name="priority" id="tkSprio">{_prio_options(DEFAULT_PRIORITY)}</select></div>
+    </div>
+    <div class="tk-sheet-grid">
+      <div class="wf-field"><label class="wf-label">Project</label>
+        <input class="wf-input" type="text" name="project" id="tkSproject"
+               list="tk-projects" placeholder="e.g. Samsung AEO"></div>
+      <div class="wf-field"><label class="wf-label">Place</label>
+        <select class="wf-input" name="place_id" id="tkSplace">{place_opts}</select></div>
+    </div>
+    <div class="tk-sheet-actions">
+      <button class="btn btn-primary btn-lg" type="submit">Save</button>
+      <button class="btn btn-ghost btn-lg" type="button" onclick="tkClose()">Cancel</button>
+    </div>
+  </form>
+  <form method="POST" action="/todo/delete" class="tk-sheet-delete"
+        onsubmit="return confirm('Delete this task?')">
+    <input type="hidden" name="id" id="tkDid">
+    <input type="hidden" name="next" value="/momentum?tab=tasks">
+    <button class="btn btn-danger" type="submit">Delete task</button>
+  </form>
+</div>
+<datalist id="tk-projects">{project_opts}</datalist>'''
+
+    from server import app_tabs
+    tabs_html = app_tabs("tasks", user)
+    remaining = len(active)
+    done_today = sum(1 for t in done_list if (t.get("done_at") or "")[:10] == today_str)
+    summary = (f'<div class="tk-summary"><b>{remaining}</b> open'
+               f'{f" · <b>{done_today}</b> done today" if done_today else ""}</div>'
+               ) if todos else ""
 
     return f'''<!DOCTYPE html>
-<html lang="ko"><head><meta charset="UTF-8">
+<html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Tasks · Momentum</title>
 <link rel="stylesheet" href="/static/style.css">
 <style>
-/* Badge */
-.badge {{ display:inline-flex; align-items:center; height:20px; padding:0 8px; border-radius:var(--radius-full); font-size:var(--text-xs); font-weight:var(--fw-bold); }}
-.badge-due     {{ background:rgba(56,189,248,0.1);   color:var(--accent); }}
-.badge-overdue {{ background:rgba(248,113,113,0.12); color:var(--danger); border:1px solid rgba(248,113,113,0.3); }}
-.badge-dday    {{ background:rgba(251,191,36,0.1);   color:var(--warn); border:1px solid rgba(251,191,36,0.3); }}
-.badge-early   {{ background:rgba(52,211,153,0.1);   color:var(--success); }}
+.tk-wrap{{max-width:720px;margin:0 auto;padding:18px 16px 90px}}
+.tk-quick{{display:flex;gap:8px;margin-bottom:14px}}
+.tk-quick-input{{flex:1;min-width:0;padding:12px 14px;font-size:1rem;
+  background:var(--surface);border:1px solid var(--border-bright);border-radius:var(--radius-md);
+  color:var(--text)}}
+.tk-quick-input:focus{{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-glow)}}
+.tk-quick .btn{{height:auto;padding:0 18px}}
+.tk-summary{{font-size:var(--text-sm);color:var(--text-muted);margin:0 2px 14px}}
+.tk-filter{{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px}}
+.tk-filter .wf-input{{width:auto;flex:1;min-width:140px;min-height:44px}}
+.tk-filter-n{{font-size:var(--text-xs);color:var(--text-muted)}}
 
-/* Work axes — project chip, priority badge, filter toolbar */
-.wk-chip {{ display:inline-flex; align-items:center; height:20px; padding:0 8px; border-radius:var(--radius-full);
-  background:var(--surface-3); color:var(--text); font-size:var(--text-xs); font-weight:var(--fw-semibold); }}
-.wk-prio {{ display:inline-flex; align-items:center; height:20px; padding:0 8px; border-radius:var(--radius-full);
-  border:1px solid; font-size:var(--text-xs); font-weight:var(--fw-bold); background:transparent; }}
-.wk-add-input {{ padding:7px 10px; border:1px solid var(--border); border-radius:var(--radius-sm);
-  font-size:var(--text-sm); background:var(--surface); color:var(--text); min-width:110px; }}
-.wk-inline-project {{ width:96px; padding:3px 6px; border:1px solid var(--border); border-radius:var(--radius-sm);
-  font-size:var(--text-xs); background:var(--surface-2); color:var(--text); }}
-.wk-filter {{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:10px 14px; margin-bottom:12px;
-  background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-lg); }}
-.wk-filter-label {{ font-size:var(--text-xs); font-weight:var(--fw-bold); letter-spacing:.06em;
-  text-transform:uppercase; color:var(--text-muted); }}
-.wk-filter .wf-input {{ width:auto; min-width:120px; }}
-.wk-filter-count {{ font-size:var(--text-xs); color:var(--text-muted); margin-left:auto; }}
-@media (max-width:768px) {{
-  .wk-filter {{ display:grid; grid-template-columns:auto 1fr; }}
-  .wk-filter .btn, .wk-filter-count {{ grid-column:1 / -1; }}
-  .wk-filter-count {{ margin-left:0; }}
-  .wk-inline-project {{ width:100%; min-height:44px; }}
+.tk-section{{margin-bottom:22px}}
+.tk-section-head{{display:flex;align-items:center;gap:8px;margin:0 2px 8px;
+  font-size:var(--text-xs);font-weight:var(--fw-bold);letter-spacing:.06em;
+  text-transform:uppercase;color:var(--text-muted)}}
+.tk-section-n{{background:var(--surface-2);color:var(--text-muted);border-radius:var(--radius-full);
+  padding:1px 8px;font-size:var(--text-xs);font-weight:var(--fw-bold)}}
+
+.tk-row{{display:flex;align-items:flex-start;gap:12px;padding:12px 14px;cursor:pointer;
+  background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-md);
+  margin-bottom:8px;transition:border-color .15s,background .15s}}
+.tk-row:hover{{border-color:var(--border-bright)}}
+.tk-row--done{{opacity:.55}}
+.tk-row--done .tk-title{{text-decoration:line-through}}
+.tk-check-form{{flex-shrink:0;display:flex;position:relative}}
+.tk-check{{width:24px;height:24px;border-radius:50%;border:2px solid var(--border-bright);
+  background:transparent;color:var(--on-accent);cursor:pointer;font-size:.8rem;font-weight:800;
+  display:flex;align-items:center;justify-content:center;padding:0;position:relative;flex-shrink:0}}
+/* Circle stays small, tap area does not — the guideline's 44px floor. */
+.tk-check::after{{content:"";position:absolute;top:50%;left:50%;translate:-50% -50%;
+  width:max(100%,44px);height:max(100%,44px);border-radius:50%}}
+.tk-check:hover{{border-color:var(--accent)}}
+.tk-check--on{{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}}
+.tk-main{{flex:1;min-width:0}}
+.tk-title{{font-size:var(--text-base);color:var(--text);line-height:1.4;word-break:break-word}}
+.tk-meta{{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}}
+/* Chips carry no fill: a tinted background pushed every one of these under AA
+   in the light theme (4.13-4.49). On the card surface the same colors clear it
+   in both themes, and the outline still reads as a chip. */
+.tk-chip,.tk-due{{display:inline-flex;align-items:center;height:20px;padding:0 8px;
+  border-radius:var(--radius-full);background:transparent;
+  border:1px solid var(--border-bright);color:var(--text-muted);
+  font-size:var(--text-xs);font-weight:var(--fw-semibold)}}
+.tk-due{{font-weight:var(--fw-bold)}}
+.tk-chip--high{{border-color:var(--group-4);color:var(--group-4)}}
+.tk-due--over{{border-color:var(--danger);color:var(--danger)}}
+.tk-due--today{{border-color:var(--warn);color:var(--warn)}}
+.tk-due--soon{{border-color:var(--accent);color:var(--accent)}}
+.tk-open{{color:var(--text-dim);font-size:1.2rem;line-height:1;flex-shrink:0;align-self:center}}
+
+.tk-empty{{text-align:center;color:var(--text-muted);padding:38px 16px;font-size:var(--text-md)}}
+.tk-empty span{{font-size:var(--text-sm);color:var(--text-dim)}}
+.tk-done{{margin-top:6px}}
+.tk-done>summary{{cursor:pointer;list-style:none;font-size:var(--text-xs);
+  font-weight:var(--fw-bold);letter-spacing:.06em;text-transform:uppercase;
+  color:var(--text-muted);padding:8px 2px}}
+.tk-done>summary::-webkit-details-marker{{display:none}}
+
+.tk-places{{margin-top:20px;background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius-md);overflow:hidden}}
+.tk-places>summary{{cursor:pointer;list-style:none;padding:12px 14px;
+  font-size:var(--text-sm);font-weight:var(--fw-semibold);color:var(--text)}}
+.tk-places>summary::-webkit-details-marker{{display:none}}
+.tk-places-body{{padding:0 14px 14px;display:flex;flex-direction:column;gap:10px}}
+.tk-place-row{{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  padding-top:10px;border-top:1px solid var(--border)}}
+.tk-place-name{{font-size:var(--text-sm);font-weight:var(--fw-semibold);color:var(--text)}}
+.tk-place-meta{{font-size:var(--text-xs);color:var(--text-muted)}}
+.tk-place-add{{display:flex;gap:8px;flex-wrap:wrap;align-items:center;
+  padding-top:10px;border-top:1px solid var(--border)}}
+.tk-place-add .wf-input{{flex:1;min-width:160px;min-height:44px}}
+.tk-place-note{{font-size:var(--text-xs);color:var(--text-muted);line-height:1.6}}
+.tk-place-note code{{background:var(--surface-2);padding:1px 5px;border-radius:var(--radius-sm)}}
+
+.tk-backdrop{{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9998;display:none}}
+.tk-backdrop.is-on{{display:block}}
+.tk-sheet{{position:fixed;left:50%;translate:-50% 0;bottom:0;width:min(560px,100%);
+  z-index:9999;background:var(--surface);border:1px solid var(--border-bright);
+  border-radius:var(--radius-xl) var(--radius-xl) 0 0;box-shadow:var(--shadow-lg);
+  padding:8px 18px calc(20px + env(safe-area-inset-bottom,0px));display:none;
+  max-height:88vh;overflow-y:auto}}
+.tk-sheet.is-on{{display:block}}
+.tk-sheet-grip{{width:40px;height:4px;border-radius:2px;background:var(--border-bright);
+  margin:6px auto 14px}}
+.tk-sheet-form{{display:flex;flex-direction:column;gap:12px}}
+.tk-sheet-grid{{display:grid;grid-template-columns:1fr 1fr;gap:12px}}
+.tk-sheet .wf-input{{min-height:44px}}
+.tk-sheet-actions{{display:flex;gap:8px;margin-top:4px}}
+.tk-sheet-actions .btn{{flex:1}}
+.tk-sheet-delete{{margin-top:14px;padding-top:14px;border-top:1px solid var(--border);
+  display:flex;justify-content:center}}
+@media (min-width:768px){{
+  .tk-sheet{{bottom:auto;top:50%;translate:-50% -50%;border-radius:var(--radius-xl)}}
 }}
-
-/* Places */
-.wk-places {{ background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-lg);
-  margin-bottom:12px; overflow:hidden; }}
-.wk-places > summary {{ padding:12px 16px; cursor:pointer; font-size:var(--text-sm);
-  font-weight:var(--fw-semibold); color:var(--text); list-style:none; }}
-.wk-places > summary::-webkit-details-marker {{ display:none; }}
-.wk-places-body {{ padding:0 16px 16px; display:flex; flex-direction:column; gap:10px; }}
-.wk-place-row {{ display:flex; align-items:center; gap:12px; flex-wrap:wrap;
-  padding:8px 0; border-top:1px solid var(--border); }}
-.wk-place-name {{ font-size:var(--text-sm); font-weight:var(--fw-semibold); color:var(--text); }}
-.wk-place-meta {{ font-size:var(--text-xs); color:var(--text-muted); }}
-.wk-place-empty {{ font-size:var(--text-sm); color:var(--text-muted); padding:8px 0; }}
-.wk-place-add {{ display:flex; gap:8px; align-items:center; flex-wrap:wrap;
-  padding-top:10px; border-top:1px solid var(--border); }}
-.wk-place-add .wf-input {{ width:auto; min-width:180px; flex:1; }}
-.wk-place-note {{ font-size:var(--text-xs); color:var(--text-muted); line-height:1.6; }}
-.wk-place-note code {{ background:var(--surface-2); padding:1px 5px; border-radius:var(--radius-sm); }}
-@media (max-width:768px) {{
-  .wk-place-add {{ flex-direction:column; align-items:stretch; }}
-  .wk-place-add .wf-input, .wk-place-add .btn {{ width:100%; min-height:44px; }}
-}}
-
-/* Notepad card */
-.notepad-card {{ background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-lg); margin-bottom:16px; box-shadow:var(--shadow-sm); overflow:hidden; }}
-.notepad-tab {{ background:var(--notepad-header); border-bottom:1px solid var(--border); display:flex; align-items:center; padding:5px 20px; gap:8px; }}
-.notepad-tab-dot {{ width:10px; height:10px; border-radius:50%; border:2px solid var(--accent); background:transparent; }}
-.notepad-header {{ background:var(--notepad-header); padding:10px 16px 12px; }}
-.notepad-title-row {{ display:flex; align-items:center; gap:10px; }}
-.notepad-chevron {{ font-size:0.7rem; color:var(--text-muted); cursor:pointer; transition:transform 0.2s; user-select:none; }}
-.notepad-card.collapsed .notepad-chevron {{ transform:rotate(-90deg); }}
-.notepad-name {{ font-weight:var(--fw-bold); font-size:var(--text-md); color:var(--text); flex:1; }}
-.notepad-count {{ font-size:var(--text-xs); font-weight:var(--fw-bold); padding:2px 9px; background:var(--accent); color:var(--on-accent); border-radius:var(--radius-full); min-width:22px; text-align:center; }}
-.notepad-del-btn {{ background:transparent; border:none; color:var(--text-dim); font-size:1.1rem; cursor:pointer; padding:0 4px; transition:color 0.15s; }}
-.notepad-del-btn:hover {{ color:var(--danger); }}
-.notepad-body {{ padding:8px 12px 4px; }}
-.notepad-card.collapsed .notepad-body, .notepad-card.collapsed .notepad-footer {{ display:none; }}
-.notepad-item {{ display:flex; align-items:flex-start; gap:10px; padding:10px 8px; border-bottom:1px solid var(--notepad-line); border-radius:var(--radius-md); transition:background 0.15s; }}
-.notepad-item:last-child {{ border-bottom:none; }}
-.notepad-item:hover {{ background:var(--surface-3); }}
-.item-left {{ display:flex; align-items:center; gap:6px; padding-top:4px; flex-shrink:0; }}
-.item-type-dot {{ width:8px; height:8px; border-radius:50%; flex-shrink:0; }}
-.task-dot {{ background:var(--accent); }}
-.memo-dot {{ background:var(--warn); }}
-.item-content {{ flex:1; min-width:0; }}
-.item-title {{ font-size:var(--text-md); font-weight:var(--fw-semibold); color:var(--text); line-height:1.4; }}
-.item-meta {{ display:flex; align-items:center; gap:6px; margin-top:3px; }}
-.item-date {{ font-size:var(--text-xs); color:var(--text-muted); }}
-.item-actions {{ display:flex; align-items:center; gap:4px; flex-shrink:0; }}
-.notepad-task.done .item-title {{ text-decoration:line-through; color:var(--text-muted); }}
-.notepad-task.done {{ opacity:0.5; }}
-.memo-text {{ font-size:var(--text-base); color:var(--text-muted); font-style:italic; line-height:1.5; }}
-.memo-textarea {{ width:100%; padding:8px 12px; border:1px solid var(--border); border-radius:var(--radius-sm); font-size:var(--text-base); resize:vertical; background:var(--surface-2); color:var(--text); }}
-.notepad-footer {{ display:flex; gap:8px; padding:8px 12px 10px; background:var(--surface-2); border-top:1px solid var(--notepad-line); }}
-
-/* drag */
-.drag-handle {{ cursor:grab; color:var(--slate-300); font-size:1rem; padding:0 2px; flex-shrink:0; user-select:none; touch-action:none; }}
-.drag-handle:hover {{ color:var(--slate-500); }}
-.drag-handle:active {{ cursor:grabbing; }}
-.notepad-task.dragging {{ opacity:0.4; box-shadow:0 8px 24px rgba(0,0,0,0.15); border:1px solid var(--blue-500); }}
-
-/* group select inline */
-.group-sel-form {{ display:inline-flex; align-items:center; }}
-.group-select-inline {{ font-size:0.75rem; padding:3px 6px; border-radius:6px; border:1px solid var(--border); background:var(--surface-2); color:var(--text-muted); cursor:pointer; }}
-
-/* sub-done */
-.sub-done-accordion {{ margin-top:8px; border-radius:8px; border:1px solid var(--border); overflow:hidden; }}
-.sub-done-accordion[open] > .sub-done-summary .sub-done-chevron {{ transform:rotate(90deg); }}
-.sub-done-summary {{ display:flex; align-items:center; gap:8px; padding:8px 12px; cursor:pointer; list-style:none; background:var(--surface-2); font-size:0.82rem; font-weight:600; color:var(--text-muted); user-select:none; }}
-.sub-done-summary::-webkit-details-marker {{ display:none; }}
-.sub-done-chevron {{ font-size:0.65rem; color:var(--text-muted); transition:transform 0.2s; display:inline-block; }}
-.sub-done-body {{ padding:8px 8px 4px; }}
-.group-empty {{ color:var(--text-muted); font-size:0.85rem; padding:12px 8px; text-align:center; }}
-
-/* header & stats */
-.task-list-header {{ display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }}
-.stats {{ display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap; }}
-.stats span {{ background:var(--surface-2); padding:5px 14px; border-radius:var(--radius-full); border:1px solid var(--border); font-size:0.82rem; color:var(--text-muted); font-weight:600; }}
-.stats .done-c {{ color:var(--success); background:rgba(52,211,153,0.1); border-color:rgba(52,211,153,0.3); }}
-.add-form {{ display:flex; gap:8px; flex-wrap:wrap; align-items:flex-start; }}
-.add-form input, .add-form select {{ padding:9px 12px; border:1px solid var(--border); border-radius:var(--radius-sm); font-size:var(--text-base); background:var(--surface-2); color:var(--text); }}
-.add-form input[type=text], .add-form input[type=date] {{ flex:1; min-width:140px; }}
-.add-form input:focus, .add-form select:focus {{ outline:none; border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-glow); }}
-
-/* Habits section */
-.habits-accordion {{ background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-lg); margin-top:24px; overflow:hidden; box-shadow:var(--shadow-sm); }}
-.habits-accordion > .habits-header {{ display:flex; align-items:center; justify-content:space-between; padding:14px 20px; cursor:pointer; list-style:none; background:var(--surface-2); user-select:none; }}
-.habits-accordion > .habits-header::-webkit-details-marker {{ display:none; }}
-.habits-accordion[open] > .habits-header {{ border-bottom:1px solid var(--border); }}
-.habits-accordion .habit-items {{ display:flex; flex-direction:column; gap:8px; padding:12px 20px; }}
-.habits-section.habits-empty {{ display:flex; align-items:center; justify-content:space-between; padding:14px 20px; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-lg); margin-top:24px; }}
-.habits-title {{ font-weight:800; font-size:1rem; color:var(--text); }}
-.habits-meta {{ font-size:0.85rem; color:var(--text-muted); }}
-.habit-item {{ display:flex; align-items:center; gap:12px; background:var(--surface-2); padding:12px 16px; border-radius:12px; border:1px solid var(--border); transition:0.2s; }}
-.habit-item:hover {{ border-color:var(--accent); background:var(--surface-3); transform:translateY(-1px); }}
-.habit-item.habit-checked {{ opacity:0.5; }}
-.h-icon {{ font-size:1.1rem; flex-shrink:0; width:32px; height:32px; background:var(--surface-3); border-radius:8px; display:flex; align-items:center; justify-content:center; }}
-.h-name {{ flex:1; font-size:0.9rem; font-weight:600; color:var(--text); }}
-.h-streak {{ font-size:0.75rem; color:var(--warn); font-weight:700; white-space:nowrap; background:rgba(251,191,36,0.1); padding:2px 8px; border-radius:var(--radius-full); border:1px solid rgba(251,191,36,0.3); }}
-.h-actions {{ display:flex; gap:6px; align-items:center; flex-shrink:0; }}
-.hb-check {{ background:var(--accent); color:var(--on-accent); font-size:0.78rem; padding:4px 12px; border-radius:6px; border:none; cursor:pointer; font-weight:700; transition:0.2s; }}
-.hb-check:hover {{ opacity:0.88; transform:translateY(-1px); box-shadow:0 4px 10px rgba(56,189,248,0.3); }}
-.hb-done {{ font-size:0.78rem; color:var(--success); font-weight:700; padding:4px 8px; background:rgba(52,211,153,0.1); border-radius:6px; border:1px solid rgba(52,211,153,0.3); }}
-.hb-detail {{ background:var(--surface-2); color:var(--text-muted); font-size:0.78rem; text-decoration:none; padding:4px 10px; border-radius:6px; border:1px solid var(--border); transition:0.2s; }}
-.hb-detail:hover {{ border-color:var(--accent); color:var(--accent); }}
-.habits-link {{ display:inline-block; margin:8px 20px 16px; font-size:0.82rem; color:var(--accent); text-decoration:none; font-weight:600; }}
-.habits-link:hover {{ text-decoration:underline; }}
-
-@media (max-width:600px) {{
-  .notepad-item {{ flex-wrap:wrap; }}
-  /* Four controls (group, priority, place, project) cannot share one row at
-     390px — they collapse to slivers. Two per row, each full width. */
-  .item-actions {{ width:100%; justify-content:flex-end; margin-top:6px; flex-wrap:wrap; gap:6px; }}
-  .item-actions .group-sel-form {{ flex:1 1 46%; min-width:0; }}
-  .item-actions .group-select-inline, .item-actions .wk-inline-project {{ width:100%; }}
-  .wk-inline-project {{ min-height:44px; }}
-  .group-sel-form {{ order:10; width:100%; }}
-  /* 44px, not 40 — the guideline's floor, and this class now carries the
-     priority and place pickers too. */
-  .group-select-inline {{ width:100%; min-height:44px; font-size:0.88rem; padding:8px 10px; }}
-  .habit-item {{ flex-wrap:wrap; gap:8px; padding:10px 12px; }}
-  .h-actions {{ width:100%; justify-content:flex-end; margin-top:4px; flex-wrap:wrap; gap:6px; }}
-  .add-form {{ flex-direction:column; gap:8px; }}
-  .add-form input, .add-form select, .add-form textarea {{ width:100%; min-height:44px; font-size:1rem; }}
+@media (max-width:768px){{
+  .tk-sheet-grid{{grid-template-columns:1fr}}
+  .tk-quick-input{{font-size:16px}}
+  .tk-row{{padding:14px}}
 }}
 </style>
 </head><body>
@@ -833,263 +633,68 @@ def render(todos, habits, user, readonly=False):
   <span class="nav-brand">⚡ Momentum</span>
   <span class="nav-user">👤 {user} &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
 </nav>
-<div class="container">
-  {add_form}
-  {todo_add_group_card}
-  <div class="task-list-header">
-    <div class="stats">
-      <span>Total {total}</span><span class="done-c">Done {done_count}</span><span>Remaining {total - done_count}</span>
-    </div>
-    {todo_header_btns}
-  </div>
-  {work_filter_html}
+<div class="tk-wrap">
+  {quick_add}
+  {summary}
+  {filter_html}
+  <div id="tkList">{list_html}</div>
   {places_html}
-  {todo_sections}
-  {habit_section}
 </div>
+{sheet_html}
 {tabs_html}
 <script>
-function wkFilter() {{
-  var pj = document.getElementById('wkProject').value;
-  var pr = document.getElementById('wkPrio').value;
+function tkOpen(row) {{
+  var $ = function(i) {{ return document.getElementById(i); }};
+  $('tkSid').value = row.dataset.id;
+  $('tkDid').value = row.dataset.id;
+  $('tkStitle').value = row.dataset.title || '';
+  $('tkSdue').value = row.dataset.due || '';
+  $('tkSprio').value = row.dataset.prio || '2';
+  $('tkSproject').value = row.dataset.project || '';
+  var place = $('tkSplace');
+  if (place) place.value = row.dataset.place || '';
+  $('tkBackdrop').classList.add('is-on');
+  $('tkSheet').classList.add('is-on');
+}}
+function tkClose() {{
+  document.getElementById('tkBackdrop').classList.remove('is-on');
+  document.getElementById('tkSheet').classList.remove('is-on');
+}}
+document.addEventListener('keydown', function(e) {{
+  if (e.key === 'Escape') tkClose();
+}});
+function tkFilter() {{
+  var pj = document.getElementById('tkFProject').value;
+  var pr = document.getElementById('tkFPrio').value;
   var shown = 0;
-  document.querySelectorAll('.notepad-task').forEach(function(row) {{
-    var ok = (!pj || row.dataset.project === pj) && (!pr || row.dataset.prio === pr);
-    row.style.display = ok ? '' : 'none';
+  document.querySelectorAll('.tk-row').forEach(function(r) {{
+    var ok = (!pj || r.dataset.project === pj) && (!pr || r.dataset.prio === pr);
+    r.style.display = ok ? '' : 'none';
     if (ok) shown++;
   }});
-  // A group whose every task is filtered out would otherwise sit there empty.
-  document.querySelectorAll('.notepad-card').forEach(function(card) {{
-    var tasks = card.querySelectorAll('.notepad-task');
-    var vis = card.querySelectorAll('.notepad-task:not([style*="display: none"])');
-    card.style.display = (tasks.length && !vis.length && (pj || pr)) ? 'none' : '';
+  // A section whose rows all filtered out should not leave its heading behind.
+  document.querySelectorAll('.tk-section').forEach(function(s) {{
+    var vis = [].slice.call(s.querySelectorAll('.tk-row')).some(function(r) {{
+      return r.style.display !== 'none';
+    }});
+    s.style.display = vis ? '' : 'none';
   }});
-  var c = document.getElementById('wkCount');
+  var c = document.getElementById('tkFCount');
   if (c) c.textContent = (pj || pr) ? shown + ' shown' : '';
 }}
-function wkSavePlace() {{
-  var msg = document.getElementById('wkGeoMsg');
-  var label = document.getElementById('wkLabel');
+function tkSavePlace() {{
+  var msg = document.getElementById('tkGeoMsg');
+  var label = document.getElementById('tkLabel');
   if (!label.value.trim()) {{ msg.textContent = 'Name it first.'; label.focus(); return; }}
   if (!navigator.geolocation) {{ msg.textContent = 'This browser has no geolocation.'; return; }}
   msg.textContent = 'Locating…';
   navigator.geolocation.getCurrentPosition(function(pos) {{
-    document.getElementById('wkLat').value = pos.coords.latitude;
-    document.getElementById('wkLon').value = pos.coords.longitude;
-    document.getElementById('wkPlaceForm').submit();
+    document.getElementById('tkLat').value = pos.coords.latitude;
+    document.getElementById('tkLon').value = pos.coords.longitude;
+    document.getElementById('tkPlaceForm').submit();
   }}, function(err) {{
     msg.textContent = 'Could not get location: ' + err.message;
   }}, {{ enableHighAccuracy: true, timeout: 10000 }});
 }}
-function wkReset() {{
-  document.getElementById('wkProject').value = '';
-  document.getElementById('wkPrio').value = '';
-  wkFilter();
-}}
-function toggleAddGroupCard() {{
-  var card = document.getElementById('addGroupCard');
-  if (!card) return;
-  var open = card.style.display !== 'none';
-  card.style.display = open ? 'none' : 'block';
-  if (!open) {{
-    card.scrollIntoView({{behavior:'smooth', block:'nearest'}});
-    setTimeout(function() {{
-      var inp = document.getElementById('newGroupNameInput');
-      if (inp) inp.focus();
-    }}, 100);
-  }}
-}}
-function closeAddForms() {{
-  var taskCard = document.getElementById('addTaskCard');
-  var memoCard = document.getElementById('addMemoCard');
-  if (taskCard) taskCard.style.display = 'none';
-  if (memoCard) memoCard.style.display = 'none';
-}}
-
-function openAddTask(btn) {{
-  closeAllInlineForms();
-  var card = btn.closest('.notepad-card');
-  if (!card) return;
-  var form = card.querySelector('.inline-task-form');
-  if (!form) return;
-  form.style.display = 'block';
-  setTimeout(function() {{
-    var inp = form.querySelector('input[name="title"]');
-    if (inp) inp.focus();
-  }}, 50);
-}}
-
-function openAddMemo(btn) {{
-  closeAllInlineForms();
-  var card = btn.closest('.notepad-card');
-  if (!card) return;
-  var form = card.querySelector('.inline-memo-form');
-  if (!form) return;
-  form.style.display = 'block';
-  setTimeout(function() {{
-    var ta = form.querySelector('textarea');
-    if (ta) ta.focus();
-  }}, 50);
-}}
-
-function closeInlineForm(btn) {{
-  var form = btn.closest('.inline-add-form');
-  if (form) form.style.display = 'none';
-}}
-
-function closeAllInlineForms() {{
-  document.querySelectorAll('.inline-add-form').forEach(function(el) {{
-    el.style.display = 'none';
-  }});
-}}
-
-function toggleNotepad(el) {{
-  var card = el.closest('.notepad-card');
-  if (card) card.classList.toggle('collapsed');
-}}
-
-function openMemoEdit(id, btn) {{
-  var text = document.getElementById('memo-text-' + id);
-  var form = document.getElementById('memo-edit-' + id);
-  if (!text || !form) return;
-  text.style.display = 'none';
-  form.style.display = 'block';
-  var item = form.closest('.notepad-item');
-  if (item) {{
-    var actions = item.querySelector('.item-actions');
-    if (actions) actions.style.display = 'none';
-  }}
-  var ta = form.querySelector('textarea');
-  if (ta) ta.focus();
-}}
-
-function closeMemoEdit(id) {{
-  var text = document.getElementById('memo-text-' + id);
-  var form = document.getElementById('memo-edit-' + id);
-  if (!text || !form) return;
-  text.style.display = '';
-  form.style.display = 'none';
-  var item = form.closest('.notepad-item');
-  if (item) {{
-    var actions = item.querySelector('.item-actions');
-    if (actions) actions.style.display = '';
-  }}
-}}
-
-function toggleNewGroup(sel) {{
-  var inp = document.getElementById('newGroupInput');
-  if (!inp) return;
-  if (sel.value === '__new__') {{
-    inp.style.display = 'block';
-    inp.required = true;
-    inp.focus();
-    sel.value = '';
-  }} else {{
-    inp.style.display = 'none';
-    inp.required = false;
-    inp.value = '';
-  }}
-}}
-
-document.addEventListener('keydown', function(e) {{
-  if (e.key !== 'Enter' || e.target.tagName !== 'INPUT') return;
-  var t = e.target.type;
-  if (t === 'submit' || t === 'button' || t === 'checkbox' || t === 'radio') return;
-  e.preventDefault();
-  var form = e.target.closest('form');
-  if (!form) return;
-  var inputs = Array.from(form.querySelectorAll('input:not([type=hidden]):not([type=submit]):not([type=button]), select, textarea'));
-  var idx = inputs.indexOf(e.target);
-  if (idx < inputs.length - 1) inputs[idx + 1].focus();
-}});
-
-(function() {{
-  var dragged = null;
-  var clone = null;
-  var offsetY = 0;
-
-  function getList(el) {{
-    return el.closest('.todo-list');
-  }}
-
-  function saveOrder(list) {{
-    var ids = Array.from(list.querySelectorAll('.notepad-task[draggable]')).map(function(el) {{ return el.dataset.id; }});
-    if (ids.length > 0) {{
-      fetch('/todo/reorder', {{
-        method: 'POST',
-        headers: {{'Content-Type': 'application/x-www-form-urlencoded'}},
-        body: 'ids=' + ids.join(',')
-      }});
-    }}
-  }}
-
-  function insertAt(list, clientY) {{
-    var items = Array.from(list.querySelectorAll('.notepad-task[draggable]')).filter(function(el) {{ return el !== dragged; }});
-    var after = null;
-    for (var i = 0; i < items.length; i++) {{
-      var rect = items[i].getBoundingClientRect();
-      if (clientY < rect.top + rect.height / 2) {{ after = items[i]; break; }}
-    }}
-    list.insertBefore(dragged, after);
-  }}
-
-  document.addEventListener('dragstart', function(e) {{
-    dragged = e.target.closest('.notepad-task[draggable]');
-    if (!dragged) return;
-    dragged.classList.add('dragging');
-    e.dataTransfer.effectAllowed = 'move';
-  }});
-  document.addEventListener('dragend', function() {{
-    if (!dragged) return;
-    dragged.classList.remove('dragging');
-    var list = getList(dragged);
-    if (list) saveOrder(list);
-    dragged = null;
-  }});
-  document.addEventListener('dragover', function(e) {{
-    e.preventDefault();
-    if (!dragged) return;
-    var list = getList(e.target.closest('.todo-item') || e.target);
-    if (list) insertAt(list, e.clientY);
-  }});
-
-  document.addEventListener('touchstart', function(e) {{
-    var handle = e.target.closest('.drag-handle');
-    if (!handle) return;
-    dragged = handle.closest('.notepad-task[draggable]');
-    if (!dragged) return;
-    var touch = e.touches[0];
-    var rect = dragged.getBoundingClientRect();
-    offsetY = touch.clientY - rect.top;
-    clone = dragged.cloneNode(true);
-    clone.style.cssText = 'position:fixed;left:' + rect.left + 'px;width:' + rect.width + 'px;top:' + rect.top + 'px;z-index:9999;opacity:.85;pointer-events:none;box-shadow:0 8px 24px rgba(0,0,0,.18);border-radius:14px;background:white;';
-    document.body.appendChild(clone);
-    dragged.style.opacity = '.25';
-    e.preventDefault();
-  }}, {{passive: false}});
-
-  document.addEventListener('touchmove', function(e) {{
-    if (!dragged || !clone) return;
-    var touch = e.touches[0];
-    clone.style.top = (touch.clientY - offsetY) + 'px';
-    clone.style.display = 'none';
-    var under = document.elementFromPoint(touch.clientX, touch.clientY);
-    clone.style.display = '';
-    if (under) {{
-      var list = getList(under.closest('.todo-item') || under);
-      if (list) insertAt(list, touch.clientY);
-    }}
-    e.preventDefault();
-  }}, {{passive: false}});
-
-  document.addEventListener('touchend', function() {{
-    if (!dragged) return;
-    dragged.style.opacity = '';
-    if (clone) {{ clone.remove(); clone = null; }}
-    var list = getList(dragged);
-    if (list) saveOrder(list);
-    dragged = null;
-  }});
-}})();
 </script>
 </body></html>'''
