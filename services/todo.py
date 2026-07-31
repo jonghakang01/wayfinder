@@ -486,6 +486,7 @@ def render(todos, habits, user, readonly=False, group_by="date"):
             f'data-project="{_attr(project)}" data-prio="{prio}" '
             f'data-due="{due}" data-place="{_attr(place_id)}" '
             f'data-group="{_attr(t.get("group") or "")}" '
+            f'data-habit="{"1" if t.get("habit_id") else ""}" '
             f'data-memo="{"1" if is_memo else ""}">'
             f'{check}'
             f'<div class="tk-main">'
@@ -702,6 +703,11 @@ def render(todos, habits, user, readonly=False, group_by="date"):
     </div>
     <span id="tkNpMsg" class="tk-place-meta"></span>
   </form>
+  <form method="POST" action="/todo/to_habit" class="tk-sheet-habit">
+    <input type="hidden" name="id" id="tkHid">
+    <input type="hidden" name="next" value="{back}">
+    <button class="btn btn-secondary" type="submit" id="tkHabitBtn">🔁 Also track as a habit</button>
+  </form>
   <form method="POST" action="/todo/delete" class="tk-sheet-delete"
         onsubmit="return confirm('Delete this task?')">
     <input type="hidden" name="id" id="tkDid">
@@ -870,6 +876,9 @@ a.tk-row{{text-decoration:none;color:inherit}}
 @media (max-width:768px){{
   .tk-copy-label{{min-width:100%}}
 }}
+.tk-sheet-habit{{margin-top:12px}}
+.tk-sheet-habit .btn{{width:100%;min-height:44px}}
+.tk-sheet-habit .btn:disabled{{opacity:.55;cursor:default}}
 .tk-fup-done{{font-size:var(--text-sm);color:var(--text-muted);margin-bottom:12px;
   padding-bottom:12px;border-bottom:1px solid var(--border);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
@@ -920,6 +929,14 @@ function tkOpen(row, isNew) {{
   if (c) c.textContent = isNew ? 'Later' : 'Cancel';
   $('tkSid').value = row.dataset.id;
   $('tkDid').value = row.dataset.id;
+  $('tkHid').value = row.dataset.id;
+  // Already recurring? Then the offer is nonsense — say what is true instead.
+  var hb = $('tkHabitBtn');
+  if (hb) {{
+    var linked = row.dataset.habit === '1';
+    hb.disabled = linked;
+    hb.textContent = linked ? '🔁 Tracked as a habit' : '🔁 Also track as a habit';
+  }}
   $('tkStitle').value = row.dataset.title || '';
   $('tkSdue').value = row.dataset.due || '';
   $('tkSprio').value = row.dataset.prio || '2';

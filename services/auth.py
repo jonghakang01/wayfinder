@@ -427,7 +427,13 @@ def handle(method, path, body, ctx=None):
         token = secrets.token_urlsafe(32)
         SESSIONS[token] = key
         _save_sessions()
-        cookie = f"session={token}; HttpOnly; Path=/; SameSite=Lax"
+        # Give the cookie a life of its own. Without Max-Age it dies with the
+        # browser session, and iOS Safari drops it while restoring the page that
+        # was open — so the screen still looked signed in and the first POST
+        # bounced to /login. The server keeps sessions indefinitely anyway, so
+        # this only stops the browser from forgetting sooner than the server.
+        cookie = (f"session={token}; HttpOnly; Path=/; SameSite=Lax; "
+                  f"Max-Age={60 * 60 * 24 * 30}")
         return ("set_cookie_redirect", "/", cookie)
 
     # GET — render the login/signup page, scoped to ?app= when present.
