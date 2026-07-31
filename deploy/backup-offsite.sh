@@ -35,7 +35,14 @@ if [ ! -d "$REPO_DIR/.git" ]; then
     git clone "$REPO_URL" "$REPO_DIR" || exit 1
 fi
 cd "$REPO_DIR" || exit 1
-git pull --rebase --quiet || true
+# Two writers share this repo (prod appdata + local PC claude-config), so a
+# stale clone is normal. The .enc file is fully regenerated below, so local
+# commits carry nothing unique — hard-sync to remote instead of rebasing
+# (a failed rebase once left the repo on a detached HEAD and broke pushes).
+git rebase --abort >/dev/null 2>&1 || true
+git checkout main --quiet 2>/dev/null || true
+git fetch origin --quiet || exit 1
+git reset --hard origin/main --quiet || exit 1
 
 openssl enc -aes-256-cbc -pbkdf2 -pass "file:$KEY_FILE" \
     -in "$latest" -out "$REPO_DIR/appdata-latest.tar.gz.enc" || exit 1
