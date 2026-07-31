@@ -655,6 +655,9 @@ def render(todos, habits, user, readonly=False, group_by="date"):
         f'<input type="text" name="label" id="tkLabel" class="wf-input" placeholder="Place name (e.g. Office)" required>'
         f'<button type="button" class="btn btn-secondary btn-sm" onclick="tkSavePlace()">Use my current location</button>'
         f'<span id="tkGeoMsg" class="tk-place-meta"></span></form>'
+        f'<button type="button" class="btn btn-secondary btn-sm tk-near-ask" '
+        f'id="tkNearAskBtn" onclick="tkNearAsk()" hidden>'
+        f'📍 Check what is near me</button>'
         f'<p class="tk-place-note">Opening this page checks where you are. '
         f'A browser cannot do that in the background — for an alert the moment '
         f'you arrive, set up your phone below.</p>'
@@ -853,10 +856,16 @@ a.tk-row{{text-decoration:none;color:inherit}}
 .tk-sheet-grip{{width:40px;height:4px;border-radius:2px;background:var(--border-bright);
   margin:6px auto 14px}}
 .tk-sheet-form{{display:flex;flex-direction:column;gap:12px}}
+/* A class selector beats the browser's own [hidden]{{display:none}}, so this
+   box kept its border and margin while holding nothing — an empty strip at the
+   top of the page that looks like a bug because it is one. */
+.tk-near[hidden]{{display:none}}
 .tk-near{{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
   background:var(--surface-2);border:1px solid var(--border);
   border-radius:var(--radius-lg);padding:10px 14px;margin-bottom:12px}}
 .tk-near-txt{{flex:1;min-width:0;font-size:var(--text-sm)}}
+.tk-near-ask{{align-self:flex-start;min-height:44px}}
+.tk-near-ask[hidden]{{display:none}}
 .tk-near .btn{{min-height:36px}}
 .tk-row--hit{{outline:2px solid var(--accent);outline-offset:-2px}}
 .tk-guide{{margin-top:14px;border-top:1px solid var(--border);padding-top:12px}}
@@ -1091,20 +1100,17 @@ function tkCopy(id, btn) {{
       box.hidden = false;
     }}, function() {{ box.hidden = true; }}, {{ timeout: 8000, maximumAge: 120000 }});
   }}
+  // The banner speaks only when it has something to say. Before permission is
+  // granted it has nothing, and a standing "shall I check?" strip is just a
+  // border with a question in it — that ask lives in Places instead.
+  window.tkNearAsk = locate;
+  var ask = document.getElementById('tkNearAskBtn');
+  if (ask) ask.hidden = false;
   if (navigator.permissions && navigator.permissions.query) {{
     navigator.permissions.query({{name: 'geolocation'}}).then(function(p) {{
-      if (p.state === 'granted') return locate();
-      box.innerHTML = '<span class="tk-near-txt">📍 Anything to do where you are?</span>' +
-        '<button type="button" class="btn btn-secondary btn-sm" ' +
-        'onclick="tkNearAsk()">Check</button>';
-      box.hidden = false;
-    }}, locate);
-  }} else {{
-    box.innerHTML = '<span class="tk-near-txt">📍 Anything to do where you are?</span>' +
-      '<button type="button" class="btn btn-secondary btn-sm" onclick="tkNearAsk()">Check</button>';
-    box.hidden = false;
+      if (p.state === 'granted') locate();
+    }}, function() {{}});
   }}
-  window.tkNearAsk = locate;
 }})();
 function tkShowPlace(pid) {{
   var first = null;
