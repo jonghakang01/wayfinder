@@ -11,7 +11,104 @@ META = {
     "hidden": True,   # see todo.py
 }
 
-FREQ_LABEL = {"daily": "Daily", "weekly": "Weekly"}
+FREQ_LABEL = {"daily": "Daily", "weekdays": "Weekdays", "weekends": "Weekends",
+              "days": "Chosen days", "weekly": "Weekly"}
+FREQS = tuple(FREQ_LABEL)
+DAY_NAMES = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")  # 0 = Monday
+
+
+def parse_freq(body):
+    """(freq, days) from a form. Unknown frequency falls back to daily — a
+    habit is never worth a 500 — and days only mean anything for 'days'."""
+    freq = (body.get("freq", ["daily"]) or ["daily"])[0]
+    if freq not in FREQS:
+        freq = "daily"
+    days = []
+    if freq == "days":
+        for raw in body.get("days", []):
+            try:
+                d = int(raw)
+            except (TypeError, ValueError):
+                continue
+            if 0 <= d <= 6 and d not in days:
+                days.append(d)
+        days.sort()
+        # "Chosen days" with nothing chosen would never come due again, which
+        # reads as a broken habit rather than a choice.
+        if not days:
+            freq = "daily"
+    return freq, days
+
+
+def due_today(habit, today=None):
+    """Is this habit expected today?
+
+    Weekly has no day attached, so it is never *due on a date* — it stays out
+    of a day's list rather than nagging on an arbitrary one, which is how it
+    behaved when daily was the only alternative.
+    """
+    freq = habit.get("freq", "daily")
+    wd = (today or date.today()).weekday()
+    if freq == "daily":
+        return True
+    if freq == "weekdays":
+        return wd < 5
+    if freq == "weekends":
+        return wd >= 5
+    if freq == "days":
+        return wd in (habit.get("days") or [])
+    return False
+
+
+def freq_label(habit):
+    """What to print on a chip. Chosen days name themselves — 'Chosen days'
+    tells you the shape of the answer without giving the answer."""
+    freq = habit.get("freq", "daily")
+    if freq == "days":
+        days = habit.get("days") or []
+        if len(days) == 7:
+            return "Daily"
+        return ", ".join(DAY_NAMES[d] for d in days) or "Daily"
+    return FREQ_LABEL.get(freq, "Daily")
+
+
+def freq_picker(selected="daily", days=(), idpfx="hf"):
+    """Frequency select plus the day checkboxes it reveals.
+
+    The day row only makes sense for "Chosen days", so it hides itself; the
+    same markup serves the add form, the edit form and the task-to-habit sheet
+    so the three cannot drift apart."""
+    opts = "".join(
+        f'<option value="{k}"{" selected" if k == selected else ""}>{v}</option>'
+        for k, v in FREQ_LABEL.items())
+    boxes = "".join(
+        f'<label class="hb-day"><input type="checkbox" name="days" value="{i}"'
+        f'{" checked" if i in (days or ()) else ""}>{n}</label>'
+        for i, n in enumerate(DAY_NAMES))
+    return (
+        f'<label>Frequency<select name="freq" id="{idpfx}Sel" '
+        f'onchange="hbFreqPick(\'{idpfx}\')">{opts}</select></label>'
+        f'<div class="hb-days" id="{idpfx}Days"'
+        f'{"" if selected == "days" else " hidden"}>{boxes}</div>')
+
+
+FREQ_PICKER_JS = """
+<script>
+function hbFreqPick(p) {
+  var sel = document.getElementById(p + 'Sel');
+  var box = document.getElementById(p + 'Days');
+  if (sel && box) box.hidden = sel.value !== 'days';
+}
+</script>"""
+
+FREQ_PICKER_CSS = """
+.hb-days{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.hb-days[hidden]{display:none}
+.hb-day{display:inline-flex;align-items:center;gap:5px;padding:8px 10px;
+  min-height:44px;border:1px solid var(--border);border-radius:var(--radius-md);
+  font-size:var(--text-sm);cursor:pointer;background:var(--surface-2)}
+.hb-day input{min-width:18px;min-height:18px}
+"""
 
 
 def _habits_file(user):
@@ -164,9 +261,7 @@ def handle(method, path, body, ctx=None):
     if method == "POST":
         if path == "/habit/add":
             name = body.get("name", [""])[0].strip()
-            freq = body.get("freq", ["daily"])[0]
-            if freq not in ("daily", "weekly"):
-                freq = "daily"
+            freq, freq_days = parse_freq(body)
             try:
                 target = max(1, int(body.get("target", ["1"])[0]))
             except ValueError:
@@ -184,6 +279,7 @@ def handle(method, path, body, ctx=None):
                     "name": name,
                     "icon": "✅",
                     "freq": freq,
+                    "days": freq_days,
                     "target": target,
                     "unit": unit,
                     "track": track,
@@ -279,9 +375,7 @@ def handle(method, path, body, ctx=None):
                     return ("redirect", next_url)
                 elif action == "edit":
                     name = body.get("name", [""])[0].strip()
-                    freq = body.get("freq", ["daily"])[0]
-                    if freq not in ("daily", "weekly"):
-                        freq = "daily"
+                    freq, freq_days = parse_freq(body)
                     try:
                         target = max(1, int(body.get("target", ["1"])[0]))
                     except ValueError:
@@ -296,6 +390,7 @@ def handle(method, path, body, ctx=None):
                     if name:
                         habit["name"] = name
                         habit["freq"] = freq
+                        habit["days"] = freq_days
                         habit["target"] = target
                         habit["unit"] = unit
                         habit["track"] = track
@@ -689,7 +784,7 @@ def render_list(habits, user, readonly=False):
         streak, *_ = compute_stats(h.get("checkins", {}), target)
         today_count = _day_total(h.get("checkins", {}), today_str)
         checked = today_count >= target
-        freq_lbl = FREQ_LABEL.get(h.get("freq", "daily"), "Daily")
+        freq_lbl = freq_label(h)
         started = h.get("started", "")[:7]
         target_tag = f'<span class="tag-target">Goal: {target} {unit}</span>' if target > 1 else ""
 
@@ -818,7 +913,7 @@ def render_list(habits, user, readonly=False):
         '<div class="notepad-body">'
         '<form class="add-form" method="POST" action="/habit/add">'
         '<label>Habit name<input type="text" name="name" placeholder="e.g. Exercise, Read, Drink water" required></label>'
-        '<label>Frequency<select name="freq"><option value="daily">Daily</option><option value="weekly">Weekly</option></select></label>'
+        + freq_picker('daily', (), 'hfNew') +
         '<label>Goal<input type="number" name="target" value="1" min="1" max="999"></label>'
         '<label>Unit'
         '<input type="hidden" name="unit" id="unitHiddenAdd" value="times">'
@@ -874,7 +969,7 @@ def render_list(habits, user, readonly=False):
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Habits · Momentum</title>
 <link rel="stylesheet" href="/static/style.css">
-<style>{_CSS}</style>
+<style>{_CSS}{FREQ_PICKER_CSS}</style>
 </head>
 <body>
 <nav>
@@ -1026,6 +1121,7 @@ function toggleLog(id) {{
   }}
 }}
 </script>
+{FREQ_PICKER_JS}
 </body>
 </html>'''
 
@@ -1071,7 +1167,7 @@ def render_detail(habit, user):
     )
     habit_name = habit.get("name", "")
     habit_icon = habit.get("icon", "✅")
-    freq_lbl = FREQ_LABEL.get(habit.get("freq", "daily"), "Daily")
+    freq_lbl = freq_label(habit)
 
     # ── Check-in section ─────────────────────────────────────
     if track == "detail":
@@ -1236,7 +1332,7 @@ def render_detail(habit, user):
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{habit_name} · Momentum</title>
 <link rel="stylesheet" href="/static/style.css">
-<style>{_CSS}</style>
+<style>{_CSS}{FREQ_PICKER_CSS}</style>
 </head>
 <body>
 <nav>
@@ -1265,10 +1361,7 @@ def render_detail(habit, user):
     <form id="editForm" method="POST" action="/habit/{hid}/edit" style="display:none;margin-top:20px;padding-top:20px;border-top:1px solid var(--border)">
       <div class="add-form">
         <label>Name<input type="text" name="name" value="{habit_name}" required></label>
-        <label>Frequency<select name="freq">
-          <option value="daily" {"selected" if habit.get("freq","daily")=="daily" else ""}>Daily</option>
-          <option value="weekly" {"selected" if habit.get("freq","daily")=="weekly" else ""}>Weekly</option>
-        </select></label>
+        {freq_picker(habit.get("freq","daily"), habit.get("days") or (), "hfEdit")}
         <label>Goal<input type="number" name="target" value="{target}" min="1" max="999"></label>
         <label>Unit
         <input type="hidden" name="unit" id="unitHiddenEdit" value="{unit}">
@@ -1463,5 +1556,6 @@ function addEntryRow(){{
   clone.querySelector('.entry-label-inp').focus();
 }}
 </script>
+{FREQ_PICKER_JS}
 </body>
 </html>'''

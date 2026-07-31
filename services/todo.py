@@ -238,12 +238,22 @@ def handle(method, path, body, ctx=None):
                     habits = load_habits(user)
                     existing_hid = t.get("habit_id")
                     if not existing_hid or not any(h["id"] == existing_hid for h in habits):
+                        import services.habits as habits_svc
+                        freq, freq_days = habits_svc.parse_freq(body)
+                        try:
+                            target = max(1, int(body.get("target", ["1"])[0]))
+                        except (TypeError, ValueError):
+                            target = 1
                         hid = next_id(habits)
                         habits.append({
                             "id": hid,
-                            "name": t["title"],
-                            "icon": "✅",
-                            "freq": "daily",
+                            "name": body.get("name", [""])[0].strip() or t["title"],
+                            "icon": body.get("icon", [""])[0].strip()[:4] or "✅",
+                            "freq": freq,
+                            "days": freq_days,
+                            "target": target,
+                            "unit": "times",
+                            "track": "count",
                             "started": date.today().isoformat(),
                             "checkins": [],
                         })
@@ -358,6 +368,10 @@ def render(todos, habits, user, readonly=False, group_by="date"):
     today = date.today()
     today_str = today.isoformat()
     week_str = (today + timedelta(days=7)).isoformat()
+    import services.habits as habits_svc
+    habit_freq_picker = habits_svc.freq_picker('daily', (), 'hfTask')
+    FREQ_PICKER_CSS = habits_svc.FREQ_PICKER_CSS
+    FREQ_PICKER_JS = habits_svc.FREQ_PICKER_JS
     import services.momentum as momentum_svc
     places = momentum_svc.load_places(user)
 
@@ -421,7 +435,9 @@ def render(todos, habits, user, readonly=False, group_by="date"):
             got = sum(e.get("count", 1) if isinstance(e, dict) else 1 for e in got)
         return got >= (h.get("target", 1) or 1)
 
-    habits_today = [h for h in (habits or []) if h.get("freq", "daily") == "daily"]
+    # "Today" is the habit's own answer now — weekdays, weekends and chosen
+    # days all decide for themselves instead of only daily counting.
+    habits_today = [h for h in (habits or []) if habits_svc.due_today(h)]
     habit_open = [h for h in habits_today if not _habit_done_today(h)]
     habit_done = [h for h in habits_today if _habit_done_today(h)]
 
@@ -674,7 +690,7 @@ def render(todos, habits, user, readonly=False, group_by="date"):
     <input type="hidden" name="next" value="{back}">
     <div class="wf-field"><label class="wf-label">Task</label>
       <input class="wf-input" type="text" name="title" id="tkStitle" required></div>
-    <div class="tk-sheet-grid">
+    <div class="tk-sheet-grid tk-sheet-grid--tight">
       <div class="wf-field"><label class="wf-label">Due</label>
         <input class="wf-input" type="date" name="due_date" id="tkSdue"></div>
       <div class="wf-field"><label class="wf-label">Priority</label>
@@ -706,16 +722,35 @@ def render(todos, habits, user, readonly=False, group_by="date"):
     </div>
     <span id="tkNpMsg" class="tk-place-meta"></span>
   </form>
-  <form method="POST" action="/todo/to_habit" class="tk-sheet-habit">
-    <input type="hidden" name="id" id="tkHid">
-    <input type="hidden" name="next" value="{back}">
-    <button class="btn btn-secondary" type="submit" id="tkHabitBtn">🔁 Also track as a habit</button>
-  </form>
+  <div class="tk-sheet-habit">
+    <button class="btn btn-secondary" type="button" id="tkHabitBtn"
+            onclick="tkHabitOpen()">🔁 Also track as a habit</button>
+  </div>
   <form method="POST" action="/todo/delete" class="tk-sheet-delete"
         onsubmit="return confirm('Delete this task?')">
     <input type="hidden" name="id" id="tkDid">
     <input type="hidden" name="next" value="{back}">
     <button class="btn btn-danger" type="submit">Delete task</button>
+  </form>
+</div>
+<div class="tk-sheet" id="tkHabitSheet" role="dialog" aria-label="Track as habit">
+  <div class="tk-sheet-grip"></div>
+  <form method="POST" action="/todo/to_habit" class="tk-sheet-form">
+    <input type="hidden" name="id" id="tkHid">
+    <input type="hidden" name="next" value="{back}">
+    <div class="wf-field"><label class="wf-label">Habit name</label>
+      <input class="wf-input" type="text" name="name" id="tkHbName" required></div>
+    <div class="tk-sheet-grid tk-sheet-grid--tight">
+      <div class="wf-field"><label class="wf-label">Icon</label>
+        <input class="wf-input" type="text" name="icon" id="tkHbIcon" value="✅" maxlength="4"></div>
+      <div class="wf-field"><label class="wf-label">Goal per day</label>
+        <input class="wf-input" type="number" name="target" value="1" min="1" max="999"></div>
+    </div>
+    <div class="wf-field tk-hb-freq">{habit_freq_picker}</div>
+    <div class="tk-sheet-actions">
+      <button class="btn btn-primary btn-lg" type="submit">Create habit</button>
+      <button class="btn btn-ghost btn-lg" type="button" onclick="tkHabitClose()">Cancel</button>
+    </div>
   </form>
 </div>
 <div class="tk-sheet" id="tkFup" role="dialog" aria-label="Follow-up task">
@@ -886,6 +921,8 @@ a.tk-row{{text-decoration:none;color:inherit}}
   .tk-copy-label{{min-width:100%}}
 }}
 .tk-sheet-habit{{margin-top:12px}}
+.tk-hb-freq select{{width:100%;min-height:44px}}
+{FREQ_PICKER_CSS}
 .tk-sheet-habit .btn{{width:100%;min-height:44px}}
 .tk-sheet-habit .btn:disabled{{opacity:.55;cursor:default}}
 .tk-fup-done{{font-size:var(--text-sm);color:var(--text-muted);margin-bottom:12px;
@@ -905,8 +942,14 @@ a.tk-row{{text-decoration:none;color:inherit}}
 @media (min-width:768px){{
   .tk-sheet{{bottom:auto;top:50%;translate:-50% -50%;border-radius:var(--radius-xl)}}
 }}
+/* A date field and a two-word select do not need a row each. Stretched to the
+   full sheet width a date input is mostly empty box with its calendar icon
+   stranded at the far end — it reads as broken layout, not a spacious form.
+   min-width:0 lets them actually shrink into their tracks. */
+.tk-sheet-grid--tight>*{{min-width:0}}
+.tk-sheet-grid--tight .wf-input{{width:100%;min-width:0}}
 @media (max-width:768px){{
-  .tk-sheet-grid{{grid-template-columns:1fr}}
+  .tk-sheet-grid:not(.tk-sheet-grid--tight){{grid-template-columns:1fr}}
   .tk-quick-input{{font-size:16px}}
   .tk-row{{padding:14px}}
   .tk-group{{display:flex;width:100%}}
@@ -929,6 +972,7 @@ a.tk-row{{text-decoration:none;color:inherit}}
 </div>
 {sheet_html}
 {tabs_html}
+{FREQ_PICKER_JS}
 <script>
 function tkOpen(row, isNew) {{
   var $ = function(i) {{ return document.getElementById(i); }};
@@ -986,6 +1030,22 @@ function tkClose() {{
   document.getElementById('tkBackdrop').classList.remove('is-on');
   document.getElementById('tkSheet').classList.remove('is-on');
   tkFupClose();
+  tkHabitClose();
+}}
+// Becoming a habit is a decision with settings attached — how often, what to
+// call it, what counts as a day's worth. Creating one silently on a tap gave
+// you a daily habit you never agreed to and had to go elsewhere to fix.
+function tkHabitOpen() {{
+  var $ = function(i) {{ return document.getElementById(i); }};
+  $('tkHbName').value = $('tkStitle').value || '';
+  $('tkSheet').classList.remove('is-on');
+  $('tkHabitSheet').classList.add('is-on');
+  $('tkBackdrop').classList.add('is-on');
+  $('tkHbName').focus();
+}}
+function tkHabitClose() {{
+  document.getElementById('tkHabitSheet').classList.remove('is-on');
+  document.getElementById('tkBackdrop').classList.remove('is-on');
 }}
 function tkFupClose() {{
   var f = document.getElementById('tkFup');
