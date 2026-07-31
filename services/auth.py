@@ -287,6 +287,24 @@ def is_blocked(username):
 _ACCESS_ALIASES = {"momentum": ("momentum", "todo", "habit", "dashboard")}
 
 
+def _grants_unlocking(service_name):
+    """Every grant name that opens this service — in both directions.
+
+    The alias map reads "momentum covers todo, habit, dashboard", and it was
+    only ever consulted from the momentum side: asking about /todo matched a
+    literal 'todo' grant and nothing else. So an account granted momentum could
+    open the Tasks page (a /momentum route) and then be bounced to the home
+    page the instant it posted to /todo/add. Absorbed routes have to answer to
+    the grant that absorbed them.
+    """
+    names = {service_name}
+    names.update(_ACCESS_ALIASES.get(service_name, ()))
+    for grant, covered in _ACCESS_ALIASES.items():
+        if service_name in covered:
+            names.add(grant)
+    return names
+
+
 def has_service_access(username, service_path):
     service_name = service_path.lstrip("/").split("/")[0]
     # Admin sees everything; everyone else only reaches explicitly granted services.
@@ -296,7 +314,7 @@ def has_service_access(username, service_path):
     if users.get(username, {}).get("blocked"):
         return False
     granted = users.get(username, {}).get("services", [])
-    return any(n in granted for n in _ACCESS_ALIASES.get(service_name, (service_name,)))
+    return any(n in granted for n in _grants_unlocking(service_name))
 
 
 def block_user(username):
