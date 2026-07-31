@@ -153,6 +153,7 @@ def handle(method, path, body, ctx=None):
     user = (ctx or {}).get("user", "guest")
     todos = load(user)
     created_id = None   # set by /todo/add so the caller can open its sheet
+    followup_id = None  # set by /todo/done so the caller can offer a next step
 
     if method == "POST":
         if path == "/todo/memo/add":
@@ -203,6 +204,9 @@ def handle(method, path, body, ctx=None):
                     "group": actual_group,
                     "project": body.get("project", [""])[0].strip(),
                     "priority": _priority_of(body.get("priority", [""])[0]),
+                    # A follow-up inherits where its parent was done; the quick
+                    # add field simply leaves this empty.
+                    "place_id": body.get("place_id", [""])[0].strip(),
                 })
                 save(todos, user)
         elif path == "/todo/done":
@@ -211,6 +215,11 @@ def handle(method, path, body, ctx=None):
                 if t["id"] == tid and not t["done"]:
                     t["done"] = True
                     t["done_at"] = datetime.now().isoformat()
+                    # Finishing something is when the next step is clearest —
+                    # ask now, while the context is still in your head. Memos
+                    # are notes, not work, so they get no follow-up.
+                    if t.get("type", "task") != "memo":
+                        followup_id = tid
             save(todos, user)
         elif path == "/todo/undone":
             tid = int(body.get("id", [0])[0])
@@ -302,6 +311,8 @@ def handle(method, path, body, ctx=None):
             # A task typed into the quick field has nothing but a title. Hand the
             # new id back so the page can open its sheet and let you finish it.
             next_url += ("&" if "?" in next_url else "?") + f"new={created_id}"
+        elif followup_id:
+            next_url += ("&" if "?" in next_url else "?") + f"followup={followup_id}"
         return ("redirect", next_url)
 
     # The page itself now lives at /work; this route survives for bookmarks,
@@ -410,7 +421,10 @@ def render(todos, habits, user, readonly=False, group_by="date"):
     # filters was the single worst thing about the old screen.
     show_filter = n_active >= 8 and len(all_projects) > 1
     # Grouping by project needs a project to group by, and two rows to reorder.
-    show_group = bool(all_projects) and n_active >= 2
+    # Two pills cost almost no room, and a control that quietly disappears reads
+    # as a broken feature, not a tidy one — the toggle vanishing below two open
+    # tasks is what made it look deleted. Projects existing is reason enough.
+    show_group = bool(all_projects)
     by_project = group_by == "project" and show_group
     back = "/momentum?tab=tasks" + ("&by=project" if by_project else "")
 
@@ -461,6 +475,7 @@ def render(todos, habits, user, readonly=False, group_by="date"):
             f'data-id="{tid}" data-title="{_attr(t.get("title",""))}" '
             f'data-project="{_attr(project)}" data-prio="{prio}" '
             f'data-due="{due}" data-place="{_attr(place_id)}" '
+            f'data-group="{_attr(t.get("group") or "")}" '
             f'data-memo="{"1" if is_memo else ""}">'
             f'{check}'
             f'<div class="tk-main">'
@@ -633,6 +648,24 @@ def render(todos, habits, user, readonly=False, group_by="date"):
     <button class="btn btn-danger" type="submit">Delete task</button>
   </form>
 </div>
+<div class="tk-sheet" id="tkFup" role="dialog" aria-label="Follow-up task">
+  <div class="tk-sheet-grip"></div>
+  <div class="tk-fup-done">✓ <span id="tkFupTitle"></span></div>
+  <form method="POST" action="/todo/add" class="tk-sheet-form">
+    <input type="hidden" name="next" value="{back}">
+    <input type="hidden" name="project" id="tkFupProject">
+    <input type="hidden" name="place_id" id="tkFupPlace">
+    <input type="hidden" name="group" id="tkFupGroup">
+    <input type="hidden" name="priority" id="tkFupPrio">
+    <div class="wf-field"><label class="wf-label">Anything follow from this?</label>
+      <input class="wf-input" type="text" name="title" id="tkFupInput"
+             placeholder="Next step — leave empty if none" autocomplete="off"></div>
+    <div class="tk-sheet-actions">
+      <button class="btn btn-primary btn-lg" type="submit">Add follow-up</button>
+      <button class="btn btn-ghost btn-lg" type="button" onclick="tkFupClose()">Nothing follows</button>
+    </div>
+  </form>
+</div>
 <datalist id="tk-projects">{project_opts}</datalist>'''
 
     from server import app_tabs
@@ -753,6 +786,9 @@ a.tk-row{{text-decoration:none;color:inherit}}
 .tk-sheet-grip{{width:40px;height:4px;border-radius:2px;background:var(--border-bright);
   margin:6px auto 14px}}
 .tk-sheet-form{{display:flex;flex-direction:column;gap:12px}}
+.tk-fup-done{{font-size:var(--text-sm);color:var(--text-muted);margin-bottom:12px;
+  padding-bottom:12px;border-bottom:1px solid var(--border);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
 .tk-sheet-grid{{display:grid;grid-template-columns:1fr 1fr;gap:12px}}
 .tk-sheet .wf-input{{min-height:44px}}
 .tk-sheet-actions{{display:flex;gap:8px;margin-top:4px}}
@@ -838,6 +874,27 @@ function tkAddPlace() {{
 function tkClose() {{
   document.getElementById('tkBackdrop').classList.remove('is-on');
   document.getElementById('tkSheet').classList.remove('is-on');
+  tkFupClose();
+}}
+function tkFupClose() {{
+  var f = document.getElementById('tkFup');
+  if (f) f.classList.remove('is-on');
+  document.getElementById('tkBackdrop').classList.remove('is-on');
+}}
+// A finished task carries the context its successor should start with — same
+// project, same place, same list. Only the deadline is left blank: a follow-up
+// inherits the work, not the date the work was due.
+function tkFupOpen(row) {{
+  var $ = function(i) {{ return document.getElementById(i); }};
+  $('tkFupTitle').textContent = row.dataset.title || '';
+  $('tkFupProject').value = row.dataset.project || '';
+  $('tkFupPlace').value = row.dataset.place || '';
+  $('tkFupGroup').value = row.dataset.group || '';
+  $('tkFupPrio').value = row.dataset.prio || '2';
+  $('tkFupInput').value = '';
+  $('tkBackdrop').classList.add('is-on');
+  $('tkFup').classList.add('is-on');
+  $('tkFupInput').focus();
 }}
 document.addEventListener('keydown', function(e) {{
   if (e.key === 'Escape') tkClose();
@@ -858,6 +915,19 @@ document.addEventListener('keydown', function(e) {{
   row.scrollIntoView({{block: 'center'}});
   var t = document.getElementById('tkSdue');
   if (t) t.focus();
+}})();
+// Just finished something? Offer the next step before the context fades. The
+// row is inside the collapsed Completed section, which querySelector still
+// reaches — no need to open it.
+(function() {{
+  var qs = new URLSearchParams(location.search);
+  var fid = qs.get('followup');
+  if (!fid) return;
+  var row = document.querySelector('.tk-row[data-id="' + fid + '"]');
+  qs.delete('followup');
+  if (!qs.get('tab')) qs.set('tab', 'tasks');
+  history.replaceState({{}}, '', location.pathname + '?' + qs.toString());
+  if (row) tkFupOpen(row);
 }})();
 function tkFilter() {{
   // The project select is absent while the list is grouped by project.
