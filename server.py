@@ -488,7 +488,12 @@ self.addEventListener('notificationclick', function(event) {{
 
 APP_TAB_CSS = """
 <style>
-.app-tabs{--tab-ink:#94a3b8;--tab-accent:#38bdf8;position:fixed!important;top:auto!important;bottom:0!important;left:0;right:0;height:auto;background:rgba(8,13,20,0.97);backdrop-filter:blur(20px);border-top:1px solid rgba(255,255,255,0.06);border-bottom:none;display:flex!important;justify-content:stretch;z-index:200;padding:8px 8px calc(8px + env(safe-area-inset-bottom,0));gap:4px}
+/* bottom is the visible bottom, not the document's. A fixed element anchors to
+   the layout viewport, which on a phone stays tall while the browser's own
+   address bar and toolbar cover the screen — so the bar sat under them until
+   you scrolled and the chrome collapsed. --tabs-vv-gap is the difference, kept
+   current by the script below. */
+.app-tabs{--tab-ink:#94a3b8;--tab-accent:#38bdf8;position:fixed!important;top:auto!important;bottom:var(--tabs-vv-gap,0px)!important;left:0;right:0;transition:bottom .15s ease;height:auto;background:rgba(8,13,20,0.97);backdrop-filter:blur(20px);border-top:1px solid rgba(255,255,255,0.06);border-bottom:none;display:flex!important;justify-content:stretch;z-index:200;padding:8px 8px calc(8px + env(safe-area-inset-bottom,0));gap:4px}
 .app-tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:8px 4px;color:var(--tab-ink);text-decoration:none;font-size:0.6rem;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;border-radius:12px;transition:all 0.2s}
 .app-tab:hover{color:rgba(255,255,255,0.7);background:rgba(255,255,255,0.04)}
 .app-tab.active{color:var(--tab-accent);background:rgba(56,189,248,0.12)}
@@ -531,8 +536,37 @@ def app_tabs(active, user=None):
         cls = "app-tab active" if active == key else "app-tab"
         html += (f'<a href="/momentum?tab={key}" class="{cls}">'
                  f'<span class="app-tab-icon">{icon}</span>{label}</a>')
-    html += "</nav>"
+    html += "</nav>" + APP_TAB_VV_JS
     return html
+
+
+# Keep the tab bar on the part of the screen you can actually see. Samsung
+# Internet (and every other mobile browser) reports the visible box through
+# visualViewport; the gap between that and the layout viewport is exactly how
+# far the bar has to rise. When the gap is large the keyboard is up, and a tab
+# bar riding on top of the keyboard would cover the field you are typing in —
+# so it stands down until the keyboard closes.
+APP_TAB_VV_JS = """
+<script>
+(function () {
+  var vv = window.visualViewport;
+  if (!vv) return;
+  var nav = document.querySelector('.app-tabs');
+  if (!nav) return;
+  var KEYBOARD = 200;
+  function fit() {
+    var gap = document.documentElement.clientHeight - (vv.height + vv.offsetTop);
+    if (!(gap > 0)) gap = 0;
+    if (gap > KEYBOARD) { nav.style.visibility = 'hidden'; return; }
+    nav.style.visibility = '';
+    document.documentElement.style.setProperty('--tabs-vv-gap', Math.round(gap) + 'px');
+  }
+  vv.addEventListener('resize', fit);
+  vv.addEventListener('scroll', fit);
+  window.addEventListener('orientationchange', function () { setTimeout(fit, 250); });
+  fit();
+})();
+</script>"""
 
 
 VIEWPORT_META = ('<meta name="viewport" content="width=device-width,'

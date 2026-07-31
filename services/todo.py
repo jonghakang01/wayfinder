@@ -319,6 +319,16 @@ def handle(method, path, body, ctx=None):
     # phone shortcuts and the POST actions above.
     return ("redirect", "/momentum?tab=tasks")
 
+def _copy_row(label, value, eid):
+    """A value you are meant to paste into a phone, with a button that copies it.
+
+    Typing a shared secret by hand off a screen is where this setup dies."""
+    return (f'<div class="tk-copy"><span class="tk-copy-label">{label}</span>'
+            f'<code class="tk-copy-val" id="tk{eid}">{_attr(value)}</code>'
+            f'<button type="button" class="btn btn-secondary btn-sm" '
+            f'onclick="tkCopy(\'tk{eid}\',this)">Copy</button></div>')
+
+
 def _attr(v):
     """Quote-safe value for a data-* attribute."""
     return str(v or "").replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;")
@@ -583,6 +593,56 @@ def render(todos, habits, user, readonly=False, group_by="date"):
         f'<input type="hidden" name="id" value="{pl["id"]}">'
         f'<button class="btn btn-danger btn-sm">Remove</button></form></div>'
         for pl in places)
+    # Everything the nearby banner needs, so it can answer "am I there?" without
+    # a round trip. Only places with open work — the rest cannot say anything.
+    nearby_data = json.dumps([
+        {"id": pl["id"], "label": pl["label"], "lat": pl["lat"], "lon": pl["lon"],
+         "r": pl.get("radius_m") or 200,
+         "n": sum(1 for t in active if t.get("place_id") == pl["id"])}
+        for pl in places
+        if any(t.get("place_id") == pl["id"] for t in active)
+    ])
+    # The setup guide differs per phone OS and is useless on the wrong one, so
+    # the page shows one and hides the other. The shared secret is the whole
+    # authentication for /momentum/arrive, so only the account that owns the
+    # Telegram chat the alert lands in ever sees it.
+    from services import auth as _auth
+    _is_owner = user == getattr(_auth, "ADMIN_USERNAME", user)
+    _secret = os.environ.get("MOMENTUM_ARRIVE_SECRET", "") if _is_owner else ""
+    _origin_note = ("" if _secret else
+                    '<p class="tk-place-note">Ask the owner of this Wayfinder '
+                    'for the arrival key to finish this.</p>')
+    _first_place = places[0]["id"] if places else "home"
+    arrive_guide = "" if not places else (
+        '<details class="tk-guide"><summary>📱 Alert me the moment I arrive</summary>'
+        '<div class="tk-guide-body">'
+        '<p class="tk-place-note">Your phone is the only thing that knows you '
+        'arrived. Set this once and it keeps working.</p>'
+        '<div id="tkGuideIos" hidden>'
+        '<ol class="tk-guide-steps">'
+        '<li>Open the <b>Shortcuts</b> app (it comes with iPhone)</li>'
+        '<li><b>Automation</b> → <b>+</b> → <b>Arrive</b>, pick the place</li>'
+        '<li>Turn <b>Run Immediately</b> on, <b>Notify When Run</b> off</li>'
+        '<li>Add action <b>Get Contents of URL</b>, then paste below</li>'
+        '</ol></div>'
+        '<div id="tkGuideAndroid" hidden>'
+        '<ol class="tk-guide-steps">'
+        '<li>Install <b>MacroDroid</b> (free) from Play Store</li>'
+        '<li><b>Add Macro</b> → Trigger: <b>Geofence → Entry</b>, pick the place</li>'
+        '<li>Action: <b>Connectivity → HTTP Request</b>, method <b>POST</b></li>'
+        '<li>Paste the values below into that request</li>'
+        '</ol></div>'
+        '<div class="tk-guide-fields">'
+        f'{_copy_row("URL", "https://wayfindar.duckdns.org/momentum/arrive", "gU")}'
+        f'{_copy_row("Method", "POST", "gM")}'
+        f'{_copy_row("Header", f"X-Arrive-Secret: {_secret}", "gH") if _secret else ""}'
+        f'{_copy_row("Body (JSON)", json.dumps({"place": _first_place, "user": user}), "gB")}'
+        '</div>'
+        f'{_origin_note}'
+        '<p class="tk-place-note">One automation per place — change '
+        '<code>place</code> in the body to match.</p>'
+        '</div></details>')
+
     places_html = "" if readonly else (
         f'<details class="tk-places"{" open" if not places else ""}>'
         f'<summary>📍 Places <span class="tk-section-n">{len(places)}</span></summary>'
@@ -594,9 +654,10 @@ def render(todos, habits, user, readonly=False, group_by="date"):
         f'<input type="text" name="label" id="tkLabel" class="wf-input" placeholder="Place name (e.g. Office)" required>'
         f'<button type="button" class="btn btn-secondary btn-sm" onclick="tkSavePlace()">Use my current location</button>'
         f'<span id="tkGeoMsg" class="tk-place-meta"></span></form>'
-        f'<p class="tk-place-note">A browser cannot watch your location in the background. '
-        f'Set an arrival automation on your phone to call <code>POST /momentum/arrive</code> '
-        f'and the list arrives in Telegram when you get there.</p>'
+        f'<p class="tk-place-note">Opening this page checks where you are. '
+        f'A browser cannot do that in the background — for an alert the moment '
+        f'you arrive, set up your phone below.</p>'
+        f'{arrive_guide}'
         f'</div></details>')
 
     place_opts = _place_options(places, "")
@@ -786,6 +847,29 @@ a.tk-row{{text-decoration:none;color:inherit}}
 .tk-sheet-grip{{width:40px;height:4px;border-radius:2px;background:var(--border-bright);
   margin:6px auto 14px}}
 .tk-sheet-form{{display:flex;flex-direction:column;gap:12px}}
+.tk-near{{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  background:var(--surface-2);border:1px solid var(--border);
+  border-radius:var(--radius-lg);padding:10px 14px;margin-bottom:12px}}
+.tk-near-txt{{flex:1;min-width:0;font-size:var(--text-sm)}}
+.tk-near .btn{{min-height:36px}}
+.tk-row--hit{{outline:2px solid var(--accent);outline-offset:-2px}}
+.tk-guide{{margin-top:14px;border-top:1px solid var(--border);padding-top:12px}}
+.tk-guide summary{{cursor:pointer;font-size:var(--text-sm);font-weight:var(--fw-bold)}}
+.tk-guide-body{{padding-top:10px;display:flex;flex-direction:column;gap:10px}}
+.tk-guide-steps{{margin:0;padding-left:20px;font-size:var(--text-sm);
+  color:var(--text-muted);display:flex;flex-direction:column;gap:6px}}
+.tk-guide-fields{{display:flex;flex-direction:column;gap:8px}}
+.tk-copy{{display:flex;align-items:center;gap:8px;flex-wrap:wrap}}
+.tk-copy-label{{font-size:var(--text-xs);font-weight:var(--fw-bold);
+  text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);
+  min-width:92px}}
+.tk-copy-val{{flex:1;min-width:0;overflow-x:auto;white-space:nowrap;
+  background:var(--surface-3);border:1px solid var(--border);
+  border-radius:var(--radius-md);padding:6px 10px;font-size:var(--text-xs)}}
+.tk-copy .btn{{min-height:36px}}
+@media (max-width:768px){{
+  .tk-copy-label{{min-width:100%}}
+}}
 .tk-fup-done{{font-size:var(--text-sm);color:var(--text-muted);margin-bottom:12px;
   padding-bottom:12px;border-bottom:1px solid var(--border);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
@@ -817,6 +901,7 @@ a.tk-row{{text-decoration:none;color:inherit}}
   <span class="nav-user">👤 {user} &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
 </nav>
 <div class="tk-wrap">
+  <div id="tkNear" class="tk-near" hidden></div>
   {quick_add}
   {summary}
   {group_html}
@@ -929,6 +1014,90 @@ document.addEventListener('keydown', function(e) {{
   history.replaceState({{}}, '', location.pathname + '?' + qs.toString());
   if (row) tkFupOpen(row);
 }})();
+// Show the guide for the phone you are holding. A stranger's instructions are
+// worse than none — they read as "this app does not know what it is doing".
+(function() {{
+  var ua = navigator.userAgent || '';
+  var ios = /iPhone|iPad|iPod/.test(ua) ||
+            (/Mac/.test(ua) && navigator.maxTouchPoints > 1);
+  var el = document.getElementById(ios ? 'tkGuideIos' : 'tkGuideAndroid');
+  if (el) el.hidden = false;
+}})();
+function tkCopy(id, btn) {{
+  var el = document.getElementById(id);
+  if (!el) return;
+  var txt = el.textContent;
+  var done = function() {{
+    var was = btn.textContent;
+    btn.textContent = 'Copied';
+    setTimeout(function() {{ btn.textContent = was; }}, 1400);
+  }};
+  if (navigator.clipboard) {{
+    navigator.clipboard.writeText(txt).then(done, function() {{}});
+  }} else {{
+    var r = document.createRange();
+    r.selectNodeContents(el);
+    var s = window.getSelection();
+    s.removeAllRanges(); s.addRange(r);
+    try {{ document.execCommand('copy'); done(); }} catch (e) {{}}
+  }}
+}}
+// Opening the page is the one moment the browser may ask where you are, so use
+// it: if a saved place with open work is within its radius, say so up top.
+// Never prompt unasked — an unexplained location dialog on every load is worse
+// than the banner is useful, so ask only after a tap.
+(function() {{
+  var places = {nearby_data};
+  var box = document.getElementById('tkNear');
+  if (!box || !places.length || !navigator.geolocation) return;
+
+  function km(a, b, c, d) {{  // haversine, metres
+    var R = 6371000, p = Math.PI / 180;
+    var dLat = (c - a) * p, dLon = (d - b) * p;
+    var x = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(a * p) * Math.cos(c * p) *
+            Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    return 2 * R * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+  }}
+  function locate() {{
+    navigator.geolocation.getCurrentPosition(function(pos) {{
+      var here = null;
+      places.forEach(function(pl) {{
+        var d = km(pos.coords.latitude, pos.coords.longitude, pl.lat, pl.lon);
+        if (d <= pl.r && (!here || d < here.d)) {{ here = pl; here.d = d; }}
+      }});
+      if (!here) {{ box.hidden = true; return; }}
+      box.innerHTML = '<span class="tk-near-txt">📍 You are at <b>' +
+        here.label + '</b> — ' + here.n + ' here</span>' +
+        '<button type="button" class="btn btn-secondary btn-sm" ' +
+        'onclick="tkShowPlace(\\'' + here.id + '\\')">Show</button>';
+      box.hidden = false;
+    }}, function() {{ box.hidden = true; }}, {{ timeout: 8000, maximumAge: 120000 }});
+  }}
+  if (navigator.permissions && navigator.permissions.query) {{
+    navigator.permissions.query({{name: 'geolocation'}}).then(function(p) {{
+      if (p.state === 'granted') return locate();
+      box.innerHTML = '<span class="tk-near-txt">📍 Anything to do where you are?</span>' +
+        '<button type="button" class="btn btn-secondary btn-sm" ' +
+        'onclick="tkNearAsk()">Check</button>';
+      box.hidden = false;
+    }}, locate);
+  }} else {{
+    box.innerHTML = '<span class="tk-near-txt">📍 Anything to do where you are?</span>' +
+      '<button type="button" class="btn btn-secondary btn-sm" onclick="tkNearAsk()">Check</button>';
+    box.hidden = false;
+  }}
+  window.tkNearAsk = locate;
+}})();
+function tkShowPlace(pid) {{
+  var first = null;
+  document.querySelectorAll('.tk-row').forEach(function(r) {{
+    var hit = r.dataset.place === pid && !r.classList.contains('tk-row--done');
+    r.classList.toggle('tk-row--hit', hit);
+    if (hit && !first) first = r;
+  }});
+  if (first) first.scrollIntoView({{block: 'center', behavior: 'smooth'}});
+}}
 function tkFilter() {{
   // The project select is absent while the list is grouped by project.
   var pjEl = document.getElementById('tkFProject');
