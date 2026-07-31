@@ -29,6 +29,27 @@ if [ "$DISK_PCT" -gt 85 ]; then
     PROBLEMS="$PROBLEMS\n• 디스크 사용률 ${DISK_PCT}%"
 fi
 
+# 2b. Off-site backup freshness: the GitHub mirror must hold an appdata
+# commit <26h old. The local tar can be fine while the push silently fails
+# (2026-07-30/31: a detached-HEAD clone blocked pushes for two days unnoticed).
+OFFSITE_REPO="/root/backup-offsite-repo"
+if [ -d "$OFFSITE_REPO/.git" ]; then
+    export GIT_SSH_COMMAND="ssh -i /root/.ssh/wayfinder_backup -o IdentitiesOnly=yes"
+    git -C "$OFFSITE_REPO" fetch origin --quiet 2>/dev/null
+    LAST_TS=$(git -C "$OFFSITE_REPO" log origin/main --grep='^backup appdata' -1 --format=%ct 2>/dev/null)
+    if [ -z "$LAST_TS" ]; then
+        PROBLEMS="$PROBLEMS\n• offsite 백업 커밋을 원격에서 못 찾음"
+    else
+        OFF_AGE_H=$(( ( $(date +%s) - LAST_TS ) / 3600 ))
+        if [ "$OFF_AGE_H" -gt 26 ]; then
+            PROBLEMS="$PROBLEMS\n• offsite(GitHub) 백업이 ${OFF_AGE_H}시간 전 — 푸시 실패 의심 (backup.log 확인)"
+        fi
+    fi
+    unset GIT_SSH_COMMAND
+else
+    PROBLEMS="$PROBLEMS\n• offsite 백업 저장소가 없음 ($OFFSITE_REPO)"
+fi
+
 # 3. Staging health (prod is covered by the 5-min monitor).
 ST=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 http://localhost:8081/health 2>/dev/null)
 if [ "$ST" != "200" ]; then
