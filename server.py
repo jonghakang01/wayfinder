@@ -644,7 +644,7 @@ THEME_TOGGLE = (
 )
 
 CATEGORIES = {
-    "💼 업무":    ["/momentum", "/cardconv", "/sow", "/matters", "/aeo", "/llm-check"],
+    "💼 업무":    ["/momentum", "/toast", "/cardconv", "/sow", "/matters", "/aeo", "/llm-check"],
     "🏠 개인":    [],
     "🛠 팀 도구": ["/design"],
     "⚙️ 관리":    ["/admin"],
