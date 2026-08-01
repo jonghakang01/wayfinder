@@ -533,20 +533,14 @@ async function renderCanon(){
   const fit = document.getElementById('canonFit').checked;
   const box = document.getElementById('canonList'); box.innerHTML='';
   const freshOrder = {'스테디':0,'요즘':0,'한물':1,'주의':2};
-  const cats = canonCat==='전체' ? CANON_CATS.slice(1) : [canonCat];
-  cats.forEach(cat=>{
-    let items = CANON.filter(e=>e.c===cat);
-    if(fit) items = items.filter(canonMatchesToday);
-    if(!items.length) return;
-    items.sort((a,b)=>(freshOrder[a.fresh]-freshOrder[b.fresh]) || (b.pop-a.pop));
-    const h=document.createElement('h3'); h.className='rec'; h.textContent=`${cat} (${items.length})`; box.appendChild(h);
+  function canonPanel(items){
     const panel=document.createElement('div'); panel.className='panel';
     const toasts = items.map(canonToToast);
     items.forEach((e,i)=>{
       const t = toasts[i];
       const d=document.createElement('div'); d.className='list-item';
       const dup = dupInfo(t);
-      d.innerHTML = `<div style="min-width:0"><div class="t"><span style="color:var(--brass-deep)">${esc(e.call)}</span> <span style="color:var(--text-dim);font-weight:400">→</span> <span style="color:var(--celadon-deep)">${esc(e.resp)}</span> <span style="font-size:12px">${FRESH_ICO[e.fresh]||''}${'·'.repeat(e.pop)}</span></div>
+      d.innerHTML = `<div style="min-width:0"><div class="t">${e.hot?'🔥 ':''}<span style="color:var(--brass-deep)">${esc(e.call)}</span> <span style="color:var(--text-dim);font-weight:400">→</span> <span style="color:var(--celadon-deep)">${esc(e.resp)}</span> <span style="font-size:12px">${FRESH_ICO[e.fresh]||''}${'·'.repeat(e.pop)}</span></div>
         <div class="m">${esc(e.expl)}${e.role!=='무난'?' · <b>'+esc(e.role)+'</b>':''}</div>
         ${dup&&dup.red?`<div class="dupline red" style="font-size:11.5px">${dup.text}</div>`:''}</div>
         <button class="star${isSaved(t)?' on':''}" style="flex:0 0 auto">★</button>`;
@@ -554,7 +548,27 @@ async function renderCanon(){
       d.querySelector('.star').onclick=ev=>{ ev.stopPropagation(); toggleSave(t); ev.target.classList.toggle('on'); };
       panel.appendChild(d);
     });
-    box.appendChild(panel);
+    return panel;
+  }
+  // 🔥 지금 뜨는 — 유튜브·인스타·커뮤니티 리서치로 hot 태그된 것, 항상 맨 위 (2026-08-01 강프로)
+  if(canonCat==='전체'){
+    let hot = CANON.filter(e=>e.hot);
+    if(fit) hot = hot.filter(canonMatchesToday);
+    if(hot.length){
+      hot.sort((a,b)=>b.pop-a.pop);
+      const h=document.createElement('h3'); h.className='rec';
+      h.textContent=`🔥 지금 뜨는 (${hot.length}) — 20·30 사이 분위기용`; box.appendChild(h);
+      box.appendChild(canonPanel(hot));
+    }
+  }
+  const cats = canonCat==='전체' ? CANON_CATS.slice(1) : [canonCat];
+  cats.forEach(cat=>{
+    let items = CANON.filter(e=>e.c===cat);
+    if(fit) items = items.filter(canonMatchesToday);
+    if(!items.length) return;
+    items.sort((a,b)=>(freshOrder[a.fresh]-freshOrder[b.fresh]) || (b.pop-a.pop));
+    const h=document.createElement('h3'); h.className='rec'; h.textContent=`${cat} (${items.length})`; box.appendChild(h);
+    box.appendChild(canonPanel(items));
   });
   if(!box.children.length) box.innerHTML='<div class="empty">조건에 맞는 항목이 없습니다</div>';
   document.getElementById('canonMeta').textContent =
