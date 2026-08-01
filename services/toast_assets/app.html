@@ -150,6 +150,9 @@ h3.rec{font-size:13px;color:var(--text-dim);font-weight:700;margin:18px 0 8px 2p
 #rdNav{flex:0 0 auto;display:flex;gap:10px;margin-top:12px}
 #rdNav button{flex:1;padding:12px;border:1px solid var(--ink-600);background:var(--ink-800);color:var(--paper);border-radius:12px;font-size:15px;cursor:pointer;min-height:48px}
 #rdNav button:disabled{opacity:.35}
+/* 서버가 전 앱에 주입하는 플로팅 버튼 2종은 이 페이지에선 숨김 (2026-08-01 강프로
+   — 낭독·카드 몰입 화면과 겹침). 홈 복귀는 헤더 🥂, 테마는 전역 설정을 따른다. */
+.wf-back,.wf-theme-btn{display:none!important}
 /* ---- 광고주 뉴스 카드 ---- */
 .news-pt{border-top:1px solid var(--border);padding:9px 0;font-size:14px;line-height:1.5}
 .news-hl{padding:7px 0;border-top:1px solid var(--border);font-size:13px;line-height:1.45}
