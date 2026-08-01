@@ -4,13 +4,24 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>술자리 컴패니언</title>
+<link rel="stylesheet" href="/static/style.css">
+<script>try{var _t=localStorage.getItem('wf-theme');if(_t)document.documentElement.dataset.theme=_t;}catch(e){}</script>
 <style>
+/* Wayfinder DS shell (2026-08-01 강프로 — 메인도 가이드 Look&Feel로). 앱 전용 색은
+   선창=놋쇠/후창=청자/경고=고추 3종만 남기고, 나머지는 전부 글로벌 토큰에 위임한다.
+   낭독 모드는 무대용 고정 다크(ink/paper)를 그대로 유지. */
 :root{
   --ink-900:#14110E; --ink-800:#1F1A15; --ink-600:#3A322A;
   --paper:#F4EFE4; --paper-dim:#A79C8C;
-  --brass:#D9A93C; --celadon:#6FB89A; --gochu:#C4553D;
-  --bg:#FBF8F2; --surface:#FFFEFA; --text:#1F1A15; --text-dim:#6B6259;
-  --brass-deep:#8F6A14; --celadon-deep:#2F7A5C; --line:#E7E0D2; --card-line:#EFE8D8;
+  --brass:#D9A93C; --celadon:#6FB89A; --gochu:#E0705A;
+  --brass-deep:#E2B65C; --celadon-deep:#7FC4A6;
+  --bg:var(--bg-deep); --text-dim:var(--text-muted);
+  --line:var(--border); --card-line:var(--border);
+  --chip-on-bg:rgba(217,169,60,.14); --avoid-bg:rgba(224,112,90,.14);
+}
+:root[data-theme="light"]{
+  --gochu:#C4553D; --brass-deep:#8F6A14; --celadon-deep:#2F7A5C;
+  --chip-on-bg:rgba(143,106,20,.10); --avoid-bg:rgba(196,85,61,.10);
 }
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg);color:var(--text);font-family:'Pretendard','Apple SD Gothic Neo','Malgun Gothic',system-ui,sans-serif;font-size:15px;line-height:1.5}
@@ -22,13 +33,13 @@ header h1{font-size:19px;letter-spacing:-.3px}
 header .sub{font-size:12px;color:var(--text-dim)}
 .tabs{display:flex;gap:6px;margin-bottom:16px}
 .tab{flex:1;text-align:center;padding:10px 2px;border:1px solid var(--line);border-radius:999px;background:var(--surface);font-size:13.5px;cursor:pointer;min-height:44px;display:flex;align-items:center;justify-content:center}
-.tab.on{background:var(--ink-900);color:var(--paper);border-color:var(--ink-900)}
-.panel{background:var(--surface);border:1px solid var(--card-line);border-radius:16px;box-shadow:0 1px 3px rgba(31,26,21,.05)}
+.tab.on{background:var(--tab-accent);color:var(--tab-ink);border-color:var(--tab-accent)}
+.panel{background:var(--surface);border:1px solid var(--card-line);border-radius:16px;box-shadow:var(--shadow-sm)}
 .sec-label{font-size:11px;font-weight:700;letter-spacing:.4px;color:var(--brass-deep)}
 .sec-label.g{color:var(--celadon-deep)}
 .sec-label.r{color:var(--gochu)}
 /* ---- 오늘 자리 + 특성 요약 행 ---- */
-#ctxRow{border-top:1px solid #F2ECDE;cursor:pointer;padding:11px 16px;display:flex;justify-content:space-between;align-items:center;gap:10px;min-height:48px}
+#ctxRow{border-top:1px solid var(--border);cursor:pointer;padding:11px 16px;display:flex;justify-content:space-between;align-items:center;gap:10px;min-height:48px}
 #sumLine{font-size:13.5px;font-weight:600;letter-spacing:-.2px;line-height:1.45}
 .sum-toggle{font-size:12.5px;color:var(--text-dim);flex:0 0 auto}
 /* 특성 설정 — 자리 만들기 시트 안 */
@@ -42,13 +53,13 @@ header .sub{font-size:12px;color:var(--text-dim)}
 .chips{display:flex;flex-wrap:wrap;gap:6px}
 .chip{padding:7px 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);font-size:13px;cursor:pointer;min-height:40px;display:inline-flex;align-items:center}
 @media(pointer:coarse){.chip{min-height:44px}}
-.chip.on{border-color:var(--brass-deep);background:#FAF3E1;color:var(--brass-deep);font-weight:600}
+.chip.on{border-color:var(--brass-deep);background:var(--chip-on-bg);color:var(--brass-deep);font-weight:600}
 input[type=text],input[type=date],textarea{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface);font-size:15px;min-height:44px;font-family:inherit}
 input:focus,textarea:focus{outline:2px solid var(--brass);border-color:var(--brass)}
 .hint{font-size:12px;color:var(--text-dim);margin-top:4px}
 .req{color:var(--gochu)}
 .btn{border:none;border-radius:12px;cursor:pointer;font-family:inherit;font-size:14px;min-height:44px;padding:10px 14px}
-.btn-dark{background:var(--ink-900);color:var(--paper);font-weight:700}
+.btn-dark{background:var(--accent);color:var(--on-accent);font-weight:700}
 .btn-line{background:var(--surface);border:1px solid var(--line);color:var(--text)}
 .btn-sm{min-height:38px;font-size:13px;padding:7px 12px}
 #genBtn{width:100%;font-size:16px;min-height:48px;margin-top:4px}
@@ -66,19 +77,19 @@ input:focus,textarea:focus{outline:2px solid var(--brass);border-color:var(--bra
 #briefBox .bsub{font-size:12.5px;color:var(--text-dim);margin:2px 0 4px;padding-bottom:10px;border-bottom:2px solid var(--brass);border-image:linear-gradient(90deg,var(--brass),transparent) 1}
 .bcard{border:1px solid var(--card-line);border-radius:12px;padding:12px 14px;margin-top:10px}
 .bcard .fact{font-size:14.5px;font-weight:600;margin:3px 0 8px;letter-spacing:-.2px}
-.bcard .q{font-size:14px;color:#4A4238;border-top:1px solid #F2ECDE;padding-top:8px}
-.bavoid{background:#F8E9E4;border:none;border-radius:12px;padding:12px 14px;margin-top:10px}
+.bcard .q{font-size:14px;color:var(--text);border-top:1px solid var(--border);padding-top:8px}
+.bavoid{background:var(--avoid-bg);border:none;border-radius:12px;padding:12px 14px;margin-top:10px}
 .bavoid .items{font-size:14px;color:var(--gochu);font-weight:600;margin-top:4px}
 /* ---- cards ---- */
 .cards{margin-top:14px;display:flex;flex-direction:column;gap:10px}
-.card{background:var(--surface);border:1px solid var(--card-line);border-radius:16px;padding:13px 16px;cursor:pointer;box-shadow:0 1px 3px rgba(31,26,21,.05)}
-.card.top{border:1.5px solid var(--brass);box-shadow:0 2px 8px rgba(217,169,60,.14)}
+.card{background:var(--surface);border:1px solid var(--card-line);border-radius:16px;padding:13px 16px;cursor:pointer;box-shadow:var(--shadow-sm)}
+.card.top{border:1.5px solid var(--brass);box-shadow:0 2px 8px var(--accent-glow)}
 .card .row1{display:flex;align-items:center;gap:8px;margin-bottom:6px}
 .badge{font-size:11px;font-weight:700;letter-spacing:.3px;color:var(--brass-deep)}
 .badge.b-bridge{color:var(--celadon-deep)}
-.badge.b-en{color:#5B4E8F}
+.badge.b-en{color:var(--info)}
 .dur{font-size:11px;color:var(--text-dim)}
-.star{margin-left:auto;background:none;border:none;font-size:20px;cursor:pointer;line-height:1;color:#C9C0AE;padding:4px 2px}
+.star{margin-left:auto;background:none;border:none;font-size:20px;cursor:pointer;line-height:1;color:var(--border-bright);padding:4px 2px}
 .star.on{color:var(--brass-deep)}
 .pair{font-size:clamp(20px,5.4vw,25px);font-weight:750;letter-spacing:-.4px;line-height:1.3;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
 .pair .c{color:var(--brass-deep)}
@@ -94,7 +105,7 @@ input:focus,textarea:focus{outline:2px solid var(--brass);border-color:var(--bra
 .vbtn.on{border-color:var(--celadon-deep);color:var(--celadon-deep);font-weight:700}
 .del{background:none;border:none;font-size:15px;cursor:pointer;color:var(--text-dim);padding:6px}
 /* ---- 기록 ---- */
-.list-item{padding:11px 14px;border-bottom:1px solid #F2ECDE;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.list-item{padding:11px 14px;border-bottom:1px solid var(--border);cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:8px}
 .list-item:last-child{border-bottom:none}
 .list-item .t{font-size:15px;font-weight:600;line-height:1.4;letter-spacing:-.2px}
 .list-item .m{font-size:12.5px;color:var(--text-dim);margin-top:2px;line-height:1.5}
@@ -108,17 +119,17 @@ h3.rec{font-size:13px;color:var(--text-dim);font-weight:700;margin:18px 0 8px 2p
 .sheet .actrow{display:flex;gap:8px;margin-top:14px}
 .sheet .actrow .btn{flex:1}
 .plist{max-height:200px;overflow-y:auto;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
-.pitem{display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid #F2ECDE;min-height:44px}
+.pitem{display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid var(--border);min-height:44px}
 .pitem:last-child{border-bottom:none}
 .pitem input[type=checkbox]{width:18px;height:18px;accent-color:var(--brass-deep)}
 .pitem .nm{font-size:14px;font-weight:600}
 .pitem .og{font-size:12px;color:var(--text-dim)}
 .reactrow{display:flex;gap:8px}
 .reactrow .btn{flex:1}
-.reactrow .btn.on{background:#FAF3E1;border:1.5px solid var(--brass-deep);color:var(--brass-deep);font-weight:700}
+.reactrow .btn.on{background:var(--chip-on-bg);border:1.5px solid var(--brass-deep);color:var(--brass-deep);font-weight:700}
 .note-item{background:var(--surface);border:1px solid var(--card-line);border-radius:10px;padding:10px 12px;margin-top:8px;font-size:13.5px}
 .note-item .nm{font-size:11.5px;color:var(--celadon-deep);font-weight:700}
-.micbtn.rec{background:#F8E9E4;border-color:var(--gochu);color:var(--gochu)}
+.micbtn.rec{background:var(--avoid-bg);border-color:var(--gochu);color:var(--gochu)}
 /* ---- reader ---- */
 #reader{position:fixed;inset:0;background:var(--ink-900);color:var(--paper);display:none;flex-direction:column;padding:calc(14px + env(safe-area-inset-top)) 20px calc(14px + env(safe-area-inset-bottom));z-index:50;overflow:hidden}
 #reader.open{display:flex}
@@ -145,11 +156,11 @@ h3.rec{font-size:13px;color:var(--text-dim);font-weight:700;margin:18px 0 8px 2p
 #rdNav button{flex:1;padding:12px;border:1px solid var(--ink-600);background:var(--ink-800);color:var(--paper);border-radius:12px;font-size:15px;cursor:pointer;min-height:48px}
 #rdNav button:disabled{opacity:.35}
 /* ---- 광고주 뉴스 카드 ---- */
-.news-pt{border-top:1px solid #F2ECDE;padding:9px 0;font-size:14px;line-height:1.5}
-.news-hl{padding:7px 0;border-top:1px solid #F2ECDE;font-size:13px;line-height:1.45}
+.news-pt{border-top:1px solid var(--border);padding:9px 0;font-size:14px;line-height:1.5}
+.news-hl{padding:7px 0;border-top:1px solid var(--border);font-size:13px;line-height:1.45}
 .news-hl a{color:var(--text);text-decoration:none}
 .news-hl a:hover{text-decoration:underline}
-.spin{display:inline-block;width:16px;height:16px;border:2px solid var(--paper);border-right-color:transparent;border-radius:50%;animation:sp .8s linear infinite;vertical-align:-3px;margin-right:8px}
+.spin{display:inline-block;width:16px;height:16px;border:2px solid var(--on-accent);border-right-color:transparent;border-radius:50%;animation:sp .8s linear infinite;vertical-align:-3px;margin-right:8px}
 .spin.dk{border-color:var(--text);border-right-color:transparent}
 @keyframes sp{to{transform:rotate(360deg)}}
 </style>
@@ -595,28 +606,38 @@ let lastCaption = '';
 function renderResults(caption){
   if(caption!==undefined) lastCaption = caption;
   const box = document.getElementById('resultCards'); box.innerHTML='';
-  // 1) 검증된 정석 먼저 — 모음집에서 오늘 자리에 맞는 상위 3개 (안전 우선)
+  // 1) 검증된 정석 먼저 — ~10개, 카테고리 라벨로 묶어서 (2026-08-01 강프로:
+  //    정석이 주인공. 카테고리당 최대 2개 라운드로빈으로 다양성 확보)
   if(CANON.length){
-    let picks = CANON.filter(canonMatchesToday);
-    picks.sort((a,b)=>((b.tone===state.tone)-(a.tone===state.tone)) || (b.pop-a.pop));
-    picks = picks.slice(0,3);
+    let fit = CANON.filter(canonMatchesToday);
+    fit.sort((a,b)=>((b.tone===state.tone)-(a.tone===state.tone)) || (b.pop-a.pop));
+    const perCat = {}, picks = [];
+    for(const e of fit){ if((perCat[e.c]||0)<2){ picks.push(e); perCat[e.c]=(perCat[e.c]||0)+1; if(picks.length>=10) break; } }
+    if(picks.length<10) for(const e of fit){ if(!picks.includes(e)){ picks.push(e); if(picks.length>=10) break; } }
     if(picks.length){
       const h=document.createElement('div');
       h.style.cssText='font-size:12px;color:var(--text-dim);padding:2px 4px';
       h.textContent='📖 검증된 정석 — 모음집에서 오늘 자리 기준'; box.appendChild(h);
-      const pts = dupSort(picks.map(canonToToast));
-      pts.forEach((t,i)=>box.appendChild(cardEl(t,i,pts,{})));
+      const toasts = dupSort(picks.map(canonToToast));
+      const byCat = new Map();
+      toasts.forEach(t=>{ const k=t.canonCat||'기타'; if(!byCat.has(k)) byCat.set(k,[]); byCat.get(k).push(t); });
+      let first = true;
+      byCat.forEach((list,cat)=>{
+        const cl=document.createElement('div'); cl.className='sec-label';
+        cl.style.cssText='padding:8px 4px 0'; cl.textContent=cat; box.appendChild(cl);
+        list.forEach(t=>{ box.appendChild(cardEl(t, first?0:1, toasts, {top:first})); first=false; });
+      });
     }
   }
-  // 2) 생성형 제안
-  if(results.length){
+  // 2) 생성형은 곁들임 — 5개까지만
+  const gen = dupSort(results).slice(0,5);
+  if(gen.length){
     const c = document.createElement('div');
-    c.style.cssText='font-size:12px;color:var(--text-dim);padding:8px 4px 2px';
+    c.style.cssText='font-size:12px;color:var(--text-dim);padding:10px 4px 2px';
     c.textContent = lastCaption || '✨ 생성형 제안 — 오늘 자리만을 위해 새로 쓴 것';
     box.appendChild(c);
+    gen.forEach((t,i)=>box.appendChild(cardEl(t,i,gen,{})));
   }
-  const sorted = dupSort(results);
-  sorted.forEach((t,i)=>box.appendChild(cardEl(t,i,sorted,{top:true})));
 }
 let savedMode = 'all';
 document.querySelectorAll('#savedChips .chip').forEach(c=>c.onclick=()=>{
