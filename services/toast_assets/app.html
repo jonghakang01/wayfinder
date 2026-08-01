@@ -38,9 +38,6 @@ header .sub{font-size:12px;color:var(--text-dim)}
 .sec-label{font-size:11px;font-weight:700;letter-spacing:.4px;color:var(--brass-deep)}
 .sec-label.g{color:var(--celadon-deep)}
 .sec-label.r{color:var(--gochu)}
-/* ---- 오늘 자리 + 특성 요약 행 ---- */
-#ctxRow{border-top:1px solid var(--border);cursor:pointer;padding:11px 16px;display:flex;justify-content:space-between;align-items:center;gap:10px;min-height:48px}
-#sumLine{font-size:13.5px;font-weight:600;letter-spacing:-.2px;line-height:1.45}
 .sum-toggle{font-size:12.5px;color:var(--text-dim);flex:0 0 auto}
 /* 특성 설정 — 자리 만들기 시트 안 */
 #setupBox summary{list-style:none;cursor:pointer;padding:10px 0;display:flex;justify-content:space-between;align-items:center;gap:10px;min-height:44px;font-size:13px;color:var(--text-dim);font-weight:600}
@@ -179,10 +176,6 @@ h3.rec{font-size:13px;color:var(--text-dim);font-weight:700;margin:18px 0 8px 2p
     <div id="todayPanel" class="panel" style="margin-bottom:12px">
       <div id="eventStrip"></div>
       <div id="briefBox" style="display:none"></div>
-      <div id="ctxRow" onclick="openEventSheet(db('tc_active',null)||undefined)">
-        <div><span class="sec-label">특성 · 설정</span><br><span id="sumLine"></span></div>
-        <span class="sum-toggle">바꾸기 ›</span>
-      </div>
     </div>
     <div class="field" id="sceneField" style="display:none">
       <label>최근 이 팀과 있었던 일 한 줄 <span class="req">*영문 빌드업 필수</span></label>
@@ -452,7 +445,7 @@ function ctxSummary(c){
   return note ? base+' · “'+(note.length>16?note.slice(0,16)+'…':note)+'”' : base;
 }
 function updateSummary(){
-  document.getElementById('sumLine').textContent = ctxSummary(state);
+  // 홈에는 특성 요약을 두지 않는다(2026-08-01 강프로) — 시트 안 세부 설정 요약만 갱신
   const cs = document.getElementById('cfgSum'); if(cs) cs.textContent = ctxSummary(state);
 }
 function refreshChips(){
@@ -710,7 +703,7 @@ function renderEventStrip(){
   const ev = activeEvent();
   if(!ev){
     box.innerHTML = `<div class="row"><div><span class="sec-label">오늘 자리</span>
-      <div class="meta">아직 없음 — 만들면 아래 설정이 자리의 특성이 되고, 재탕 방지·회고가 열립니다</div></div>
+      <div class="meta">아직 없음 — 만들기에서 특성까지 한 번에 잡고, 저장하면 바로 뽑아드립니다</div></div>
       <button class="btn btn-dark btn-sm" style="flex:0 0 auto" onclick="openEventSheet()">＋ 만들기</button></div>`;
     return;
   }
