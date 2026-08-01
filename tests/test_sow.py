@@ -362,7 +362,9 @@ def test_change_intake_lists_live_contracts_and_posts_to_both_routes():
     d = _email_change_chain()
     html = m._change_intake(d, d["contracts"], "g1")
     assert "Log a change to this deal" in html
-    assert 'value="base"' in html
+    # the governing document is a live target; the superseded base is history
+    # once its amendment takes effect (fixture dates: eml1 governs from 2026-08-01)
+    assert 'value="eml1"' in html
     assert 'accept=".msg,.eml,.pdf,.docx,.doc,.txt"' in html
     assert "/sow/contract/email" in html and "/sow/contract/schedule" in html
     assert 'accept=".xlsx,.xlsm,.csv,.txt,.tsv"' in html
