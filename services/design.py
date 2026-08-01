@@ -384,6 +384,27 @@ wfProgress.start('Working…') / wfProgress.stop()            // anything else t
     <p>The watcher gives up after 15 minutes so a failed download never leaves the page
     spinning, and <code>prefers-reduced-motion</code> stops the animation without hiding the
     indicator.</p>
+
+    <h3>External feed summary card <span style="font-size:.7rem;color:var(--text-muted);font-weight:500">(2026-08-01 · first use: Toast 광고주 뉴스)</span></h3>
+    <p>For content pulled from an outside feed (news, mail, RSS) and digested by AI. One card =
+    <b>①source label + ↻ refresh</b> in the header row, <b>②one-line situation summary</b> (serif,
+    larger), <b>③3–5 point rows</b> (bold what happened + muted why it matters), <b>④original links
+    folded in a &lt;details&gt;</b>, <b>⑤footer: collected-at time + stale warning</b> when a refresh
+    failed and an old result is shown. Never render fetched text as fact without the collected-at
+    stamp — freshness is part of the data. Refresh policy: background warm on app open, manual ↻
+    forces, everything else serves cache.</p>
+    <div class="ds-card" style="max-width:420px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline">
+        <span style="font-size:.72rem;font-weight:700;color:var(--accent)">CLIENT · UNIT</span>
+        <button class="ds-btn" style="font-size:.72rem">↻ Refresh</button></div>
+      <div style="font-style:italic;font-size:1.05rem;margin:.4rem 0">One-line situation summary.</div>
+      <div style="border-top:1px solid var(--border);padding:.45rem 0">
+        <div style="font-weight:600">What happened, one sentence.</div>
+        <div style="color:var(--text-muted);font-size:.85rem">Why it matters / how to bring it up.</div></div>
+      <details style="margin-top:.4rem"><summary style="font-size:.8rem;color:var(--text-muted);cursor:pointer">Original headlines (10)</summary></details>
+      <div style="font-size:.75rem;color:var(--text-muted);margin-top:.4rem">Collected 2026-08-01 09:00</div>
+    </div>
+
   </div>
 
   <div class="ds-sect"><h2>4 · Rules &amp; pitfalls</h2>

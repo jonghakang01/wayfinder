@@ -27,13 +27,15 @@ header .sub{font-size:12px;color:var(--text-dim)}
 .sec-label{font-size:11px;font-weight:700;letter-spacing:.4px;color:var(--brass-deep)}
 .sec-label.g{color:var(--celadon-deep)}
 .sec-label.r{color:var(--gochu)}
-/* ---- 오늘 자리 + 설정 통합 패널 ---- */
-#setupBox{border-top:1px solid #F2ECDE}
-#setupBox summary{list-style:none;cursor:pointer;padding:11px 16px;display:flex;justify-content:space-between;align-items:center;gap:10px;min-height:48px}
-#setupBox summary::-webkit-details-marker{display:none}
+/* ---- 오늘 자리 + 특성 요약 행 ---- */
+#ctxRow{border-top:1px solid #F2ECDE;cursor:pointer;padding:11px 16px;display:flex;justify-content:space-between;align-items:center;gap:10px;min-height:48px}
 #sumLine{font-size:13.5px;font-weight:600;letter-spacing:-.2px;line-height:1.45}
 .sum-toggle{font-size:12.5px;color:var(--text-dim);flex:0 0 auto}
-#setup{padding:2px 16px 14px;border-top:1px solid #F2ECDE}
+/* 특성 설정 — 자리 만들기 시트 안 */
+#setupBox summary{list-style:none;cursor:pointer;padding:10px 0;display:flex;justify-content:space-between;align-items:center;gap:10px;min-height:44px;font-size:13px;color:var(--text-dim);font-weight:600}
+#setupBox summary>span:first-child{flex:0 0 auto;white-space:nowrap}
+#cfgSum{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:400}
+#setupBox summary::-webkit-details-marker{display:none}
 .setup-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 14px}
 .field{margin-bottom:10px}
 .field>label{display:block;font-size:11.5px;color:var(--text-dim);margin-bottom:4px;font-weight:600}
@@ -142,6 +144,11 @@ h3.rec{font-size:13px;color:var(--text-dim);font-weight:700;margin:18px 0 8px 2p
 #rdNav{flex:0 0 auto;display:flex;gap:10px;margin-top:12px}
 #rdNav button{flex:1;padding:12px;border:1px solid var(--ink-600);background:var(--ink-800);color:var(--paper);border-radius:12px;font-size:15px;cursor:pointer;min-height:48px}
 #rdNav button:disabled{opacity:.35}
+/* ---- 광고주 뉴스 카드 ---- */
+.news-pt{border-top:1px solid #F2ECDE;padding:9px 0;font-size:14px;line-height:1.5}
+.news-hl{padding:7px 0;border-top:1px solid #F2ECDE;font-size:13px;line-height:1.45}
+.news-hl a{color:var(--text);text-decoration:none}
+.news-hl a:hover{text-decoration:underline}
 .spin{display:inline-block;width:16px;height:16px;border:2px solid var(--paper);border-right-color:transparent;border-radius:50%;animation:sp .8s linear infinite;vertical-align:-3px;margin-right:8px}
 .spin.dk{border-color:var(--text);border-right-color:transparent}
 @keyframes sp{to{transform:rotate(360deg)}}
@@ -153,8 +160,7 @@ h3.rec{font-size:13px;color:var(--text-dim);font-weight:700;margin:18px 0 8px 2p
   <div class="tabs">
     <div class="tab on" data-tab="today">오늘</div>
     <div class="tab" data-tab="canon">모음집</div>
-    <div class="tab" data-tab="saved">저장함</div>
-    <div class="tab" data-tab="proven">검증</div>
+    <div class="tab" data-tab="clients">광고주</div>
     <div class="tab" data-tab="log">기록</div>
   </div>
 
@@ -162,26 +168,10 @@ h3.rec{font-size:13px;color:var(--text-dim);font-weight:700;margin:18px 0 8px 2p
     <div id="todayPanel" class="panel" style="margin-bottom:12px">
       <div id="eventStrip"></div>
       <div id="briefBox" style="display:none"></div>
-      <details id="setupBox">
-      <summary>
+      <div id="ctxRow" onclick="openEventSheet(db('tc_active',null)||undefined)">
         <div><span class="sec-label">특성 · 설정</span><br><span id="sumLine"></span></div>
         <span class="sum-toggle">바꾸기 ›</span>
-      </summary>
-      <div id="setup">
-        <div class="field"><label>자리 성격 <span style="font-weight:400">(겹치면 여러 개)</span></label><div class="chips" data-k="occasion"></div></div>
-        <div class="field"><label>언어 구성</label><div class="chips" data-k="lang_mix"></div></div>
-        <div class="setup-grid">
-          <div class="field"><label>참석 범위</label><div class="chips" data-k="audience_scope"></div></div>
-          <div class="field"><label>임원</label><div class="chips" data-k="execs"></div></div>
-          <div class="field"><label>연령대</label><div class="chips" data-k="age_mix"></div></div>
-          <div class="field"><label>내 위치</label><div class="chips" data-k="my_role"></div></div>
-        </div>
-        <div class="field"><label>톤</label><div class="chips" data-k="tone"></div></div>
-        <div class="field"><label>차수</label><div class="chips" data-k="round"></div></div>
-        <div class="field"><label>회사명 · 팀명 · 프로젝트명 <span style="font-weight:400">(두문자어 재료, 선택)</span></label>
-          <input type="text" id="orgNames" placeholder="예: 삼성 D2C, 프로젝트 오로라"></div>
       </div>
-      </details>
     </div>
     <div class="field" id="sceneField" style="display:none">
       <label>최근 이 팀과 있었던 일 한 줄 <span class="req">*영문 빌드업 필수</span></label>
@@ -201,26 +191,64 @@ h3.rec{font-size:13px;color:var(--text-dim);font-weight:700;margin:18px 0 8px 2p
     <div class="hint" style="margin-top:14px">🟢 스테디 · 🔵 요즘 · 🟡 한물 · 🔴 호불호/주의 — 근거: 2025-26 트렌드 기사 + 모음집 다수 반복 출현. "반응 좋음"은 ★로 담아 직접 검증해 가는 구조입니다.</div>
     <div class="hint" id="canonMeta" style="margin-top:6px"></div>
   </div>
-  <div id="saved" style="display:none"><div class="cards" id="savedCards"></div></div>
-  <div id="proven" style="display:none"><div class="cards" id="provenCards"></div></div>
+  <div id="clients" style="display:none">
+    <div class="chips" id="clientChips" style="margin-bottom:8px"></div>
+    <div class="chips" id="unitChips" style="margin-bottom:10px"></div>
+    <div id="newsBox"></div>
+    <div class="hint" style="margin-top:10px">앱을 열면 등록된 광고주 뉴스를 백그라운드에서 미리 갱신해 둡니다. ↻는 지금 즉시 다시 수집.</div>
+  </div>
 
   <div id="log" style="display:none">
     <button class="btn btn-line" style="width:100%" onclick="openEventSheet()">＋ 자리 만들기</button>
     <h3 class="rec">자리</h3><div class="panel" id="eventList"></div>
     <h3 class="rec">인물</h3><div class="panel" id="personList"></div>
+    <h3 class="rec">저장한 건배사</h3>
+    <div class="chips" id="savedChips" style="margin:0 2px 8px">
+      <div class="chip on" data-f="all">전체 ★</div>
+      <div class="chip" data-f="proven">✅ 검증된 것만</div>
+    </div>
+    <div class="cards" id="savedCards" style="margin-top:0"></div>
   </div>
+</div>
+
+<!-- client / unit add sheet -->
+<div class="sheet" id="clSheet">
+  <h2 id="clSheetTitle">광고주 추가</h2>
+  <div class="field" id="clNameField"><label>광고주 이름</label><input type="text" id="clName" placeholder="예: 한국타이어"></div>
+  <div class="field" id="unLabelField" style="display:none"><label>유닛 이름</label><input type="text" id="unLabel" placeholder="예: US, 브라질, 중남미"></div>
+  <div class="field"><label>뉴스 검색어 <span style="font-weight:400">(비우면 이름 그대로)</span></label><input type="text" id="clQ" placeholder="예: Hankook Tire"></div>
+  <div class="field"><label>지역·언어</label><div class="chips" id="clRegion"></div></div>
+  <div class="actrow"><button class="btn btn-line" onclick="closeSheets()">취소</button><button class="btn btn-dark" id="clSaveBtn" onclick="saveClientSheet()">추가</button></div>
 </div>
 
 <!-- event create sheet -->
 <div class="sheet-bg" id="sheetBg" onclick="closeSheets()"></div>
 <div class="sheet" id="evSheet">
   <h2 id="evSheetTitle">자리 만들기</h2>
-  <div class="hint" id="evCtx" style="margin:-8px 0 10px"></div>
   <div class="field"><label>자리 이름</label><input type="text" id="evTitle" placeholder="예: 삼성 D2C 정기 만찬"></div>
   <div class="setup-grid">
     <div class="field"><label>날짜</label><input type="date" id="evDate"></div>
     <div class="field"><label>템플릿에서</label><div id="evTplWrap"><select id="evTpl" style="width:100%;min-height:44px;border:1px solid var(--line);border-radius:10px;background:var(--surface);font-size:14px;padding:0 8px"><option value="">-</option></select></div></div>
   </div>
+  <div class="field"><label>자리 성격 <span style="font-weight:400">(겹치면 여러 개)</span></label><div class="chips" data-k="occasion"></div></div>
+  <div class="field"><label>자리 성격 한 줄 <span style="font-weight:400">(선택 — 구체적일수록 건배사가 맞아집니다)</span></label>
+    <input type="text" id="occNote" placeholder="예: 3년 만의 재계약 기념, 어제 수주 소식 겹침"></div>
+  <details id="setupBox">
+    <summary><span>세부 설정</span><span class="sum-toggle" id="cfgSum"></span></summary>
+    <div id="setup">
+      <div class="field"><label>언어 구성</label><div class="chips" data-k="lang_mix"></div></div>
+      <div class="setup-grid">
+        <div class="field"><label>참석 범위</label><div class="chips" data-k="audience_scope"></div></div>
+        <div class="field"><label>임원</label><div class="chips" data-k="execs"></div></div>
+        <div class="field"><label>연령대</label><div class="chips" data-k="age_mix"></div></div>
+        <div class="field"><label>내 위치</label><div class="chips" data-k="my_role"></div></div>
+      </div>
+      <div class="field"><label>톤</label><div class="chips" data-k="tone"></div></div>
+      <div class="field"><label>차수</label><div class="chips" data-k="round"></div></div>
+      <div class="field"><label>회사명 · 팀명 · 프로젝트명 <span style="font-weight:400">(두문자어 재료, 선택)</span></label>
+        <input type="text" id="orgNames" placeholder="예: 삼성 D2C, 프로젝트 오로라"></div>
+    </div>
+  </details>
   <div class="field"><label>오늘 참석자 <span style="font-weight:400">(빼려면 탭)</span></label>
     <div class="chips" id="attChips" style="min-height:32px"></div>
     <div style="display:flex;gap:6px;margin-top:10px">
@@ -318,11 +346,47 @@ state.occasion = state.occasion.filter(o=>OPTS.occasion.includes(o));
 if(!state.occasion.length) state.occasion=['클라이언트 만찬'];
 if(state.audience){ if(state.audience==='사내') state.audience_scope='사내만';
   if(state.audience==='임원 있음') state.execs='임원 포함'; delete state.audience; }
-function persistState(){ localStorage.setItem('toast_state', JSON.stringify(state)); }
+function persistState(){ localStorage.setItem('toast_state', JSON.stringify(state)); schedulePush(); }
 let results = [], readerList = [], readerIdx = 0, wakeLock = null;
 
-function db(key, def){ try{return JSON.parse(localStorage.getItem(key)) ?? def}catch(e){return def} }
-function dbSet(key, v){ localStorage.setItem(key, JSON.stringify(v)); }
+/* ---- storage: per-account on the server; localStorage stays as local backup ---- */
+const MEM = {};
+const DB_KEYS = ['tc_persons','tc_events','tc_active','toasts_saved','tc_clients'];
+DB_KEYS.forEach(k=>{ try{ MEM[k]=JSON.parse(localStorage.getItem(k)); }catch(e){ MEM[k]=null; } });
+function db(key, def){ return MEM[key] ?? def; }
+function dbSet(key, v){ MEM[key]=v; try{localStorage.setItem(key, JSON.stringify(v))}catch(e){} schedulePush(); }
+function fieldVal(id){ const el=document.getElementById(id); return el?el.value:''; }
+function stateBlob(){ return {state, persons:db('tc_persons',[]), events:db('tc_events',[]),
+  active:db('tc_active',null), saved:db('toasts_saved',[]), clients:clientsList(),
+  fields:{orgNames:fieldVal('orgNames'), scene:fieldVal('scene')}}; }
+let pushT = null;
+function schedulePush(){ clearTimeout(pushT); pushT = setTimeout(pushState, 800); }
+async function pushState(){
+  try{ await fetch('/toast/api/state',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(stateBlob())}); }catch(e){}
+}
+async function loadRemote(){
+  try{
+    const r = await fetch('/toast/api/state'); const j = await r.json();
+    if(j && j.state){
+      MEM['tc_persons']=j.persons||[]; MEM['tc_events']=j.events||[];
+      MEM['tc_active']=j.active??null; MEM['toasts_saved']=j.saved||[];
+      if(j.clients) MEM['tc_clients']=j.clients;
+      state = {...DEFAULTS, ...j.state};
+      if(typeof state.occasion==='string') state.occasion=[state.occasion];
+      state.occasion = state.occasion.filter(o=>OPTS.occasion.includes(o));
+      if(!state.occasion.length) state.occasion=['클라이언트 만찬'];
+      const f = j.fields||{};
+      if(f.orgNames!==undefined) document.getElementById('orgNames').value=f.orgNames;
+      if(f.scene!==undefined) document.getElementById('scene').value=f.scene;
+      DB_KEYS.forEach(k=>{ try{localStorage.setItem(k, JSON.stringify(MEM[k]))}catch(e){} });
+      localStorage.setItem('toast_state', JSON.stringify(state));
+      refreshChips(); refreshToday(); renderLog();
+    } else {
+      pushState();  // account has no server state yet — migrate this device's records up
+    }
+  }catch(e){}
+}
 const persons = ()=>db('tc_persons',[]);
 const events  = ()=>db('tc_events',[]);
 const uid = ()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
@@ -372,12 +436,18 @@ document.querySelectorAll('.chips').forEach(box=>{
 function ctxSummary(c){
   if(!c) return '';
   const occ = Array.isArray(c.occasion)?c.occasion.join('+'):(c.occasion||'');
-  return [occ, c.audience_scope, c.execs, MIX_LABEL[c.lang_mix]||c.lang_mix, c.tone, c.round].filter(Boolean).join(' · ');
+  const base = [occ, c.audience_scope, c.execs, MIX_LABEL[c.lang_mix]||c.lang_mix, c.tone, c.round].filter(Boolean).join(' · ');
+  const note = (c.occasion_note||'').trim();
+  return note ? base+' · “'+(note.length>16?note.slice(0,16)+'…':note)+'”' : base;
 }
-function updateSummary(){ document.getElementById('sumLine').textContent = ctxSummary(state); }
+function updateSummary(){
+  document.getElementById('sumLine').textContent = ctxSummary(state);
+  const cs = document.getElementById('cfgSum'); if(cs) cs.textContent = ctxSummary(state);
+}
 function refreshChips(){
   document.querySelectorAll('.chips').forEach(box=>{
     const k = box.dataset.k, multi = MULTI.includes(k);
+    if(!OPTS[k]) return;  // savedChips/canonFilter 등 설정 아닌 칩 박스
     [...box.children].forEach((c,idx)=>{
       const o = OPTS[k][idx]; const val = Array.isArray(o)?o[1]:o;
       c.classList.toggle('on', multi?state[k].includes(val):state[k]===val);
@@ -387,28 +457,37 @@ function refreshChips(){
   updateSummary();
 }
 // While a 자리 is active, the settings ARE that event's 특성 — keep them bound.
-function syncEventContext(){ const ev=activeEvent(); if(ev) updEvent(ev.id, e=>e.context={...state}); }
+function syncEventContext(){
+  if(document.getElementById('evSheet').classList.contains('open')){
+    // creating: context lands on the event at saveEvent; editing: bind to that event
+    if(editingEventId) updEvent(editingEventId, e=>e.context={...state});
+    return;
+  }
+  const ev=activeEvent(); if(ev) updEvent(ev.id, e=>e.context={...state});
+}
 updateSummary();
 ['orgNames','scene'].forEach(id=>{
   const el = document.getElementById(id);
   el.value = localStorage.getItem('toast_'+id)||'';
-  el.oninput = ()=>localStorage.setItem('toast_'+id, el.value);
+  el.oninput = ()=>{ localStorage.setItem('toast_'+id, el.value); schedulePush(); };
 });
+const occNoteEl = document.getElementById('occNote');
+occNoteEl.value = state.occasion_note||'';
+occNoteEl.oninput = ()=>{ state.occasion_note = occNoteEl.value; persistState(); updateSummary(); syncEventContext(); };
 
 /* ================= tabs ================= */
 document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
   document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('on',x===t));
-  ['today','canon','saved','proven','log'].forEach(id=>document.getElementById(id).style.display = t.dataset.tab===id?'':'none');
+  ['today','canon','clients','log'].forEach(id=>document.getElementById(id).style.display = t.dataset.tab===id?'':'none');
   if(t.dataset.tab==='canon') renderCanon();
-  if(t.dataset.tab==='saved') renderSaved();
-  if(t.dataset.tab==='proven') renderProven();
+  if(t.dataset.tab==='clients') renderClients();
   if(t.dataset.tab==='log') renderLog();
 });
 
 /* ================= 정석 모음집 (canon) ================= */
 let CANON = [], CANON_META = {};   // raw entries + meta(updated 등)
 const FRESH_ICO = {'스테디':'🟢','요즘':'🔵','한물':'🟡','주의':'🔴'};
-const CANON_CATS = ['전체','클래식','삼행시','결의·파이팅','품격·성어','송년·신년','축하','요즘·구호','파트너십','환영·송별','실적·프로젝트','유머·주의'];
+const CANON_CATS = ['전체','클래식','삼행시','결의·파이팅','품격·성어','송년·신년','축하','요즘·구호','파트너십','환영·송별','실적·프로젝트','건강·가족','감사·노고','유머·주의'];
 let canonCat = '전체';
 const OCC_MAP = {'클라이언트 만찬':['클라이언트'],'송년/신년':['송년','신년'],'승진·영전':['승진'],'환영':['환영'],'송별':['송별'],'실적 달성':['실적']};
 function canonToToast(e){
@@ -539,17 +618,24 @@ function renderResults(caption){
   const sorted = dupSort(results);
   sorted.forEach((t,i)=>box.appendChild(cardEl(t,i,sorted,{top:true})));
 }
+let savedMode = 'all';
+document.querySelectorAll('#savedChips .chip').forEach(c=>c.onclick=()=>{
+  savedMode = c.dataset.f;
+  document.querySelectorAll('#savedChips .chip').forEach(x=>x.classList.toggle('on',x===c));
+  renderSaved();
+});
 function renderSaved(){
   const box = document.getElementById('savedCards'); box.innerHTML='';
-  const a = dupSort(loadSaved());
-  if(!a.length){ box.innerHTML = '<div class="empty">저장한 건배사가 없습니다.<br>오늘 탭에서 뽑아 ★로 담아두세요.</div>'; return; }
+  let a = loadSaved();
+  if(savedMode==='proven') a = a.filter(t=>t.verified);
+  a = dupSort(a);
+  if(!a.length){
+    box.innerHTML = savedMode==='proven'
+      ? '<div class="empty">아직 검증된 건배사가 없습니다.<br>써보고 반응이 좋았던 것에 ✅를 켜세요.</div>'
+      : '<div class="empty">저장한 건배사가 없습니다.<br>오늘 탭에서 뽑아 ★로 담아두세요.</div>';
+    return;
+  }
   a.forEach((t,i)=>box.appendChild(cardEl(t,i,a,{saved:true,rerender:renderSaved})));
-}
-function renderProven(){
-  const box = document.getElementById('provenCards'); box.innerHTML='';
-  const a = dupSort(loadSaved().filter(t=>t.verified));
-  if(!a.length){ box.innerHTML = '<div class="empty">아직 검증된 건배사가 없습니다.<br>저장함에서 써보고 반응이 좋았던 것에 ✅를 켜세요.</div>'; return; }
-  a.forEach((t,i)=>box.appendChild(cardEl(t,i,a,{saved:true,rerender:renderProven})));
 }
 
 /* ================= generate ================= */
@@ -609,7 +695,7 @@ function refreshToday(){ renderEventStrip(); renderResults(); }
 /* ---- event sheets ---- */
 let editingEventId = null;
 function openSheet(id){ document.getElementById('sheetBg').classList.add('open'); document.getElementById(id).classList.add('open'); }
-function closeSheets(){ document.querySelectorAll('.sheet,.sheet-bg').forEach(x=>x.classList.remove('open')); stopMic(); }
+function closeSheets(){ document.querySelectorAll('.sheet,.sheet-bg').forEach(x=>x.classList.remove('open')); editingEventId=null; stopMic(); }
 function personCheckList(boxId, checked){
   const box = document.getElementById(boxId); box.innerHTML='';
   const ps = persons();
@@ -621,15 +707,23 @@ function personCheckList(boxId, checked){
     box.appendChild(d);
   });
 }
+function adoptContext(c){
+  if(!c) return;
+  state = {...DEFAULTS, ...c};
+  if(typeof state.occasion==='string') state.occasion=[state.occasion];
+  state.occasion = state.occasion.filter(o=>OPTS.occasion.includes(o));
+  if(!state.occasion.length) state.occasion=['클라이언트 만찬'];
+  persistState(); refreshChips();
+}
 function openEventSheet(editId){
   closeSheets();
   editingEventId = editId || null;
   const ev = editId ? events().find(e=>e.id===editId) : null;
+  if(ev) adoptContext(ev.context);
+  document.getElementById('occNote').value = state.occasion_note||'';
+  document.getElementById('cfgSum').textContent = ctxSummary(state);
   document.getElementById('evSheetTitle').textContent = ev ? '자리 수정' : '자리 만들기';
-  document.getElementById('evSaveBtn').textContent = ev ? '저장' : '오늘 자리로 시작';
-  document.getElementById('evCtx').textContent = ev
-    ? '특성: '+ctxSummary(ev.context)+' — 오늘 탭 설정에서 바뀝니다'
-    : '특성(지금 설정): '+ctxSummary(state)+' — 오늘 탭에서 바꾸면 자리에도 반영';
+  document.getElementById('evSaveBtn').textContent = ev ? '저장' : '자리 등록 → 바로 뽑기';
   document.getElementById('evTitle').value = ev ? ev.title : '';
   document.getElementById('evDate').value = ev ? ev.date : new Date().toISOString().slice(0,10);
   document.getElementById('evIsTpl').checked = ev ? !!ev.isTemplate : false;
@@ -641,6 +735,9 @@ function openEventSheet(editId){
   sel.onchange = ()=>{
     const t = events().find(e=>e.id===sel.value); if(!t) return;
     document.getElementById('evTitle').value = t.title;
+    adoptContext(t.context);
+    document.getElementById('occNote').value = state.occasion_note||'';
+    document.getElementById('cfgSum').textContent = ctxSummary(state);
     evSelected = [...t.attendeeIds]; renderAttChips();
   };
   evSelected = ev ? [...ev.attendeeIds] : []; renderAttChips();
@@ -686,8 +783,9 @@ function saveEvent(){
   const isTpl = document.getElementById('evIsTpl').checked;
   const date = document.getElementById('evDate').value;
   const now = new Date().toISOString();
+  const isNew = !editingEventId;
   if(editingEventId){
-    updEvent(editingEventId, e=>{ e.title=title; e.date=date; e.attendeeIds=attendeeIds; e.isTemplate=isTpl; });
+    updEvent(editingEventId, e=>{ e.title=title; e.date=date; e.attendeeIds=attendeeIds; e.isTemplate=isTpl; e.context={...state}; });
   }else{
     const a = events();
     const ev = {id:uid(), title, date, attendeeIds, isTemplate:isTpl,
@@ -696,6 +794,11 @@ function saveEvent(){
   }
   attendeeIds.forEach(id=>updPerson(id, p=>p.lastSeenAt=now));
   editingEventId=null; closeSheets(); refreshToday(); renderLog();
+  if(isNew){
+    // 자리 등록 = 1차 뽑기까지 한 동작 (2026-08-01 강프로)
+    document.querySelector('.tab[data-tab=today]').click();
+    document.getElementById('genBtn').click();
+  }
 }
 
 /* ---- event detail / 회고 (Phase 4) ---- */
@@ -791,6 +894,135 @@ function openPersonDetail(id){
   openSheet('pdSheet');
 }
 
+/* ================= 광고주 뉴스 (v2.1) ================= */
+const REGIONS = [['한국','ko','KR'],['미국','en-US','US'],['브라질','pt-BR','BR'],['중남미','es-419','MX'],['글로벌','en','US']];
+const DEFAULT_CLIENTS = [
+  {id:'samsung', name:'삼성', units:[
+    {id:'kr', label:'한국', q:'삼성전자', hl:'ko', gl:'KR'},
+    {id:'us', label:'US', q:'Samsung Electronics', hl:'en-US', gl:'US'},
+    {id:'latam', label:'중남미', q:'Samsung Electronics', hl:'es-419', gl:'MX'}]},
+  {id:'hankook', name:'한국타이어', units:[
+    {id:'kr', label:'한국', q:'한국타이어', hl:'ko', gl:'KR'},
+    {id:'us', label:'US', q:'Hankook Tire', hl:'en-US', gl:'US'}]},
+];
+function clientsList(){ return db('tc_clients', DEFAULT_CLIENTS); }
+let selClientId=null, selUnitId=null, clManage=false, clAddingUnit=false;
+function selClient(){ return clientsList().find(c=>c.id===selClientId)||clientsList()[0]||null; }
+function newsUrl(c,u,mode){
+  return '/toast/api/news?q='+encodeURIComponent(u.q)+'&hl='+encodeURIComponent(u.hl)
+    +'&gl='+encodeURIComponent(u.gl)+'&label='+encodeURIComponent(c.name+' '+u.label)
+    +(mode?'&mode='+mode:'');
+}
+function renderClients(){
+  const cb = document.getElementById('clientChips'); cb.innerHTML='';
+  const cl = clientsList();
+  cl.forEach(c=>{
+    const d=document.createElement('div');
+    d.className='chip'+(selClient()&&selClient().id===c.id?' on':'');
+    d.textContent = c.name + (clManage?' ×':'');
+    d.onclick=()=>{
+      if(clManage){ if(confirm(`'${c.name}' 광고주를 삭제할까요?`)){ dbSet('tc_clients', cl.filter(x=>x.id!==c.id)); if(selClientId===c.id){selClientId=null;selUnitId=null;} renderClients(); } return; }
+      selClientId=c.id; selUnitId=null; renderClients();
+    };
+    cb.appendChild(d);
+  });
+  const add=document.createElement('div'); add.className='chip'; add.textContent='＋ 광고주';
+  add.onclick=()=>openClientSheet(false); cb.appendChild(add);
+  const mg=document.createElement('div'); mg.className='chip'+(clManage?' on':''); mg.textContent='관리';
+  mg.onclick=()=>{ clManage=!clManage; renderClients(); }; cb.appendChild(mg);
+
+  const ub = document.getElementById('unitChips'); ub.innerHTML='';
+  const c = selClient();
+  const box = document.getElementById('newsBox');
+  if(!c){ box.innerHTML='<div class="empty">광고주를 추가해 보세요</div>'; return; }
+  const unit = c.units.find(u=>u.id===selUnitId)||c.units[0];
+  c.units.forEach(u=>{
+    const d=document.createElement('div');
+    d.className='chip'+(unit&&unit.id===u.id?' on':'');
+    d.textContent=u.label+(clManage?' ×':'');
+    d.onclick=()=>{
+      if(clManage){ if(c.units.length>1&&confirm(`'${u.label}' 유닛을 삭제할까요?`)){ c.units=c.units.filter(x=>x.id!==u.id); dbSet('tc_clients',[...clientsList()]); if(selUnitId===u.id)selUnitId=null; renderClients(); } return; }
+      selUnitId=u.id; renderClients();
+    };
+    ub.appendChild(d);
+  });
+  const ua=document.createElement('div'); ua.className='chip'; ua.textContent='＋ 유닛';
+  ua.onclick=()=>openClientSheet(true); ub.appendChild(ua);
+  if(unit) loadNews(c, unit);
+}
+let newsToken=0;
+async function loadNews(c, u, mode){
+  const box = document.getElementById('newsBox');
+  const tok = ++newsToken;
+  box.innerHTML = `<div class="empty"><span class="spin dk"></span>${esc(c.name)} ${esc(u.label)} 뉴스 정리 중…</div>`;
+  try{
+    const r = await fetch(newsUrl(c,u,mode));
+    const j = await r.json();
+    if(tok!==newsToken) return;  // user moved on to another unit
+    if(j.error) throw new Error(j.error);
+    const s = j.summary||{};
+    let html = `<div class="panel" style="padding:15px 16px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">
+        <span class="sec-label">${esc(c.name)} · ${esc(u.label)}</span>
+        <button class="vbtn" onclick="loadNews(selClient(), selClient().units.find(x=>x.id==='${esc(u.id)}')||selClient().units[0], 'force')">↻ 새로고침</button>
+      </div>
+      <div class="serif" style="font-size:16.5px;margin:8px 0 2px;line-height:1.5">${esc(s.headline||'')}</div>`;
+    (s.points||[]).forEach(p=>{
+      html += `<div class="news-pt"><div style="font-weight:600">${esc(p.point)}</div>
+        <div style="color:var(--text-dim);font-size:13px;margin-top:2px">${esc(p.why)}</div></div>`;
+    });
+    html += `<details style="margin-top:10px"><summary style="cursor:pointer;font-size:12.5px;color:var(--text-dim)">헤드라인 원문 ${ (j.items||[]).length }건</summary>`;
+    (j.items||[]).forEach(i=>{
+      html += `<div class="news-hl"><a href="${esc(i.link)}" target="_blank" rel="noopener">${esc(i.title)}</a>
+        <span style="color:var(--text-dim);font-size:11.5px"> — ${esc(i.source||'')} ${esc(i.date||'')}</span></div>`;
+    });
+    html += `</details><div class="hint" style="margin-top:8px">수집 ${esc(j.at||'-')}${j.stale?' · ⚠️ 새 수집 실패, 이전 결과 표시':''}</div></div>`;
+    box.innerHTML = html;
+  }catch(e){
+    if(tok!==newsToken) return;
+    box.innerHTML = `<div class="empty">뉴스를 가져오지 못했습니다 (${esc(e.message)})<br>
+      <button class="btn btn-line btn-sm" style="margin-top:10px" onclick="renderClients()">다시 시도</button></div>`;
+  }
+}
+function openClientSheet(unitMode){
+  closeSheets(); clAddingUnit = unitMode;
+  document.getElementById('clSheetTitle').textContent = unitMode ? `${selClient().name} — 유닛 추가` : '광고주 추가';
+  document.getElementById('clNameField').style.display = unitMode?'none':'';
+  document.getElementById('unLabelField').style.display = unitMode?'':'none';
+  document.getElementById('clName').value=''; document.getElementById('unLabel').value='';
+  document.getElementById('clQ').value='';
+  const rb = document.getElementById('clRegion'); rb.innerHTML='';
+  REGIONS.forEach((r,i)=>{
+    const d=document.createElement('div'); d.className='chip'+(i===0?' on':''); d.textContent=r[0]; d.dataset.i=i;
+    d.onclick=()=>{ rb.querySelectorAll('.chip').forEach(x=>x.classList.remove('on')); d.classList.add('on'); };
+    rb.appendChild(d);
+  });
+  openSheet('clSheet');
+}
+function saveClientSheet(){
+  const ri = +(document.querySelector('#clRegion .chip.on')?.dataset.i||0);
+  const [rl, hl, gl] = REGIONS[ri];
+  const q = document.getElementById('clQ').value.trim();
+  const cl = clientsList();
+  if(clAddingUnit){
+    const c = selClient(); if(!c) return;
+    const label = document.getElementById('unLabel').value.trim() || rl;
+    c.units.push({id:uid(), label, q:q||c.name, hl, gl});
+    dbSet('tc_clients', [...cl]); selUnitId=c.units[c.units.length-1].id;
+  }else{
+    const name = document.getElementById('clName').value.trim(); if(!name) return;
+    const c = {id:uid(), name, units:[{id:uid(), label:rl, q:q||name, hl, gl}]};
+    dbSet('tc_clients', cl.concat([c])); selClientId=c.id; selUnitId=null;
+  }
+  closeSheets(); renderClients();
+}
+async function warmNews(){
+  // 앱 오픈 시 등록된 전 유닛을 조용히 갱신해 둔다 (30분 넘게 묵은 것만, 순차)
+  for(const c of clientsList()) for(const u of (c.units||[])){
+    try{ await fetch(newsUrl(c,u,'warm')); }catch(e){}
+  }
+}
+
 /* ---- 기록 tab ---- */
 function renderLog(){
   const eb = document.getElementById('eventList'); eb.innerHTML='';
@@ -815,6 +1047,7 @@ function renderLog(){
     d.onclick=()=>openPersonDetail(p.id);
     pb.appendChild(d);
   });
+  renderSaved();
 }
 
 /* ================= 사전 브리핑 (Phase 3) ================= */
@@ -862,9 +1095,19 @@ async function loadBriefing(force){
 async function openReader(list, idx){
   readerList = list; readerIdx = idx;
   document.getElementById('reader').classList.add('open');
+  // 모바일 back이 앱을 떠나지 않고 낭독만 닫도록 히스토리 한 칸을 쌓는다 (2026-08-01 강프로)
+  history.pushState({tcReader:1}, '');
   fillReader();
   try{ wakeLock = await navigator.wakeLock?.request('screen'); }catch(e){}
 }
+function closeReaderUI(){
+  document.getElementById('reader').classList.remove('open');
+  try{ wakeLock?.release(); }catch(e){} wakeLock=null;
+  refreshToday();
+}
+window.addEventListener('popstate', ()=>{
+  if(document.getElementById('reader').classList.contains('open')) closeReaderUI();
+});
 function fillReader(){
   const t = readerList[readerIdx];
   document.getElementById('rdBadge').textContent = `${TRACK_KO[t.track]||t.track} · ~${t.duration_sec}초 · ${readerIdx+1}/${readerList.length}`;
@@ -897,14 +1140,11 @@ function markUsed(){
 }
 document.getElementById('rdPrev').onclick = ()=>{ if(readerIdx>0){readerIdx--; fillReader();} };
 document.getElementById('rdNext').onclick = ()=>{ if(readerIdx<readerList.length-1){readerIdx++; fillReader();} };
-document.getElementById('rdClose').onclick = ()=>{
-  document.getElementById('reader').classList.remove('open');
-  try{ wakeLock?.release(); }catch(e){} wakeLock=null;
-  refreshToday();
-};
+document.getElementById('rdClose').onclick = ()=>history.back();  // 닫기도 같은 경로로 — 히스토리 잔류 방지
 
 renderEventStrip();
 loadCanon().then(()=>renderResults());
+loadRemote().then(()=>warmNews());
 </script>
 </body>
 </html>
