@@ -17,7 +17,7 @@ def test_meta_is_valid():
 def test_get_renders_app_html():
     kind, html = _mod().handle("GET", "/toast", {}, {"user": "__testuser__"})
     assert kind == "html"
-    assert "술자리 컴패니언" in html
+    assert "건배사전" in html  # renamed 2026-08-01
     assert "/toast/api/preload" in html  # API paths rewritten for webapp
 
 

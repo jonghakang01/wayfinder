@@ -12,7 +12,7 @@ from services._paths import DATA_ROOT
 ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "toast_assets")
 
 META = {
-    "name": "Toast Companion",
+    "name": "건배사전",  # renamed from Toast Companion (강프로, 2026-08-01)
     "path": "/toast",
     "icon": "🥂",
     "description": "Toast scripts for client dinners",
