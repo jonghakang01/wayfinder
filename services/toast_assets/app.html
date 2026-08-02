@@ -722,7 +722,13 @@ function renderResults(caption){
   const gen = dupSort(results).slice(0,5);
   viewToggle(box, gen.length);
   if(resultView==='gen'){
-    renderGenSection(box, gen, '아직 생성한 게 없습니다.<br>자리 카드의 🎲 다시 뽑기를 눌러보세요.');
+    if(!drawing){
+      const rb=document.createElement('button');
+      rb.className='btn btn-dark'; rb.style.cssText='width:100%;margin-bottom:10px';
+      rb.textContent='🎲 다시 뽑기 — 이 자리 특성으로 새로 씁니다';
+      rb.onclick=drawToasts; box.appendChild(rb);
+    }
+    renderGenSection(box, gen, '아직 생성한 게 없습니다.<br>위 🎲 버튼으로 뽑아보세요.');
     return;
   }
   // 📖 정석 — 자리의 흐름대로: 🥂 시작 → 🍻 중반 → 🌙 마무리
@@ -817,7 +823,6 @@ function renderEventStrip(){
      <div class="row" style="margin-top:2px"><div><div class="title">${esc(ev.title)}</div>
      <div class="meta">${ev.date} · ${ev.attendeeIds.length}명${names?' — '+esc(names):''}</div></div></div>
      <div class="acts">
-       <button class="btn btn-dark btn-sm" onclick="drawToasts()">🎲 다시 뽑기</button>
        <button class="btn btn-line btn-sm" onclick="openEventDetail('${ev.id}')">🌙 회고·메모</button>
        <button class="btn btn-line btn-sm" onclick="openEventSheet('${ev.id}')">✏️ 수정</button>
        <button class="btn btn-line btn-sm" onclick="dbSet('tc_active',null);refreshToday()">자리 닫기</button>
