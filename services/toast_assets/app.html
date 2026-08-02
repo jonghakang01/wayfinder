@@ -40,14 +40,6 @@ header .sub{font-size:12px;color:var(--text-dim)}
 .sec-label.r{color:var(--gochu)}
 .sum-toggle{font-size:12.5px;color:var(--text-dim);flex:0 0 auto}
 /* 특성 설정 — 자리 만들기 시트 안 */
-#setupBox{margin:2px 0 10px}
-#setupBox summary{list-style:none;cursor:pointer;padding:10px 12px;display:flex;justify-content:space-between;align-items:center;gap:10px;min-height:46px;font-size:14px;color:var(--text);font-weight:700;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
-#setupBox[open] summary{border-radius:10px 10px 0 0;border-bottom-color:transparent}
-#setupBox[open] .cfg-arrow{display:inline-block;transform:rotate(180deg)}
-#setupBox[open] #setup{border:1px solid var(--line);border-top:none;border-radius:0 0 10px 10px;padding:10px 12px 12px}
-#setupBox summary>span:first-child{flex:0 0 auto;white-space:nowrap}
-#cfgSum{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:400}
-#setupBox summary::-webkit-details-marker{display:none}
 .setup-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 14px}
 .field{margin-bottom:10px}
 .field>label{display:block;font-size:11.5px;color:var(--text-dim);margin-bottom:4px;font-weight:600}
@@ -257,26 +249,20 @@ body:has(.sheet.open) .wf-back, body:has(.sheet.open) .wf-theme-btn{display:none
   <div class="field"><label>자리 성격 <span style="font-weight:400">(겹치면 여러 개)</span></label><div class="chips" data-k="occasion"></div></div>
   <div class="field"><label>자리 성격 한 줄 <span style="font-weight:400">(선택 — 구체적일수록 건배사가 맞아집니다)</span></label>
     <input type="text" id="occNote" placeholder="예: 3년 만의 재계약 기념, 어제 수주 소식 겹침"></div>
-  <details id="setupBox">
-    <summary><span>⚙️ 세부 설정 — 언어·좌중·톤 <span class="cfg-arrow">▾</span></span><span class="sum-toggle" id="cfgSum"></span></summary>
-    <div id="setup">
-      <div class="field"><label>언어 구성</label><div class="chips" data-k="lang_mix"></div></div>
-      <div class="field" id="sceneField" style="display:none">
-        <label>최근 이 팀과 있었던 일 한 줄 <span class="req">*영문 빌드업 필수</span></label>
-        <input type="text" id="scene" placeholder="e.g. we pulled an all-nighter before the D2C launch">
-      </div>
-      <div class="setup-grid">
-        <div class="field"><label>참석 범위</label><div class="chips" data-k="audience_scope"></div></div>
-        <div class="field"><label>임원</label><div class="chips" data-k="execs"></div></div>
-        <div class="field"><label>연령대</label><div class="chips" data-k="age_mix"></div></div>
-        <div class="field"><label>내 위치</label><div class="chips" data-k="my_role"></div></div>
-      </div>
-      <div class="field"><label>톤</label><div class="chips" data-k="tone"></div></div>
-      <div class="field"><label>차수</label><div class="chips" data-k="round"></div></div>
-      <div class="field"><label>회사명 · 팀명 · 프로젝트명 <span style="font-weight:400">(두문자어 재료, 선택)</span></label>
-        <input type="text" id="orgNames" placeholder="예: 삼성 D2C, 프로젝트 오로라"></div>
-    </div>
-  </details>
+  <div class="field"><label>언어 구성</label><div class="chips" data-k="lang_mix"></div></div>
+  <div class="field" id="sceneField" style="display:none">
+    <label>최근 이 팀과 있었던 일 한 줄 <span class="req">*영문 빌드업 필수</span></label>
+    <input type="text" id="scene" placeholder="e.g. we pulled an all-nighter before the D2C launch">
+  </div>
+  <div class="setup-grid">
+    <div class="field"><label>임원</label><div class="chips" data-k="execs"></div></div>
+    <div class="field"><label>연령대</label><div class="chips" data-k="age_mix"></div></div>
+    <div class="field"><label>내 위치</label><div class="chips" data-k="my_role"></div></div>
+    <div class="field"><label>차수</label><div class="chips" data-k="round"></div></div>
+  </div>
+  <div class="field"><label>톤</label><div class="chips" data-k="tone"></div></div>
+  <div class="field"><label>회사명 · 팀명 · 프로젝트명 <span style="font-weight:400">(두문자어 재료, 선택)</span></label>
+    <input type="text" id="orgNames" placeholder="예: 삼성 D2C, 프로젝트 오로라"></div>
   <div class="field"><label>오늘 참석자 <span style="font-weight:400">(빼려면 탭)</span></label>
     <div class="chips" id="attChips" style="min-height:32px"></div>
     <div style="display:flex;gap:6px;margin-top:10px">
@@ -351,7 +337,6 @@ body:has(.sheet.open) .wf-back, body:has(.sheet.open) .wf-theme-btn{display:none
 /* ================= data ================= */
 const OPTS = {
   occasion:['클라이언트 만찬','내부 만찬','워크숍','송년/신년','승진·영전','환영','송별','실적 달성'],
-  audience_scope:['외부 포함','사내만'],
   execs:['임원 포함','임원 없음'],
   age_mix:['혼합','40대 이하','50대'],
   my_role:['중간','최연장자','막내'],
@@ -456,6 +441,7 @@ document.querySelectorAll('.chips').forEach(box=>{
         state[k]=val;
         box.querySelectorAll('.chip').forEach(x=>x.classList.remove('on')); c.classList.add('on');
       }
+      if(k==='occasion') syncAudience();
       persistState(); updateSummary(); syncEventContext();
       if(k==='lang_mix') document.getElementById('sceneField').style.display = val==='all_korean'?'none':'';
     };
@@ -469,6 +455,8 @@ function ctxSummary(c){
   const note = (c.occasion_note||'').trim();
   return note ? base+' · “'+(note.length>16?note.slice(0,16)+'…':note)+'”' : base;
 }
+// 참석 범위는 자리 성격에서 자동 유도 (2026-08-02 강프로: 내부 만찬이면 사내만이 자명)
+function syncAudience(){ state.audience_scope = state.occasion.includes('클라이언트 만찬') ? '외부 포함' : '사내만'; }
 function updateSummary(){
   // 홈에는 특성 요약을 두지 않는다(2026-08-01 강프로) — 시트 안 세부 설정 요약만 갱신
   const cs = document.getElementById('cfgSum'); if(cs) cs.textContent = ctxSummary(state);
@@ -889,7 +877,7 @@ function adoptContext(c){
   if(typeof state.occasion==='string') state.occasion=[state.occasion];
   state.occasion = state.occasion.filter(o=>OPTS.occasion.includes(o));
   if(!state.occasion.length) state.occasion=['클라이언트 만찬'];
-  persistState(); refreshChips();
+  syncAudience(); persistState(); refreshChips();
 }
 function openEventSheet(editId){
   closeSheets();
@@ -898,7 +886,7 @@ function openEventSheet(editId){
   if(ev) adoptContext(ev.context);
   else { state.occasion_note=''; persistState(); }  // 새 자리 = 이전 자리의 한 줄 메모를 비운다
   document.getElementById('occNote').value = state.occasion_note||'';
-  document.getElementById('cfgSum').textContent = ctxSummary(state);
+  syncAudience();
   document.getElementById('evSheetTitle').textContent = ev ? '자리 수정' : '자리 만들기';
   document.getElementById('evSaveBtn').textContent = ev ? '저장' : '자리 등록 → 바로 뽑기';
   document.getElementById('evTitle').value = ev ? ev.title : '';
@@ -916,7 +904,6 @@ function openEventSheet(editId){
     document.getElementById('evTitle').value = t.title;
     adoptContext(t.context);
     document.getElementById('occNote').value = state.occasion_note||'';
-    document.getElementById('cfgSum').textContent = ctxSummary(state);
     evSelected = [...t.attendeeIds]; renderAttChips();
   };
   evSelected = ev ? [...ev.attendeeIds] : []; renderAttChips();
