@@ -385,6 +385,7 @@ async function loadRemote(){
       if(f.scene!==undefined) document.getElementById('scene').value=f.scene;
       DB_KEYS.forEach(k=>{ try{localStorage.setItem(k, JSON.stringify(MEM[k]))}catch(e){} });
       localStorage.setItem('toast_state', JSON.stringify(state));
+      migrateClients();
       refreshChips(); refreshToday(); renderLog();
     } else {
       pushState();  // account has no server state yet — migrate this device's records up
@@ -973,15 +974,32 @@ function openPersonDetail(id){
 
 /* ================= 광고주 뉴스 (v2.1) ================= */
 const REGIONS = [['한국','ko','KR'],['미국','en-US','US'],['브라질','pt-BR','BR'],['중남미','es-419','MX'],['글로벌','en','US']];
+const SAMSUNG_UNITS = [
+  {id:'kr', label:'전체', q:'삼성전자', hl:'ko', gl:'KR'},
+  {id:'ds', label:'반도체', q:'삼성전자 반도체', hl:'ko', gl:'KR'},
+  {id:'mx', label:'MX·모바일', q:'삼성전자 갤럭시', hl:'ko', gl:'KR'},
+  {id:'vd', label:'VD·TV', q:'삼성전자 TV', hl:'ko', gl:'KR'},
+  {id:'da', label:'DA·가전', q:'삼성전자 가전', hl:'ko', gl:'KR'},
+  {id:'us', label:'US', q:'Samsung Electronics', hl:'en-US', gl:'US'},
+  {id:'latam', label:'중남미', q:'Samsung Electronics', hl:'es-419', gl:'MX'},
+];
 const DEFAULT_CLIENTS = [
-  {id:'samsung', name:'삼성', units:[
-    {id:'kr', label:'한국', q:'삼성전자', hl:'ko', gl:'KR'},
-    {id:'us', label:'US', q:'Samsung Electronics', hl:'en-US', gl:'US'},
-    {id:'latam', label:'중남미', q:'Samsung Electronics', hl:'es-419', gl:'MX'}]},
+  {id:'samsung', name:'삼성', units:SAMSUNG_UNITS.map(u=>({...u}))},
   {id:'hankook', name:'한국타이어', units:[
     {id:'kr', label:'한국', q:'한국타이어', hl:'ko', gl:'KR'},
     {id:'us', label:'US', q:'Hankook Tire', hl:'en-US', gl:'US'}]},
 ];
+// 이미 계정에 저장된 삼성이 지역 유닛만 갖고 있으면 제품 부문 축으로 1회 승격
+// (2026-08-01 강프로 — 반도체/MX/VD/DA로 나눠서)
+function migrateClients(){
+  const cl = clientsList();
+  const s = cl.find(c=>c.id==='samsung');
+  if(s && !s.units.some(u=>u.id==='ds')){
+    const custom = s.units.filter(u=>!['kr','us','latam'].includes(u.id));
+    s.units = SAMSUNG_UNITS.map(u=>({...u})).concat(custom);
+    dbSet('tc_clients', [...cl]);
+  }
+}
 function clientsList(){ return db('tc_clients', DEFAULT_CLIENTS); }
 let selClientId=null, selUnitId=null, clManage=false, clAddingUnit=false;
 function selClient(){ return clientsList().find(c=>c.id===selClientId)||clientsList()[0]||null; }
