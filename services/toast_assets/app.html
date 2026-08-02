@@ -51,6 +51,8 @@ header .sub{font-size:12px;color:var(--text-dim)}
 .chip{padding:7px 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);font-size:13px;cursor:pointer;min-height:40px;display:inline-flex;align-items:center}
 @media(pointer:coarse){.chip{min-height:44px}}
 .chip.on{border-color:var(--brass-deep);background:var(--chip-on-bg);color:var(--brass-deep);font-weight:600}
+input[type=text],input[type=date],textarea,select{color:var(--text)}
+:root{color-scheme:dark} :root[data-theme="light"]{color-scheme:light}
 input[type=text],input[type=date],textarea{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface);font-size:15px;min-height:44px;font-family:inherit}
 input:focus,textarea:focus{outline:2px solid var(--brass);border-color:var(--brass)}
 .hint{font-size:12px;color:var(--text-dim);margin-top:4px}
@@ -149,9 +151,13 @@ h3.rec{font-size:13px;color:var(--text-dim);font-weight:700;margin:18px 0 8px 2p
 #rdNav{flex:0 0 auto;display:flex;gap:10px;margin-top:12px}
 #rdNav button{flex:1;padding:12px;border:1px solid var(--ink-600);background:var(--ink-800);color:var(--paper);border-radius:12px;font-size:15px;cursor:pointer;min-height:48px}
 #rdNav button:disabled{opacity:.35}
-/* 서버가 전 앱에 주입하는 플로팅 버튼 2종은 이 페이지에선 숨김 (2026-08-01 강프로
-   — 낭독·카드 몰입 화면과 겹침). 홈 복귀는 헤더 🥂, 테마는 전역 설정을 따른다. */
-.wf-back,.wf-theme-btn{display:none!important}
+/* 플로팅 Wayfinder·테마 버튼은 표시하되, 낭독·시트가 떠 있는 동안은 숨김
+   (시트 하단 버튼을 가로채는 실측 버그, 2026-08-02) */
+body:has(#reader.open) .wf-back, body:has(#reader.open) .wf-theme-btn,
+body:has(.sheet.open) .wf-back, body:has(.sheet.open) .wf-theme-btn{display:none}
+/* 광고주명 버튼 — 지역/세부 pill과 위계 구분 (2026-08-02 강프로) */
+.cl-chip{padding:9px 15px;border:1.5px solid var(--line);border-radius:10px;background:var(--surface);font-weight:700;font-size:14px;min-height:44px;display:inline-flex;align-items:center;cursor:pointer}
+.cl-chip.on{background:var(--tab-accent);color:var(--tab-ink);border-color:var(--tab-accent)}
 /* ---- 광고주 뉴스 카드 ---- */
 .news-pt{border-top:1px solid var(--border);padding:9px 0;font-size:14px;line-height:1.5}
 .news-hl{padding:7px 0;border-top:1px solid var(--border);font-size:13px;line-height:1.45}
@@ -164,7 +170,7 @@ h3.rec{font-size:13px;color:var(--text-dim);font-weight:700;margin:18px 0 8px 2p
 </head>
 <body>
 <div class="wrap">
-  <header><h1><a href="/" style="text-decoration:none;color:inherit" title="Wayfinder home">🥂</a> 건배사전</h1><span class="sub">지목 5초 전을 위해</span></header>
+  <header><h1><a href="/toast" style="text-decoration:none;color:inherit" title="건배사전 홈" onclick="document.querySelector('.tab[data-tab=today]').click();window.scrollTo(0,0);return false">🥂 건배사전</a></h1><span class="sub">지목 5초 전을 위해</span></header>
   <div class="tabs">
     <div class="tab on" data-tab="today">오늘</div>
     <div class="tab" data-tab="canon">모음집</div>
@@ -673,7 +679,14 @@ function renderTrendHome(box){
   const gen = trendResults.slice(0,5);
   viewToggle(box, gen.length);
   if(resultView==='gen'){
-    renderGenSection(box, gen, '생성 결과가 아직 없습니다.<br>잠시 후 자동으로 채워집니다.');
+    // 자리 없이는 생성 안 함 (2026-08-02 강프로 — 맥락 없는 생성은 셋 다 '영')
+    const d=document.createElement('div'); d.className='empty';
+    d.innerHTML='오늘의 자리를 세팅해야 생성형이 뜹니다.<br>자리 특성에 맞춰 그 자리만을 위해 써드려요.';
+    box.appendChild(d);
+    const btn=document.createElement('button');
+    btn.className='btn btn-dark'; btn.style.cssText='width:100%;margin-top:4px';
+    btn.textContent='＋ 오늘 자리 만들기'; btn.onclick=()=>openEventSheet();
+    box.appendChild(btn);
     return;
   }
   const ver = verifiedToasts().slice(0,8);
@@ -805,7 +818,7 @@ async function drawToasts(){
     }
   }catch(e){}
 })();
-loadTrend();
+// loadTrend()는 호출하지 않는다 — 자리 없는 생성은 폐지(2026-08-02), 함수는 복원 대비 보존
 
 /* ================= 오늘 자리 (Phase 2) ================= */
 function renderEventStrip(){
@@ -1082,16 +1095,16 @@ function newsUrl(c, r, sub, mode){
     +'&gl='+encodeURIComponent(r.gl)+'&label='+encodeURIComponent(label)
     +(mode?'&mode='+mode:'');
 }
-function chipRow(box, items, activeId, onPick, onDel, addLabel, onAdd, extra){
+function chipRow(box, items, activeId, onPick, onDel, addLabel, onAdd, extra, cls){
   box.innerHTML='';
   items.forEach(it=>{
     const d=document.createElement('div');
-    d.className='chip'+(it.id===activeId?' on':'');
+    d.className=(cls||'chip')+(it.id===activeId?' on':'');
     d.textContent=it.label+(clManage&&onDel?' ×':'');
     d.onclick=()=>{ if(clManage&&onDel){ onDel(it); return; } onPick(it); };
     box.appendChild(d);
   });
-  if(onAdd){ const a=document.createElement('div'); a.className='chip'; a.textContent=addLabel; a.onclick=onAdd; box.appendChild(a); }
+  if(onAdd){ const a=document.createElement('div'); a.className=cls||'chip'; a.textContent=addLabel; a.onclick=onAdd; box.appendChild(a); }
   if(extra) extra(box);
 }
 function renderClients(){
@@ -1101,8 +1114,8 @@ function renderClients(){
     c&&c.id, it=>{ selClientId=it.id; selRegionId=null; selSubId=null; renderClients(); },
     it=>{ if(confirm(`'${it.label}' 광고주를 삭제할까요?`)){ dbSet('tc_clients', cl.filter(x=>x.id!==it.id)); selClientId=null; renderClients(); } },
     '＋ 광고주', ()=>openClientSheet('client'),
-    box=>{ const m=document.createElement('div'); m.className='chip'+(clManage?' on':''); m.textContent='관리';
-      m.onclick=()=>{ clManage=!clManage; renderClients(); }; box.appendChild(m); });
+    box=>{ const m=document.createElement('div'); m.className='cl-chip'+(clManage?' on':''); m.textContent='관리';
+      m.onclick=()=>{ clManage=!clManage; renderClients(); }; box.appendChild(m); }, 'cl-chip');
   const rb = document.getElementById('unitChips'), sb = document.getElementById('subChips');
   const nb = document.getElementById('newsBox');
   if(!c){ rb.innerHTML=''; sb.innerHTML=''; nb.innerHTML='<div class="empty">광고주를 추가해 보세요</div>'; return; }
