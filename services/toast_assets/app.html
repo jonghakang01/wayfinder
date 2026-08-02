@@ -670,52 +670,72 @@ async function loadTrend(){
   }catch(e){ trendLoading = false; }
 }
 function renderTrendHome(box){
+  const gen = trendResults.slice(0,5);
+  viewToggle(box, gen.length);
+  if(resultView==='gen'){
+    renderGenSection(box, gen, '생성 결과가 아직 없습니다.<br>잠시 후 자동으로 채워집니다.');
+    return;
+  }
   const ver = verifiedToasts().slice(0,8);
   if(ver.length){
     const h=document.createElement('div');
     h.style.cssText='font-size:12px;color:var(--text-dim);padding:2px 4px';
     h.textContent='✅ 내 검증 — 실제 내 자리에서 쓴 것들'; box.appendChild(h);
     ver.forEach((t,i)=>box.appendChild(cardEl(t,i,ver,{top:true})));
-  }else if(CANON.length){
-    // 아직 검증이 없으면 요즘 감각의 정석 픽으로 채운다
+  }
+  if(CANON.length){
     const picks = CANON.filter(e=>e.fresh==='요즘'&&e.role!=='비추').sort((a,b)=>b.pop-a.pop).slice(0,5);
     if(picks.length){
       const h=document.createElement('div');
-      h.style.cssText='font-size:12px;color:var(--text-dim);padding:2px 4px';
-      h.textContent='📖 요즘 감각 정석 픽 — 자리에서 써보고 ★→✅로 검증을 쌓아보세요'; box.appendChild(h);
+      h.style.cssText='font-size:12px;color:var(--text-dim);padding:8px 4px 2px';
+      h.textContent='📖 요즘 감각 정석 픽 — 자리에서 써보고 ★로 담아보세요'; box.appendChild(h);
       const ts = picks.map(canonToToast);
-      ts.forEach((t,i)=>box.appendChild(cardEl(t,i,ts,{top:true})));
+      ts.forEach((t,i)=>box.appendChild(cardEl(t,i,ts,{top:!ver.length&&i===0})));
     }
   }
-  const gen = trendResults.slice(0,5);
-  if(gen.length || trendLoading){
+}
+let resultView = 'canon';  // 'canon' | 'gen' — 정석/생성형 서브탭 (2026-08-02 강프로: 순차 나열은 스크롤 과다)
+function viewToggle(box, genCount){
+  const row=document.createElement('div'); row.className='chips'; row.style.cssText='margin:2px 0 10px';
+  [['canon','📖 검증된 정석'],['gen','✨ 생성형'+(genCount?` (${genCount})`:'')]].forEach(([v,label])=>{
+    const c=document.createElement('div'); c.className='chip'+(resultView===v?' on':''); c.textContent=label;
+    c.onclick=()=>{ resultView=v; renderResults(); };
+    row.appendChild(c);
+  });
+  box.appendChild(row);
+}
+function renderGenSection(box, gen, emptyMsg){
+  if(drawing||trendLoading){
     const c=document.createElement('div');
-    c.style.cssText='font-size:12px;color:var(--text-dim);padding:10px 4px 2px';
-    if(trendLoading) c.innerHTML='<span class="spin dk"></span>요즘 감각으로 새 건배사를 쓰는 중… (30초 정도)';
-    else c.textContent='✨ 요즘 감각 생성형 — 자리를 만들면 오늘 맞춤으로 뽑아드립니다';
-    box.appendChild(c);
-    if(!trendLoading) gen.forEach((t,i)=>box.appendChild(cardEl(t,i,gen,{})));
+    c.style.cssText='font-size:12px;color:var(--text-dim);padding:6px 4px';
+    c.innerHTML='<span class="spin dk"></span>'+(drawing?'이 자리만을 위한 건배사를 쓰는 중… (30초 정도)':'요즘 감각으로 새 건배사를 쓰는 중… (30초 정도)');
+    box.appendChild(c); return;
   }
+  if(!gen.length){ const d=document.createElement('div'); d.className='empty'; d.innerHTML=emptyMsg; box.appendChild(d); return; }
+  gen.forEach((t,i)=>box.appendChild(cardEl(t,i,gen,{top:i===0})));
 }
 function renderResults(caption){
   if(caption!==undefined) lastCaption = caption;
   const box = document.getElementById('resultCards'); box.innerHTML='';
-  if(!activeEvent()){ renderTrendHome(box); return; }
-  // 1) 검증된 정석 — 자리의 흐름대로: 🥂 시작 → 🍻 중반 → 🌙 마무리 (2026-08-02 강프로:
-  //    술자리엔 순서가 있다. 인사 잔, context 잔, 기약 잔을 구분해 제안)
+  const ev = activeEvent();
+  if(!ev){ renderTrendHome(box); return; }
+  const gen = dupSort(results).slice(0,5);
+  viewToggle(box, gen.length);
+  if(resultView==='gen'){
+    renderGenSection(box, gen, '아직 생성한 게 없습니다.<br>자리 카드의 🎲 다시 뽑기를 눌러보세요.');
+    return;
+  }
+  // 📖 정석 — 자리의 흐름대로: 🥂 시작 → 🍻 중반 → 🌙 마무리
   if(CANON.length){
     let fit = CANON.filter(canonMatchesToday);
     fit.sort((a,b)=>((b.tone===state.tone)-(a.tone===state.tone)) || (b.pop-a.pop));
     const perPhase = {start:3, mid:4, end:3};
-    const h=document.createElement('div');
-    h.style.cssText='font-size:12px;color:var(--text-dim);padding:2px 4px';
-    h.textContent='📖 검증된 정석 — 자리의 흐름대로'; box.appendChild(h);
     let first = true;
     for(const ph of PHASES){
       const perCat = {}, picks = [];
       for(const e of fit){
         if((e.phase||'mid')!==ph) continue;
-        if((perCat[e.c]||0)>=2) continue;  // 단계 안에서도 카테고리 다양성
+        if((perCat[e.c]||0)>=2) continue;
         picks.push(e); perCat[e.c]=(perCat[e.c]||0)+1;
         if(picks.length>=perPhase[ph]) break;
       }
@@ -725,16 +745,6 @@ function renderResults(caption){
       const toasts = dupSort(picks.map(canonToToast));
       toasts.forEach(t=>{ box.appendChild(cardEl(t, first?0:1, toasts, {top:first})); first=false; });
     }
-  }
-  // 2) 생성형은 곁들임 — 5개까지만
-  const gen = dupSort(results).slice(0,5);
-  if(gen.length || drawing){
-    const c = document.createElement('div');
-    c.style.cssText='font-size:12px;color:var(--text-dim);padding:10px 4px 2px';
-    c.textContent = drawing ? '' : (lastCaption || '✨ 생성형 제안 — 오늘 자리만을 위해 새로 쓴 것');
-    if(drawing) c.innerHTML = '<span class="spin dk"></span>이 자리만을 위한 건배사를 쓰는 중… (30초 정도)';
-    box.appendChild(c);
-    if(!drawing) gen.forEach((t,i)=>box.appendChild(cardEl(t,i,gen,{})));
   }
 }
 // 검증은 수동 토글이 아니라 사용 기록에서 자동 유도 (2026-08-02 강프로:
@@ -768,7 +778,7 @@ async function drawToasts(){
     err.textContent = '영어 위주 자리는 시트의 "최근 있었던 일 한 줄"이 꼭 필요합니다.'; err.style.display='block'; return;
   }
   if(drawing) return;
-  drawing = true; renderResults();
+  drawing = true; resultView = 'gen'; renderResults();  // 뽑기 시작 = 생성형 탭으로
   try{
     const r = await fetch('/toast/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},
       body: JSON.stringify({...state, org_names:document.getElementById('orgNames').value, scene:document.getElementById('scene').value})});
