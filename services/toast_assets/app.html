@@ -184,8 +184,8 @@ h3.rec{font-size:13px;color:var(--text-dim);font-weight:700;margin:18px 0 8px 2p
 
   <div id="canon" style="display:none">
     <div class="chips" id="canonFilter" style="margin-bottom:4px"></div>
-    <label style="display:flex;align-items:center;gap:7px;font-size:13px;margin:8px 2px 2px;color:var(--text-dim)">
-      <input type="checkbox" id="canonFit" style="width:16px;height:16px;accent-color:var(--brass-deep)"> 오늘 자리에 맞는 것만
+    <label id="canonFitWrap" style="display:none;align-items:center;gap:7px;font-size:13px;margin:8px 2px 2px;color:var(--text-dim)">
+      <input type="checkbox" id="canonFit" style="width:16px;height:16px;accent-color:var(--brass-deep)"> <span id="canonFitLabel">오늘 자리에 맞는 것만</span>
     </label>
     <div id="canonList"></div>
     <div class="hint" style="margin-top:14px">🟢 스테디 · 🔵 요즘 · 🟡 한물 · 🔴 호불호/주의 — 근거: 2025-26 트렌드 기사 + 모음집 다수 반복 출현. "반응 좋음"은 ★로 담아 직접 검증해 가는 구조입니다.</div>
@@ -193,7 +193,8 @@ h3.rec{font-size:13px;color:var(--text-dim);font-weight:700;margin:18px 0 8px 2p
   </div>
   <div id="clients" style="display:none">
     <div class="chips" id="clientChips" style="margin-bottom:8px"></div>
-    <div class="chips" id="unitChips" style="margin-bottom:10px"></div>
+    <div class="chips" id="unitChips" style="margin-bottom:8px"></div>
+    <div class="chips" id="subChips" style="margin-bottom:10px"></div>
     <div id="newsBox"></div>
     <div class="hint" style="margin-top:10px">앱을 열면 등록된 광고주 뉴스를 백그라운드에서 미리 갱신해 둡니다. ↻는 지금 즉시 다시 수집.</div>
   </div>
@@ -215,7 +216,7 @@ h3.rec{font-size:13px;color:var(--text-dim);font-weight:700;margin:18px 0 8px 2p
 <div class="sheet" id="clSheet">
   <h2 id="clSheetTitle">광고주 추가</h2>
   <div class="field" id="clNameField"><label>광고주 이름</label><input type="text" id="clName" placeholder="예: 한국타이어"></div>
-  <div class="field" id="unLabelField" style="display:none"><label>유닛 이름</label><input type="text" id="unLabel" placeholder="예: US, 브라질, 중남미"></div>
+  <div class="field" id="unLabelField" style="display:none"><label>이름</label><input type="text" id="unLabel" placeholder="예: US, 브라질, 중남미"></div>
   <div class="field"><label>뉴스 검색어 <span style="font-weight:400">(비우면 이름 그대로)</span></label><input type="text" id="clQ" placeholder="예: Hankook Tire"></div>
   <div class="field"><label>지역·언어</label><div class="chips" id="clRegion"></div></div>
   <div class="actrow"><button class="btn btn-line" onclick="closeSheets()">취소</button><button class="btn btn-dark" id="clSaveBtn" onclick="saveClientSheet()">추가</button></div>
@@ -524,7 +525,12 @@ async function renderCanon(){
     });
     document.getElementById('canonFit').onchange = renderCanon;
   }
-  const fit = document.getElementById('canonFit').checked;
+  // 자리 기준 필터는 기준이 될 자리가 있을 때만 의미가 있다 (2026-08-01 강프로)
+  const ev = activeEvent();
+  const fw = document.getElementById('canonFitWrap');
+  fw.style.display = ev ? 'flex' : 'none';
+  if(ev) document.getElementById('canonFitLabel').textContent = `오늘 자리(${ev.title})에 맞는 것만`;
+  const fit = !!ev && document.getElementById('canonFit').checked;
   const box = document.getElementById('canonList'); box.innerHTML='';
   const freshOrder = {'스테디':0,'요즘':0,'한물':1,'주의':2};
   function canonPanel(items){
@@ -973,93 +979,102 @@ function openPersonDetail(id){
 }
 
 /* ================= 광고주 뉴스 (v2.1) ================= */
+/* 구조(2026-08-01 강프로): 1차 축=지역(한국/미국/중남미), 2차 축=사업부/세부.
+   검색어 = 지역의 base + 세부의 조각. 워밍은 지역별 '전체'만, 세부는 탭 시 생성. */
 const REGIONS = [['한국','ko','KR'],['미국','en-US','US'],['브라질','pt-BR','BR'],['중남미','es-419','MX'],['글로벌','en','US']];
-const SAMSUNG_UNITS = [
-  {id:'kr', label:'전체', q:'삼성전자', hl:'ko', gl:'KR'},
-  {id:'ds', label:'반도체', q:'삼성전자 반도체', hl:'ko', gl:'KR'},
-  {id:'mx', label:'MX·모바일', q:'삼성전자 갤럭시', hl:'ko', gl:'KR'},
-  {id:'vd', label:'VD·TV', q:'삼성전자 TV', hl:'ko', gl:'KR'},
-  {id:'da', label:'DA·가전', q:'삼성전자 가전', hl:'ko', gl:'KR'},
-  {id:'us', label:'US', q:'Samsung Electronics', hl:'en-US', gl:'US'},
-  {id:'latam', label:'중남미', q:'Samsung Electronics', hl:'es-419', gl:'MX'},
-];
+const S_SUBS_KO = [{id:'all',label:'전체',q:''},{id:'ds',label:'반도체',q:'반도체'},{id:'mx',label:'MX·모바일',q:'갤럭시'},{id:'vd',label:'VD·TV',q:'TV'},{id:'da',label:'DA·가전',q:'가전'}];
+const S_SUBS_EN = [{id:'all',label:'전체',q:''},{id:'ds',label:'반도체',q:'semiconductor'},{id:'mx',label:'MX·모바일',q:'Galaxy'},{id:'vd',label:'VD·TV',q:'TV'},{id:'da',label:'DA·가전',q:'home appliances'}];
+const _cp = o=>JSON.parse(JSON.stringify(o));
 const DEFAULT_CLIENTS = [
-  {id:'samsung', name:'삼성', units:SAMSUNG_UNITS.map(u=>({...u}))},
-  {id:'hankook', name:'한국타이어', units:[
-    {id:'kr', label:'한국', q:'한국타이어', hl:'ko', gl:'KR'},
-    {id:'us', label:'US', q:'Hankook Tire', hl:'en-US', gl:'US'}]},
+  {id:'samsung', name:'삼성', regions:[
+    {id:'kr', label:'한국', hl:'ko', gl:'KR', base:'삼성전자', subs:_cp(S_SUBS_KO)},
+    {id:'us', label:'미국', hl:'en-US', gl:'US', base:'Samsung Electronics', subs:_cp(S_SUBS_EN)},
+    {id:'latam', label:'중남미', hl:'es-419', gl:'MX', base:'Samsung Electronics', subs:_cp(S_SUBS_EN)}]},
+  {id:'hankook', name:'한국타이어', regions:[
+    {id:'kr', label:'한국', hl:'ko', gl:'KR', base:'한국타이어', subs:[{id:'all',label:'전체',q:''}]},
+    {id:'us', label:'미국', hl:'en-US', gl:'US', base:'Hankook Tire', subs:[{id:'all',label:'전체',q:''}]}]},
 ];
-// 이미 계정에 저장된 삼성이 지역 유닛만 갖고 있으면 제품 부문 축으로 1회 승격
-// (2026-08-01 강프로 — 반도체/MX/VD/DA로 나눠서)
-function migrateClients(){
-  const cl = clientsList();
-  const s = cl.find(c=>c.id==='samsung');
-  if(s && !s.units.some(u=>u.id==='ds')){
-    const custom = s.units.filter(u=>!['kr','us','latam'].includes(u.id));
-    s.units = SAMSUNG_UNITS.map(u=>({...u})).concat(custom);
-    dbSet('tc_clients', [...cl]);
-  }
-}
 function clientsList(){ return db('tc_clients', DEFAULT_CLIENTS); }
-let selClientId=null, selUnitId=null, clManage=false, clAddingUnit=false;
+// 저장분이 옛 평면 units 구조면 지역>세부 2단으로 1회 승격
+function migrateClients(){
+  const cl = clientsList(); let changed=false;
+  cl.forEach((c,i)=>{
+    if(c.regions) return;
+    changed = true;
+    const preset = DEFAULT_CLIENTS.find(d=>d.id===c.id);
+    if(preset){ cl[i] = _cp(preset); return; }
+    c.regions = (c.units||[]).map(u=>({id:u.id, label:u.label, hl:u.hl, gl:u.gl, base:u.q,
+      subs:[{id:'all', label:'전체', q:''}]}));
+    delete c.units;
+  });
+  if(changed) dbSet('tc_clients', [...cl]);
+}
+let selClientId=null, selRegionId=null, selSubId=null, clManage=false, clSheetMode='client';
 function selClient(){ return clientsList().find(c=>c.id===selClientId)||clientsList()[0]||null; }
-function newsUrl(c,u,mode){
-  return '/toast/api/news?q='+encodeURIComponent(u.q)+'&hl='+encodeURIComponent(u.hl)
-    +'&gl='+encodeURIComponent(u.gl)+'&label='+encodeURIComponent(c.name+' '+u.label)
+function selRegion(c){ return (c.regions||[]).find(r=>r.id===selRegionId)||(c.regions||[])[0]||null; }
+function selSub(r){ return (r.subs||[]).find(x=>x.id===selSubId)||(r.subs||[])[0]||null; }
+function subQuery(r, sub){ return (r.base + ' ' + (sub.q||'')).trim(); }
+function newsUrl(c, r, sub, mode){
+  const label = c.name+' '+r.label+(sub && sub.q ? ' · '+sub.label : '');
+  return '/toast/api/news?q='+encodeURIComponent(subQuery(r, sub))+'&hl='+encodeURIComponent(r.hl)
+    +'&gl='+encodeURIComponent(r.gl)+'&label='+encodeURIComponent(label)
     +(mode?'&mode='+mode:'');
 }
+function chipRow(box, items, activeId, onPick, onDel, addLabel, onAdd, extra){
+  box.innerHTML='';
+  items.forEach(it=>{
+    const d=document.createElement('div');
+    d.className='chip'+(it.id===activeId?' on':'');
+    d.textContent=it.label+(clManage&&onDel?' ×':'');
+    d.onclick=()=>{ if(clManage&&onDel){ onDel(it); return; } onPick(it); };
+    box.appendChild(d);
+  });
+  if(onAdd){ const a=document.createElement('div'); a.className='chip'; a.textContent=addLabel; a.onclick=onAdd; box.appendChild(a); }
+  if(extra) extra(box);
+}
 function renderClients(){
-  const cb = document.getElementById('clientChips'); cb.innerHTML='';
   const cl = clientsList();
-  cl.forEach(c=>{
-    const d=document.createElement('div');
-    d.className='chip'+(selClient()&&selClient().id===c.id?' on':'');
-    d.textContent = c.name + (clManage?' ×':'');
-    d.onclick=()=>{
-      if(clManage){ if(confirm(`'${c.name}' 광고주를 삭제할까요?`)){ dbSet('tc_clients', cl.filter(x=>x.id!==c.id)); if(selClientId===c.id){selClientId=null;selUnitId=null;} renderClients(); } return; }
-      selClientId=c.id; selUnitId=null; renderClients();
-    };
-    cb.appendChild(d);
-  });
-  const add=document.createElement('div'); add.className='chip'; add.textContent='＋ 광고주';
-  add.onclick=()=>openClientSheet(false); cb.appendChild(add);
-  const mg=document.createElement('div'); mg.className='chip'+(clManage?' on':''); mg.textContent='관리';
-  mg.onclick=()=>{ clManage=!clManage; renderClients(); }; cb.appendChild(mg);
-
-  const ub = document.getElementById('unitChips'); ub.innerHTML='';
   const c = selClient();
-  const box = document.getElementById('newsBox');
-  if(!c){ box.innerHTML='<div class="empty">광고주를 추가해 보세요</div>'; return; }
-  const unit = c.units.find(u=>u.id===selUnitId)||c.units[0];
-  c.units.forEach(u=>{
-    const d=document.createElement('div');
-    d.className='chip'+(unit&&unit.id===u.id?' on':'');
-    d.textContent=u.label+(clManage?' ×':'');
-    d.onclick=()=>{
-      if(clManage){ if(c.units.length>1&&confirm(`'${u.label}' 유닛을 삭제할까요?`)){ c.units=c.units.filter(x=>x.id!==u.id); dbSet('tc_clients',[...clientsList()]); if(selUnitId===u.id)selUnitId=null; renderClients(); } return; }
-      selUnitId=u.id; renderClients();
-    };
-    ub.appendChild(d);
-  });
-  const ua=document.createElement('div'); ua.className='chip'; ua.textContent='＋ 유닛';
-  ua.onclick=()=>openClientSheet(true); ub.appendChild(ua);
-  if(unit) loadNews(c, unit);
+  chipRow(document.getElementById('clientChips'), cl.map(x=>({id:x.id,label:x.name})),
+    c&&c.id, it=>{ selClientId=it.id; selRegionId=null; selSubId=null; renderClients(); },
+    it=>{ if(confirm(`'${it.label}' 광고주를 삭제할까요?`)){ dbSet('tc_clients', cl.filter(x=>x.id!==it.id)); selClientId=null; renderClients(); } },
+    '＋ 광고주', ()=>openClientSheet('client'),
+    box=>{ const m=document.createElement('div'); m.className='chip'+(clManage?' on':''); m.textContent='관리';
+      m.onclick=()=>{ clManage=!clManage; renderClients(); }; box.appendChild(m); });
+  const rb = document.getElementById('unitChips'), sb = document.getElementById('subChips');
+  const nb = document.getElementById('newsBox');
+  if(!c){ rb.innerHTML=''; sb.innerHTML=''; nb.innerHTML='<div class="empty">광고주를 추가해 보세요</div>'; return; }
+  const r = selRegion(c);
+  chipRow(rb, (c.regions||[]), r&&r.id,
+    it=>{ selRegionId=it.id; selSubId=null; renderClients(); },
+    it=>{ if(c.regions.length>1&&confirm(`'${it.label}' 지역을 삭제할까요?`)){ c.regions=c.regions.filter(x=>x.id!==it.id); dbSet('tc_clients',[...cl]); selRegionId=null; renderClients(); } },
+    '＋ 지역', ()=>openClientSheet('region'));
+  if(!r){ sb.innerHTML=''; nb.innerHTML='<div class="empty">지역을 추가해 보세요</div>'; return; }
+  const sub = selSub(r);
+  const showSubs = (r.subs||[]).length>1 || clManage;
+  sb.style.display = showSubs ? '' : 'none';
+  if(showSubs) chipRow(sb, r.subs, sub&&sub.id,
+    it=>{ selSubId=it.id; renderClients(); },
+    it=>{ if(r.subs.length>1&&confirm(`'${it.label}' 세부를 삭제할까요?`)){ r.subs=r.subs.filter(x=>x.id!==it.id); dbSet('tc_clients',[...cl]); selSubId=null; renderClients(); } },
+    '＋ 세부', ()=>openClientSheet('sub'));
+  if(sub) loadNews(c, r, sub);
 }
 let newsToken=0;
-async function loadNews(c, u, mode){
+async function loadNews(c, r, sub, mode){
   const box = document.getElementById('newsBox');
   const tok = ++newsToken;
-  box.innerHTML = `<div class="empty"><span class="spin dk"></span>${esc(c.name)} ${esc(u.label)} 뉴스 정리 중…</div>`;
+  const title = `${c.name} ${r.label}${sub.q?' · '+sub.label:''}`;
+  box.innerHTML = `<div class="empty"><span class="spin dk"></span>${esc(title)} 뉴스 정리 중…</div>`;
   try{
-    const r = await fetch(newsUrl(c,u,mode));
-    const j = await r.json();
-    if(tok!==newsToken) return;  // user moved on to another unit
+    const resp = await fetch(newsUrl(c, r, sub, mode));
+    const j = await resp.json();
+    if(tok!==newsToken) return;  // user moved on
     if(j.error) throw new Error(j.error);
     const s = j.summary||{};
     let html = `<div class="panel" style="padding:15px 16px">
       <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">
-        <span class="sec-label">${esc(c.name)} · ${esc(u.label)}</span>
-        <button class="vbtn" onclick="loadNews(selClient(), selClient().units.find(x=>x.id==='${esc(u.id)}')||selClient().units[0], 'force')">↻ 새로고침</button>
+        <span class="sec-label">${esc(title)}</span>
+        <button class="vbtn" id="newsRefresh">↻ 새로고침</button>
       </div>
       <div class="serif" style="font-size:16.5px;margin:8px 0 2px;line-height:1.5">${esc(s.headline||'')}</div>`;
     (s.points||[]).forEach(p=>{
@@ -1073,20 +1088,27 @@ async function loadNews(c, u, mode){
     });
     html += `</details><div class="hint" style="margin-top:8px">수집 ${esc(j.at||'-')}${j.stale?' · ⚠️ 새 수집 실패, 이전 결과 표시':''}</div></div>`;
     box.innerHTML = html;
+    document.getElementById('newsRefresh').onclick = ()=>loadNews(c, r, sub, 'force');
   }catch(e){
     if(tok!==newsToken) return;
     box.innerHTML = `<div class="empty">뉴스를 가져오지 못했습니다 (${esc(e.message)})<br>
       <button class="btn btn-line btn-sm" style="margin-top:10px" onclick="renderClients()">다시 시도</button></div>`;
   }
 }
-function openClientSheet(unitMode){
-  closeSheets(); clAddingUnit = unitMode;
-  document.getElementById('clSheetTitle').textContent = unitMode ? `${selClient().name} — 유닛 추가` : '광고주 추가';
-  document.getElementById('clNameField').style.display = unitMode?'none':'';
-  document.getElementById('unLabelField').style.display = unitMode?'':'none';
-  document.getElementById('clName').value=''; document.getElementById('unLabel').value='';
-  document.getElementById('clQ').value='';
-  const rb = document.getElementById('clRegion'); rb.innerHTML='';
+function openClientSheet(mode){
+  closeSheets(); clSheetMode = mode;
+  const c = selClient();
+  const titles = {client:'광고주 추가', region:`${c?c.name:''} — 지역 추가`, sub:`${c?c.name:''} — 세부(사업부) 추가`};
+  document.getElementById('clSheetTitle').textContent = titles[mode];
+  document.getElementById('clNameField').style.display = mode==='client'?'':'none';
+  document.getElementById('unLabelField').style.display = mode!=='client'?'':'none';
+  document.getElementById('unLabel').placeholder = mode==='sub' ? '예: 반도체, MX, 이커머스' : '예: 유럽, 일본';
+  const q = document.getElementById('clQ');
+  q.value=''; document.getElementById('clName').value=''; document.getElementById('unLabel').value='';
+  q.placeholder = mode==='sub' ? '검색어 조각 (지역 검색어 뒤에 붙습니다. 예: 반도체)' : '예: Hankook Tire';
+  const rb = document.getElementById('clRegion');
+  rb.parentElement.style.display = mode==='sub'?'none':'';
+  rb.innerHTML='';
   REGIONS.forEach((r,i)=>{
     const d=document.createElement('div'); d.className='chip'+(i===0?' on':''); d.textContent=r[0]; d.dataset.i=i;
     d.onclick=()=>{ rb.querySelectorAll('.chip').forEach(x=>x.classList.remove('on')); d.classList.add('on'); };
@@ -1098,23 +1120,30 @@ function saveClientSheet(){
   const ri = +(document.querySelector('#clRegion .chip.on')?.dataset.i||0);
   const [rl, hl, gl] = REGIONS[ri];
   const q = document.getElementById('clQ').value.trim();
+  const label = document.getElementById('unLabel').value.trim();
   const cl = clientsList();
-  if(clAddingUnit){
-    const c = selClient(); if(!c) return;
-    const label = document.getElementById('unLabel').value.trim() || rl;
-    c.units.push({id:uid(), label, q:q||c.name, hl, gl});
-    dbSet('tc_clients', [...cl]); selUnitId=c.units[c.units.length-1].id;
-  }else{
+  if(clSheetMode==='client'){
     const name = document.getElementById('clName').value.trim(); if(!name) return;
-    const c = {id:uid(), name, units:[{id:uid(), label:rl, q:q||name, hl, gl}]};
-    dbSet('tc_clients', cl.concat([c])); selClientId=c.id; selUnitId=null;
+    const c = {id:uid(), name, regions:[{id:uid(), label:rl, hl, gl, base:q||name, subs:[{id:'all',label:'전체',q:''}]}]};
+    dbSet('tc_clients', cl.concat([c])); selClientId=c.id; selRegionId=null; selSubId=null;
+  }else if(clSheetMode==='region'){
+    const c = selClient(); if(!c) return;
+    const r = {id:uid(), label:label||rl, hl, gl, base:q||c.name, subs:[{id:'all',label:'전체',q:''}]};
+    c.regions.push(r); dbSet('tc_clients', [...cl]); selRegionId=r.id; selSubId=null;
+  }else{
+    const c = selClient(); if(!c) return; const r = selRegion(c); if(!r) return;
+    if(!label) return;
+    const sub = {id:uid(), label, q:q||label};
+    r.subs.push(sub); dbSet('tc_clients', [...cl]); selSubId=sub.id;
   }
   closeSheets(); renderClients();
 }
 async function warmNews(){
-  // 앱 오픈 시 등록된 전 유닛을 조용히 갱신해 둔다 (30분 넘게 묵은 것만, 순차)
-  for(const c of clientsList()) for(const u of (c.units||[])){
-    try{ await fetch(newsUrl(c,u,'warm')); }catch(e){}
+  // 앱 오픈 시 지역별 '전체'만 조용히 갱신 — 세부(사업부)는 탭할 때 생성 (비용 절제)
+  for(const c of clientsList()) for(const r of (c.regions||[])){
+    const all = (r.subs||[]).find(x=>!x.q) || (r.subs||[])[0];
+    if(!all) continue;
+    try{ await fetch(newsUrl(c, r, all, 'warm')); }catch(e){}
   }
 }
 

@@ -19,7 +19,9 @@ META = {
     "hidden": False,
 }
 
-MODEL = "claude-opus-5"
+# Sonnet 5 won the 2026-08-01 blind test (강프로 pick, three-model lineup) —
+# and Korean call-and-response wordplay turned out not to need Opus pricing.
+MODEL = "claude-sonnet-5"
 _cache_lock = threading.Lock()
 _asset_cache = {}
 
@@ -74,7 +76,8 @@ def _occasions(p):
 
 
 def cache_key(p):
-    parts = ["+".join(sorted(_occasions(p)))]
+    # MODEL is part of the key: a model switch must not serve the old model's output
+    parts = [MODEL, "+".join(sorted(_occasions(p)))]
     parts += [str(p.get(k, "")) for k in
               ("audience_scope", "execs", "age_mix", "my_role", "lang_mix", "tone", "round",
                "occasion_note", "trend")]
@@ -205,6 +208,16 @@ def fetch_headlines(q, hl="ko", gl="KR", limit=10):
     return items
 
 
+
+def _model_call_kwargs(schema):
+    """Request kwargs for the current MODEL — the server-side fallbacks param
+    only exists on Opus 5 / Fable 5; sending it to other models is a 400."""
+    kw = {"extra_body": {"output_config": {"format": {"type": "json_schema", "schema": schema}}}}
+    if MODEL.startswith(("claude-opus-5", "claude-fable")):
+        kw["betas"] = ["server-side-fallback-2026-07-01"]
+        kw["extra_body"]["fallbacks"] = "default"
+    return kw
+
 def summarize_headlines(label, items):
     prompts = _asset_json("prompts.json")
     lines = [f"- {i['title']} ({i.get('source','')}, {i.get('date','')})" for i in items]
@@ -219,11 +232,7 @@ def summarize_headlines(label, items):
         max_tokens=8000,
         system=prompts["system"],
         messages=[{"role": "user", "content": user}],
-        betas=["server-side-fallback-2026-07-01"],
-        extra_body={
-            "fallbacks": "default",
-            "output_config": {"format": {"type": "json_schema", "schema": NEWS_SCHEMA}},
-        },
+        **_model_call_kwargs(NEWS_SCHEMA),
     )
     if resp.stop_reason == "refusal":
         raise RuntimeError("summary refused")
@@ -320,11 +329,7 @@ def generate(params):
         max_tokens=16000,
         system=system,
         messages=[{"role": "user", "content": "\n".join(lines)}],
-        betas=["server-side-fallback-2026-07-01"],
-        extra_body={
-            "fallbacks": "default",
-            "output_config": {"format": {"type": "json_schema", "schema": SCHEMA}},
-        },
+        **_model_call_kwargs(SCHEMA),
     )
     if resp.stop_reason == "refusal":
         raise RuntimeError("generation refused")
