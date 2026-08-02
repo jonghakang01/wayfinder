@@ -124,7 +124,6 @@ h3.rec{font-size:13px;color:var(--text-dim);font-weight:700;margin:18px 0 8px 2p
 .reactrow .btn.on{background:var(--chip-on-bg);border:1.5px solid var(--brass-deep);color:var(--brass-deep);font-weight:700}
 .note-item{background:var(--surface);border:1px solid var(--card-line);border-radius:10px;padding:10px 12px;margin-top:8px;font-size:13.5px}
 .note-item .nm{font-size:11.5px;color:var(--celadon-deep);font-weight:700}
-.micbtn.rec{background:var(--avoid-bg);border-color:var(--gochu);color:var(--gochu)}
 /* ---- reader ---- */
 #reader{position:fixed;inset:0;background:var(--ink-900);color:var(--paper);display:none;flex-direction:column;padding:calc(14px + env(safe-area-inset-top)) 20px calc(14px + env(safe-area-inset-bottom));z-index:50;overflow:hidden}
 #reader.open{display:flex}
@@ -296,10 +295,6 @@ h3.rec{font-size:13px;color:var(--text-dim);font-weight:700;margin:18px 0 8px 2p
   </div>
   <h3 class="rec">메모 — 귀가길 2분</h3>
   <textarea id="edNote" rows="2" placeholder="예: K상무 아드님 UCLA 진학. L부장 골프 시작함"></textarea>
-  <div style="display:flex;gap:6px;margin-top:8px;align-items:center">
-    <button class="btn btn-line btn-sm micbtn" id="micBtn" onclick="toggleMic()">🎤 음성</button>
-    <span class="hint" id="micHint"></span>
-  </div>
   <div class="field" style="margin-top:8px"><label>이 메모, 누구 얘기? (인물에 저장됨)</label><div class="plist" id="edTagList"></div></div>
   <button class="btn btn-dark" style="width:100%;margin-top:8px" onclick="saveNote()">메모 저장</button>
   <div id="edNotes"></div>
@@ -823,7 +818,7 @@ function refreshToday(){ renderEventStrip(); renderResults(); }
 /* ---- event sheets ---- */
 let editingEventId = null;
 function openSheet(id){ document.getElementById('sheetBg').classList.add('open'); document.getElementById(id).classList.add('open'); }
-function closeSheets(){ document.querySelectorAll('.sheet,.sheet-bg').forEach(x=>x.classList.remove('open')); editingEventId=null; stopMic(); }
+function closeSheets(){ document.querySelectorAll('.sheet,.sheet-bg').forEach(x=>x.classList.remove('open')); editingEventId=null; }
 function personCheckList(boxId, checked){
   const box = document.getElementById(boxId); box.innerHTML='';
   const ps = persons();
@@ -1008,23 +1003,6 @@ function saveMyToast(){
   dbSet('tc_mycanon', myCanon().concat([e]));
   closeSheets(); renderCanon();
 }
-
-/* ---- 음성 메모 (Phase 4) ---- */
-let rec = null;
-function toggleMic(){
-  const SR = window.SpeechRecognition||window.webkitSpeechRecognition;
-  if(!SR){ document.getElementById('micHint').textContent='이 브라우저는 음성 입력 미지원 — 타이핑으로'; return; }
-  if(rec){ stopMic(); return; }
-  rec = new SR(); rec.lang='ko-KR'; rec.continuous=true; rec.interimResults=true;
-  const ta = document.getElementById('edNote'); const base = ta.value;
-  rec.onresult = e=>{ let s=''; for(const r of e.results) s+=r[0].transcript; ta.value=(base?base+' ':'')+s; };
-  rec.onend = ()=>stopMic();
-  rec.start();
-  document.getElementById('micBtn').classList.add('rec');
-  document.getElementById('micBtn').textContent='⏹ 듣는 중';
-}
-function stopMic(){ if(rec){try{rec.stop()}catch(e){}} rec=null;
-  const b=document.getElementById('micBtn'); if(b){b.classList.remove('rec'); b.textContent='🎤 음성';} }
 
 /* ---- person detail ---- */
 function openPersonDetail(id){
