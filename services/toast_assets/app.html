@@ -40,7 +40,11 @@ header .sub{font-size:12px;color:var(--text-dim)}
 .sec-label.r{color:var(--gochu)}
 .sum-toggle{font-size:12.5px;color:var(--text-dim);flex:0 0 auto}
 /* 특성 설정 — 자리 만들기 시트 안 */
-#setupBox summary{list-style:none;cursor:pointer;padding:10px 0;display:flex;justify-content:space-between;align-items:center;gap:10px;min-height:44px;font-size:13px;color:var(--text-dim);font-weight:600}
+#setupBox{margin:2px 0 10px}
+#setupBox summary{list-style:none;cursor:pointer;padding:10px 12px;display:flex;justify-content:space-between;align-items:center;gap:10px;min-height:46px;font-size:14px;color:var(--text);font-weight:700;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+#setupBox[open] summary{border-radius:10px 10px 0 0;border-bottom-color:transparent}
+#setupBox[open] .cfg-arrow{display:inline-block;transform:rotate(180deg)}
+#setupBox[open] #setup{border:1px solid var(--line);border-top:none;border-radius:0 0 10px 10px;padding:10px 12px 12px}
 #setupBox summary>span:first-child{flex:0 0 auto;white-space:nowrap}
 #cfgSum{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:400}
 #setupBox summary::-webkit-details-marker{display:none}
@@ -254,7 +258,7 @@ body:has(.sheet.open) .wf-back, body:has(.sheet.open) .wf-theme-btn{display:none
   <div class="field"><label>자리 성격 한 줄 <span style="font-weight:400">(선택 — 구체적일수록 건배사가 맞아집니다)</span></label>
     <input type="text" id="occNote" placeholder="예: 3년 만의 재계약 기념, 어제 수주 소식 겹침"></div>
   <details id="setupBox">
-    <summary><span>세부 설정</span><span class="sum-toggle" id="cfgSum"></span></summary>
+    <summary><span>⚙️ 세부 설정 — 언어·좌중·톤 <span class="cfg-arrow">▾</span></span><span class="sum-toggle" id="cfgSum"></span></summary>
     <div id="setup">
       <div class="field"><label>언어 구성</label><div class="chips" data-k="lang_mix"></div></div>
       <div class="field" id="sceneField" style="display:none">
