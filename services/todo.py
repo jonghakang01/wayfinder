@@ -991,7 +991,9 @@ function tkOpen(row, isNew) {{
     hb.textContent = linked ? '🔁 Tracked as a habit' : '🔁 Also track as a habit';
   }}
   $('tkStitle').value = row.dataset.title || '';
-  $('tkSdue').value = row.dataset.due || '';
+  // New tasks start due today (local date — toISOString alone is UTC and lags KST at night)
+  var localToday = new Date(Date.now() - new Date().getTimezoneOffset()*60000).toISOString().slice(0,10);
+  $('tkSdue').value = row.dataset.due || (isNew ? localToday : '');
   $('tkSprio').value = row.dataset.prio || '2';
   $('tkSproject').value = row.dataset.project || '';
   var place = $('tkSplace');

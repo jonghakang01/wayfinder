@@ -189,7 +189,7 @@ h3.rec{font-size:13px;color:var(--text-dim);font-weight:700;margin:18px 0 8px 2p
       <input type="checkbox" id="canonFit" style="width:16px;height:16px;accent-color:var(--brass-deep)"> <span id="canonFitLabel">오늘 자리에 맞는 것만</span>
     </label>
     <div id="canonList"></div>
-    <div class="hint" style="margin-top:14px">🟢 스테디 · 🔵 요즘 · 🟡 한물 · 🔴 호불호/주의 — 근거: 2025-26 트렌드 기사 + 모음집 다수 반복 출현. "반응 좋음"은 ★로 담아 직접 검증해 가는 구조입니다.</div>
+    <div class="hint" style="margin-top:14px">🟢 스테디 · 🔵 요즘 · 🟡 한물 · 🔴 호불호/주의 — 근거: 2025-26 트렌드 기사 + 모음집 다수 반복 출현. ★로 담고 낭독에서 🍻를 누르면 검증이 자동으로 쌓입니다.</div>
     <div class="hint" id="canonMeta" style="margin-top:6px"></div>
   </div>
   <div id="clients" style="display:none">
@@ -204,11 +204,7 @@ h3.rec{font-size:13px;color:var(--text-dim);font-weight:700;margin:18px 0 8px 2p
     <button class="btn btn-line" style="width:100%" onclick="openEventSheet()">＋ 자리 만들기</button>
     <h3 class="rec">자리</h3><div class="panel" id="eventList"></div>
     <h3 class="rec">인물</h3><div class="panel" id="personList"></div>
-    <h3 class="rec">저장한 건배사</h3>
-    <div class="chips" id="savedChips" style="margin:0 2px 8px">
-      <div class="chip on" data-f="all">전체 ★</div>
-      <div class="chip" data-f="proven">✅ 검증된 것만</div>
-    </div>
+    <h3 class="rec">저장한 건배사 ★ <span style="font-weight:400">— 🍻로 쓴 적 있으면 ✅가 자동으로 붙습니다</span></h3>
     <div class="cards" id="savedCards" style="margin-top:0"></div>
   </div>
 </div>
@@ -346,7 +342,7 @@ h3.rec{font-size:13px;color:var(--text-dim);font-weight:700;margin:18px 0 8px 2p
 <script>
 /* ================= data ================= */
 const OPTS = {
-  occasion:['클라이언트 만찬','송년/신년','승진·영전','환영','송별','실적 달성'],
+  occasion:['클라이언트 만찬','내부 만찬','워크숍','송년/신년','승진·영전','환영','송별','실적 달성'],
   audience_scope:['외부 포함','사내만'],
   execs:['임원 포함','임원 없음'],
   age_mix:['혼합','40대 이하','50대'],
@@ -520,7 +516,7 @@ const PHASE_DESC = {start:'반가움·인사, 첫 잔', mid:'분위기 이어가
 // 순서: 클래식·결의·실적·감사가 앞 (2026-08-02 강프로)
 const CANON_CATS = ['전체','클래식','결의·파이팅','실적·프로젝트','감사·노고','품격·성어','파트너십','환영·송별','축하','송년·신년','요즘·구호','삼행시','건강·가족','유머·주의'];
 let canonCat = '전체';
-const OCC_MAP = {'클라이언트 만찬':['클라이언트'],'송년/신년':['송년','신년'],'승진·영전':['승진'],'환영':['환영'],'송별':['송별'],'실적 달성':['실적']};
+const OCC_MAP = {'클라이언트 만찬':['클라이언트'],'내부 만찬':[],'워크숍':['실적'],'송년/신년':['송년','신년'],'승진·영전':['승진'],'환영':['환영'],'송별':['송별'],'실적 달성':['실적']};
 function canonToToast(e){
   const tail = /[다요!)]$/.test(e.expl.trim()) ? '' : ' —';
   return {lang:'ko', track:'canon', canonCat:e.c,
@@ -581,12 +577,12 @@ async function renderCanon(){
   // ✅ 내 검증이 맨 위 — 리서치발 '핫'은 두 번 다 취향 불합격(2026-08-02 강프로).
   // 믿을 신호는 본인이 자리에서 써보고 ✅ 켠 것뿐이다.
   if(canonCat==='전체'){
-    const ver = dupSort(loadSaved().filter(t=>t.verified));
+    const ver = verifiedToasts();
     if(ver.length){
       const h=document.createElement('h3'); h.className='rec';
-      h.textContent=`✅ 내 검증 (${ver.length}) — 실제 내 자리에서 통한 것들`; box.appendChild(h);
+      h.textContent=`✅ 내 검증 (${ver.length}) — 실제 내 자리에서 쓴 것들, 🔥 반응순`; box.appendChild(h);
       const wrap=document.createElement('div'); wrap.className='cards'; wrap.style.marginBottom='8px';
-      ver.forEach((t,i)=>wrap.appendChild(cardEl(t,i,ver,{saved:true,rerender:renderCanon})));
+      ver.forEach((t,i)=>wrap.appendChild(cardEl(t,i,ver,{})));
       box.appendChild(wrap);
     }
   }
@@ -636,7 +632,7 @@ function cardEl(t, i, list, opts){
     `<div class="row1"><span class="badge ${bcls}">${TRACK_KO[t.track]||t.track}</span>`+
     `<span class="dur">~${t.duration_sec}초</span>`+
     (opts.saved
-      ? `<button class="vbtn${t.verified?' on':''}">${t.verified?'✅ 검증됨':'써봤어요?'}</button><button class="del">🗑</button>`
+      ? `${usedAt(keyOf(t)).length?'<span class="badge b-bridge">✅ 실전</span>':''}<button class="del">🗑</button>`
       : `<button class="star${isSaved(t)?' on':''}">★</button>`)+
     `</div>`+
     `<div class="pair"><span class="c">${esc(t.call_word)}</span><span class="arrow">→</span><span class="r">${esc(t.response_word)}</span></div>`+
@@ -645,8 +641,6 @@ function cardEl(t, i, list, opts){
     (opts.saved?(()=>{const evs=usedAt(keyOf(t));return evs.length?`<div class="dupline" style="color:var(--text-dim)">🍻 ${evs.slice(0,2).map(e=>esc(e.title)+' ('+(e.date||'').slice(5)+')').join(', ')}${evs.length>2?' 외 '+(evs.length-2):''}</div>`:''})():'');
   d.onclick = ()=>openReader(list, list.indexOf(t));
   if(opts.saved){
-    d.querySelector('.vbtn').onclick = e=>{ e.stopPropagation();
-      const a = loadSaved(); const s = a.find(x=>keyOf(x)===keyOf(t)); if(s){ s.verified=!s.verified; storeSaved(a); opts.rerender(); } };
     d.querySelector('.del').onclick = e=>{ e.stopPropagation();
       storeSaved(loadSaved().filter(x=>keyOf(x)!==keyOf(t))); opts.rerender(); };
   } else {
@@ -681,11 +675,11 @@ async function loadTrend(){
   }catch(e){ trendLoading = false; }
 }
 function renderTrendHome(box){
-  const ver = dupSort(loadSaved().filter(t=>t.verified)).slice(0,8);
+  const ver = verifiedToasts().slice(0,8);
   if(ver.length){
     const h=document.createElement('div');
     h.style.cssText='font-size:12px;color:var(--text-dim);padding:2px 4px';
-    h.textContent='✅ 내 검증 — 실제 내 자리에서 통했던 것들'; box.appendChild(h);
+    h.textContent='✅ 내 검증 — 실제 내 자리에서 쓴 것들'; box.appendChild(h);
     ver.forEach((t,i)=>box.appendChild(cardEl(t,i,ver,{top:true})));
   }else if(CANON.length){
     // 아직 검증이 없으면 요즘 감각의 정석 픽으로 채운다
@@ -748,21 +742,24 @@ function renderResults(caption){
     if(!drawing) gen.forEach((t,i)=>box.appendChild(cardEl(t,i,gen,{})));
   }
 }
-let savedMode = 'all';
-document.querySelectorAll('#savedChips .chip').forEach(c=>c.onclick=()=>{
-  savedMode = c.dataset.f;
-  document.querySelectorAll('#savedChips .chip').forEach(x=>x.classList.toggle('on',x===c));
-  renderSaved();
-});
+// 검증은 수동 토글이 아니라 사용 기록에서 자동 유도 (2026-08-02 강프로:
+// favorite과 검증을 따로 관리하지 않는다 — 🍻로 쓴 것이 곧 검증)
+function verifiedToasts(){
+  const seen = new Map();
+  events().forEach(ev=>(ev.used||[]).forEach(u=>{
+    if(!u.t) return;
+    const k = u.key || keyOf(u.t);
+    const cur = seen.get(k) || {t:u.t, hits:0, uses:0};
+    cur.uses++; if(ev.reaction==='hit') cur.hits++;
+    seen.set(k, cur);
+  }));
+  return [...seen.values()].sort((a,b)=>(b.hits-a.hits)||(b.uses-a.uses)).map(x=>x.t);
+}
 function renderSaved(){
   const box = document.getElementById('savedCards'); box.innerHTML='';
-  let a = loadSaved();
-  if(savedMode==='proven') a = a.filter(t=>t.verified);
-  a = dupSort(a);
+  const a = dupSort(loadSaved());
   if(!a.length){
-    box.innerHTML = savedMode==='proven'
-      ? '<div class="empty">아직 검증된 건배사가 없습니다.<br>써보고 반응이 좋았던 것에 ✅를 켜세요.</div>'
-      : '<div class="empty">저장한 건배사가 없습니다.<br>오늘 탭에서 뽑아 ★로 담아두세요.</div>';
+    box.innerHTML = '<div class="empty">저장한 건배사가 없습니다.<br>오늘 탭에서 뽑아 ★로 담아두세요.</div>';
     return;
   }
   a.forEach((t,i)=>box.appendChild(cardEl(t,i,a,{saved:true,rerender:renderSaved})));
@@ -856,7 +853,9 @@ function openEventSheet(editId){
   document.getElementById('evSheetTitle').textContent = ev ? '자리 수정' : '자리 만들기';
   document.getElementById('evSaveBtn').textContent = ev ? '저장' : '자리 등록 → 바로 뽑기';
   document.getElementById('evTitle').value = ev ? ev.title : '';
-  document.getElementById('evDate').value = ev ? ev.date : new Date().toISOString().slice(0,10);
+  // 로컬(KST) 기준 오늘 — toISOString은 UTC라 한국 밤이면 어제로 찍힌다
+  const today = new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10);
+  document.getElementById('evDate').value = ev ? ev.date : today;
   document.getElementById('evIsTpl').checked = ev ? !!ev.isTemplate : false;
   const sel = document.getElementById('evTpl'); sel.innerHTML='<option value="">-</option>';
   document.getElementById('evTplWrap').parentElement.style.display = ev ? 'none' : '';
