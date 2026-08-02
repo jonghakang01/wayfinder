@@ -77,7 +77,7 @@ def cache_key(p):
     parts = ["+".join(sorted(_occasions(p)))]
     parts += [str(p.get(k, "")) for k in
               ("audience_scope", "execs", "age_mix", "my_role", "lang_mix", "tone", "round",
-               "occasion_note")]
+               "occasion_note", "trend")]
     return "|".join(parts)
 
 
@@ -274,8 +274,20 @@ def _valid_toast(t):
     return 1 <= _hangul_syllables(t.get("response_word", "")) <= 4
 
 
+def _hot_examples():
+    items = _asset_json("canon.json").get("items", [])
+    return ", ".join(f"{i['call']}→{i['resp']}" for i in items if i.get("hot"))
+
+
 def generate(params):
     prompts = _asset_json("prompts.json")
+    # trend mode (2026-08-01 강프로 "너무 올드해"): the default system prompt is
+    # exec-dinner safe mode — polite request form, *no slang*. Trend generation
+    # needs the opposite, so it gets its own system prompt seeded with what is
+    # actually trending right now.
+    trend = bool(params.get("trend"))
+    system = (prompts["system_trend"].replace("{hot_examples}", _hot_examples())
+              if trend and "system_trend" in prompts else prompts["system"])
     mix = params.get("lang_mix", "all_korean")
     plans = prompts["mix_plans"]
     tpl = prompts["user_lines"]
@@ -306,7 +318,7 @@ def generate(params):
     resp = client.beta.messages.create(
         model=MODEL,
         max_tokens=16000,
-        system=prompts["system"],
+        system=system,
         messages=[{"role": "user", "content": "\n".join(lines)}],
         betas=["server-side-fallback-2026-07-01"],
         extra_body={

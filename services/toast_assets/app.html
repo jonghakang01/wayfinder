@@ -612,24 +612,28 @@ function cardEl(t, i, list, opts){
 let lastCaption = '';
 // 자리 없음 = 트렌드 홈: 🔥 핫 정석 + 요즘 감각 생성형 (2026-08-01 강프로 —
 // 뽑기 버튼 없이, 자리를 만들어야 오늘 맞춤이 된다)
-let trendResults = [], trendGenFired = false;
+let trendResults = [], trendGenFired = false, trendLoading = false;
 const TREND_PARAMS = {occasion:['요즘 트렌드(20·30 분위기 띄우기)'], audience_scope:'사내만',
   execs:'임원 없음', age_mix:'40대 이하', my_role:'중간', lang_mix:'all_korean',
-  tone:'유쾌', round:'1차'};
+  tone:'유쾌', round:'1차', trend:true};
 async function loadTrend(){
   try{
     const r = await fetch('/toast/api/preload',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify(TREND_PARAMS)});
     const j = await r.json();
-    if(j.toasts && j.toasts.length){ trendResults = j.toasts; if(!activeEvent()) renderResults(); }
-    if(j.src==='collection' && !trendGenFired){
-      trendGenFired = true;  // 공유 캐시 1회 워밍 — 이후 방문자는 preload로 즉시
+    if(j.toasts && j.toasts.length && j.src!=='collection'){
+      trendResults = j.toasts; if(!activeEvent()) renderResults();
+    }else if(!trendGenFired){
+      // 기본 컬렉션은 트렌드 결이 아니라 안 보여준다 — 트렌드 프롬프트로 새로 생성
+      trendGenFired = true; trendLoading = true; if(!activeEvent()) renderResults();
       const g = await fetch('/toast/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify(TREND_PARAMS)});
       const jj = await g.json();
-      if(jj.toasts && jj.toasts.length){ trendResults = jj.toasts; if(!activeEvent()) renderResults(); }
+      trendLoading = false;
+      if(jj.toasts && jj.toasts.length){ trendResults = jj.toasts; }
+      if(!activeEvent()) renderResults();
     }
-  }catch(e){}
+  }catch(e){ trendLoading = false; }
 }
 function renderTrendHome(box){
   if(CANON.length){
@@ -643,12 +647,13 @@ function renderTrendHome(box){
     }
   }
   const gen = trendResults.slice(0,5);
-  if(gen.length){
+  if(gen.length || trendLoading){
     const c=document.createElement('div');
     c.style.cssText='font-size:12px;color:var(--text-dim);padding:10px 4px 2px';
-    c.textContent='✨ 요즘 감각 생성형 — 자리를 만들면 오늘 맞춤으로 뽑아드립니다';
+    if(trendLoading) c.innerHTML='<span class="spin dk"></span>요즘 감각으로 새 건배사를 쓰는 중… (30초 정도)';
+    else c.textContent='✨ 요즘 감각 생성형 — 자리를 만들면 오늘 맞춤으로 뽑아드립니다';
     box.appendChild(c);
-    gen.forEach((t,i)=>box.appendChild(cardEl(t,i,gen,{})));
+    if(!trendLoading) gen.forEach((t,i)=>box.appendChild(cardEl(t,i,gen,{})));
   }
 }
 function renderResults(caption){
