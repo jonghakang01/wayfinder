@@ -883,6 +883,7 @@ function openEventSheet(editId){
   editingEventId = editId || null;
   const ev = editId ? events().find(e=>e.id===editId) : null;
   if(ev) adoptContext(ev.context);
+  else { state.occasion_note=''; persistState(); }  // 새 자리 = 이전 자리의 한 줄 메모를 비운다
   document.getElementById('occNote').value = state.occasion_note||'';
   document.getElementById('cfgSum').textContent = ctxSummary(state);
   document.getElementById('evSheetTitle').textContent = ev ? '자리 수정' : '자리 만들기';
