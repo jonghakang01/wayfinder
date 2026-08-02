@@ -179,7 +179,7 @@ def _forbidden():
 # Services shown in the per-user permission UI. Anything a person can be given
 # individually belongs here; grants outside this list survive untouched
 # (see the scope field) so trimming it never revokes anything.
-_VISIBLE_SERVICES = ["momentum", "cardconv", "sow", "aeo", "llm-check"]
+_VISIBLE_SERVICES = ["momentum", "cardconv", "sow", "aeo", "llm-check", "toast"]
 
 
 def _drive_token_exists(username):

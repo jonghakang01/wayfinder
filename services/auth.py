@@ -18,13 +18,14 @@ ADMIN_EMAIL       = "jongha.kang01@gmail.com"
 # pick at signup. "todo" is deliberately absent: the app moved to /momentum, and
 # accounts still holding the old grant keep working through _ACCESS_ALIASES —
 # listing both would show one app twice.
-CONTROLLED_SERVICES = {"momentum", "cardconv", "sow", "aeo", "llm-check"}
+CONTROLLED_SERVICES = {"momentum", "cardconv", "sow", "aeo", "llm-check", "toast"}
 APP_LABELS = {
     "momentum":  "⚡ Momentum — Tasks & Habits",
     "cardconv":  "💳 Cheil AMEX Expense Assistant",
     "sow":       "🤝 Deal Desk",
     "aeo":       "🔍 AEO Analysis",
     "llm-check": "🤖 AEO Page Diagnostic",
+    "toast":     "🥂 건배사전 — Toast Playbook",
 }
 
 
