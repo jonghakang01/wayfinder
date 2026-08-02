@@ -183,6 +183,7 @@ h3.rec{font-size:13px;color:var(--text-dim);font-weight:700;margin:18px 0 8px 2p
   </div>
 
   <div id="canon" style="display:none">
+    <button class="btn btn-line" style="width:100%;margin-bottom:8px" onclick="openMySheet()">✍️ 내 건배사 직접 추가</button>
     <div class="chips" id="canonFilter" style="margin-bottom:4px"></div>
     <label id="canonFitWrap" style="display:none;align-items:center;gap:7px;font-size:13px;margin:8px 2px 2px;color:var(--text-dim)">
       <input type="checkbox" id="canonFit" style="width:16px;height:16px;accent-color:var(--brass-deep)"> <span id="canonFitLabel">오늘 자리에 맞는 것만</span>
@@ -210,6 +211,22 @@ h3.rec{font-size:13px;color:var(--text-dim);font-weight:700;margin:18px 0 8px 2p
     </div>
     <div class="cards" id="savedCards" style="margin-top:0"></div>
   </div>
+</div>
+
+<!-- my canon add sheet -->
+<div class="sheet" id="mySheet">
+  <h2>내 건배사 추가</h2>
+  <div class="setup-grid">
+    <div class="field"><label>선창 (내가 외칠 말)</label><input type="text" id="myCall" placeholder="예: 우리 팀"></div>
+    <div class="field"><label>후창 (받는 말)</label><input type="text" id="myResp" placeholder="예: 최고다"></div>
+  </div>
+  <div class="field"><label>풀이·멘트 <span style="font-weight:400">(선택 — 낭독 화면에 나옵니다)</span></label><input type="text" id="myExpl" placeholder="예: 어디서 들었는지, 어떤 자리에 좋은지"></div>
+  <div class="setup-grid">
+    <div class="field"><label>카테고리</label><select id="myCat" style="width:100%;min-height:44px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--text);font-size:14px;padding:0 8px"></select></div>
+    <div class="field"><label>자리 단계</label><select id="myPhase" style="width:100%;min-height:44px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--text);font-size:14px;padding:0 8px">
+      <option value="start">🥂 시작 — 인사·첫 잔</option><option value="mid" selected>🍻 중반</option><option value="end">🌙 마무리 — 막잔</option></select></div>
+  </div>
+  <div class="actrow"><button class="btn btn-line" onclick="closeSheets()">취소</button><button class="btn btn-dark" onclick="saveMyToast()">추가</button></div>
 </div>
 
 <!-- client / unit add sheet -->
@@ -356,13 +373,14 @@ let results = [], readerList = [], readerIdx = 0, wakeLock = null;
 
 /* ---- storage: per-account on the server; localStorage stays as local backup ---- */
 const MEM = {};
-const DB_KEYS = ['tc_persons','tc_events','tc_active','toasts_saved','tc_clients'];
+const DB_KEYS = ['tc_persons','tc_events','tc_active','toasts_saved','tc_clients','tc_mycanon'];
 DB_KEYS.forEach(k=>{ try{ MEM[k]=JSON.parse(localStorage.getItem(k)); }catch(e){ MEM[k]=null; } });
 function db(key, def){ return MEM[key] ?? def; }
 function dbSet(key, v){ MEM[key]=v; try{localStorage.setItem(key, JSON.stringify(v))}catch(e){} schedulePush(); }
 function fieldVal(id){ const el=document.getElementById(id); return el?el.value:''; }
 function stateBlob(){ return {state, persons:db('tc_persons',[]), events:db('tc_events',[]),
   active:db('tc_active',null), saved:db('toasts_saved',[]), clients:clientsList(),
+  mycanon:db('tc_mycanon',[]),
   fields:{orgNames:fieldVal('orgNames'), scene:fieldVal('scene')}}; }
 let pushT = null;
 function schedulePush(){ clearTimeout(pushT); pushT = setTimeout(pushState, 800); }
@@ -377,6 +395,7 @@ async function loadRemote(){
       MEM['tc_persons']=j.persons||[]; MEM['tc_events']=j.events||[];
       MEM['tc_active']=j.active??null; MEM['toasts_saved']=j.saved||[];
       if(j.clients) MEM['tc_clients']=j.clients;
+      if(j.mycanon) MEM['tc_mycanon']=j.mycanon;
       state = {...DEFAULTS, ...j.state};
       if(typeof state.occasion==='string') state.occasion=[state.occasion];
       state.occasion = state.occasion.filter(o=>OPTS.occasion.includes(o));
@@ -485,6 +504,7 @@ occNoteEl.oninput = ()=>{ state.occasion_note = occNoteEl.value; persistState();
 document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
   document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('on',x===t));
   ['today','canon','clients','log'].forEach(id=>document.getElementById(id).style.display = t.dataset.tab===id?'':'none');
+  if(t.dataset.tab==='today') renderResults();  // ✅ 검증 등 다른 탭에서 바뀐 상태 반영
   if(t.dataset.tab==='canon') renderCanon();
   if(t.dataset.tab==='clients') renderClients();
   if(t.dataset.tab==='log') renderLog();
@@ -493,7 +513,12 @@ document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
 /* ================= 정석 모음집 (canon) ================= */
 let CANON = [], CANON_META = {};   // raw entries + meta(updated 등)
 const FRESH_ICO = {'스테디':'🟢','요즘':'🔵','한물':'🟡','주의':'🔴'};
-const CANON_CATS = ['전체','클래식','삼행시','결의·파이팅','품격·성어','송년·신년','축하','요즘·구호','파트너십','환영·송별','실적·프로젝트','건강·가족','감사·노고','유머·주의'];
+// 자리 단계 (2026-08-02 강프로): 시작=반가움·인사, 중반=context 잔, 마무리=기약·힘내자
+const PHASES = ['start','mid','end'];
+const PHASE_KO = {start:'🥂 시작', mid:'🍻 중반', end:'🌙 마무리'};
+const PHASE_DESC = {start:'반가움·인사, 첫 잔', mid:'분위기 이어가는 잔', end:'다음을 기약하는 막잔'};
+// 순서: 클래식·결의·실적·감사가 앞 (2026-08-02 강프로)
+const CANON_CATS = ['전체','클래식','결의·파이팅','실적·프로젝트','감사·노고','품격·성어','파트너십','환영·송별','축하','송년·신년','요즘·구호','삼행시','건강·가족','유머·주의'];
 let canonCat = '전체';
 const OCC_MAP = {'클라이언트 만찬':['클라이언트'],'송년/신년':['송년','신년'],'승진·영전':['승진'],'환영':['환영'],'송별':['송별'],'실적 달성':['실적']};
 function canonToToast(e){
@@ -501,7 +526,7 @@ function canonToToast(e){
   return {lang:'ko', track:'canon', canonCat:e.c,
     call_word:e.call, response_word:e.resp,
     lead_in:`${e.expl}${tail} 제가 '${e.call}' 하면, '${e.resp}'로 받아주시면 감사하겠습니다.`,
-    buildup:'', note:[e.note, e.role!=='무난'?'입장: '+e.role:'', FRESH_ICO[e.fresh]+' '+e.fresh].filter(Boolean).join('  ·  '),
+    buildup:'', note:[PHASE_KO[e.phase]||'', e.note, e.role!=='무난'?'입장: '+e.role:'', FRESH_ICO[e.fresh]+' '+e.fresh].filter(Boolean).join('  ·  '),
     duration_sec:12};
 }
 function canonMatchesToday(e){
@@ -540,25 +565,38 @@ async function renderCanon(){
       const t = toasts[i];
       const d=document.createElement('div'); d.className='list-item';
       const dup = dupInfo(t);
-      d.innerHTML = `<div style="min-width:0"><div class="t">${e.hot?'🔥 ':''}<span style="color:var(--brass-deep)">${esc(e.call)}</span> <span style="color:var(--text-dim);font-weight:400">→</span> <span style="color:var(--celadon-deep)">${esc(e.resp)}</span> <span style="font-size:12px">${FRESH_ICO[e.fresh]||''}${'·'.repeat(e.pop)}</span></div>
+      d.innerHTML = `<div style="min-width:0"><div class="t">${e.mine?'✍️ ':''}<span style="color:var(--brass-deep)">${esc(e.call)}</span> <span style="color:var(--text-dim);font-weight:400">→</span> <span style="color:var(--celadon-deep)">${esc(e.resp)}</span> <span style="font-size:12px">${e.phase&&e.phase!=='mid'?(PHASE_KO[e.phase]||'')+' ':''}${FRESH_ICO[e.fresh]||''}${'·'.repeat(e.pop)}</span></div>
         <div class="m">${esc(e.expl)}${e.role!=='무난'?' · <b>'+esc(e.role)+'</b>':''}</div>
         ${dup&&dup.red?`<div class="dupline red" style="font-size:11.5px">${dup.text}</div>`:''}</div>
+        ${e.mine?'<button class="del" style="flex:0 0 auto">🗑</button>':''}
         <button class="star${isSaved(t)?' on':''}" style="flex:0 0 auto">★</button>`;
       d.onclick=()=>openReader(toasts, i);
       d.querySelector('.star').onclick=ev=>{ ev.stopPropagation(); toggleSave(t); ev.target.classList.toggle('on'); };
+      if(e.mine) d.querySelector('.del').onclick=ev=>{ ev.stopPropagation();
+        if(confirm('내 건배사를 삭제할까요?')){ dbSet('tc_mycanon', myCanon().filter(x=>x.id!==e.id)); renderCanon(); } };
       panel.appendChild(d);
     });
     return panel;
   }
-  // 🔥 지금 뜨는 — 유튜브·인스타·커뮤니티 리서치로 hot 태그된 것, 항상 맨 위 (2026-08-01 강프로)
+  // ✅ 내 검증이 맨 위 — 리서치발 '핫'은 두 번 다 취향 불합격(2026-08-02 강프로).
+  // 믿을 신호는 본인이 자리에서 써보고 ✅ 켠 것뿐이다.
   if(canonCat==='전체'){
-    let hot = CANON.filter(e=>e.hot);
-    if(fit) hot = hot.filter(canonMatchesToday);
-    if(hot.length){
-      hot.sort((a,b)=>b.pop-a.pop);
+    const ver = dupSort(loadSaved().filter(t=>t.verified));
+    if(ver.length){
       const h=document.createElement('h3'); h.className='rec';
-      h.textContent=`🔥 실사용 검증 (${hot.length}) — 실제 자리에서 통한 것들`; box.appendChild(h);
-      box.appendChild(canonPanel(hot));
+      h.textContent=`✅ 내 검증 (${ver.length}) — 실제 내 자리에서 통한 것들`; box.appendChild(h);
+      const wrap=document.createElement('div'); wrap.className='cards'; wrap.style.marginBottom='8px';
+      ver.forEach((t,i)=>wrap.appendChild(cardEl(t,i,ver,{saved:true,rerender:renderCanon})));
+      box.appendChild(wrap);
+    }
+  }
+  // ✍️ 내가 직접 추가한 것
+  {
+    const mine = canonCat==='전체' ? myCanon() : myCanon().filter(e=>e.c===canonCat);
+    if(mine.length){
+      const h=document.createElement('h3'); h.className='rec';
+      h.textContent=`✍️ 내 추가 (${mine.length})`; box.appendChild(h);
+      box.appendChild(canonPanel(mine));
     }
   }
   const cats = canonCat==='전체' ? CANON_CATS.slice(1) : [canonCat];
@@ -643,13 +681,20 @@ async function loadTrend(){
   }catch(e){ trendLoading = false; }
 }
 function renderTrendHome(box){
-  if(CANON.length){
-    const hot = CANON.filter(e=>e.hot).sort((a,b)=>b.pop-a.pop).slice(0,8);
-    if(hot.length){
+  const ver = dupSort(loadSaved().filter(t=>t.verified)).slice(0,8);
+  if(ver.length){
+    const h=document.createElement('div');
+    h.style.cssText='font-size:12px;color:var(--text-dim);padding:2px 4px';
+    h.textContent='✅ 내 검증 — 실제 내 자리에서 통했던 것들'; box.appendChild(h);
+    ver.forEach((t,i)=>box.appendChild(cardEl(t,i,ver,{top:true})));
+  }else if(CANON.length){
+    // 아직 검증이 없으면 요즘 감각의 정석 픽으로 채운다
+    const picks = CANON.filter(e=>e.fresh==='요즘'&&e.role!=='비추').sort((a,b)=>b.pop-a.pop).slice(0,5);
+    if(picks.length){
       const h=document.createElement('div');
       h.style.cssText='font-size:12px;color:var(--text-dim);padding:2px 4px';
-      h.textContent='🔥 실사용 검증 — 실제 자리에서 통한 건배사'; box.appendChild(h);
-      const ts = hot.map(canonToToast);
+      h.textContent='📖 요즘 감각 정석 픽 — 자리에서 써보고 ★→✅로 검증을 쌓아보세요'; box.appendChild(h);
+      const ts = picks.map(canonToToast);
       ts.forEach((t,i)=>box.appendChild(cardEl(t,i,ts,{top:true})));
     }
   }
@@ -667,27 +712,29 @@ function renderResults(caption){
   if(caption!==undefined) lastCaption = caption;
   const box = document.getElementById('resultCards'); box.innerHTML='';
   if(!activeEvent()){ renderTrendHome(box); return; }
-  // 1) 검증된 정석 먼저 — ~10개, 카테고리 라벨로 묶어서 (2026-08-01 강프로:
-  //    정석이 주인공. 카테고리당 최대 2개 라운드로빈으로 다양성 확보)
+  // 1) 검증된 정석 — 자리의 흐름대로: 🥂 시작 → 🍻 중반 → 🌙 마무리 (2026-08-02 강프로:
+  //    술자리엔 순서가 있다. 인사 잔, context 잔, 기약 잔을 구분해 제안)
   if(CANON.length){
     let fit = CANON.filter(canonMatchesToday);
     fit.sort((a,b)=>((b.tone===state.tone)-(a.tone===state.tone)) || (b.pop-a.pop));
-    const perCat = {}, picks = [];
-    for(const e of fit){ if((perCat[e.c]||0)<2){ picks.push(e); perCat[e.c]=(perCat[e.c]||0)+1; if(picks.length>=10) break; } }
-    if(picks.length<10) for(const e of fit){ if(!picks.includes(e)){ picks.push(e); if(picks.length>=10) break; } }
-    if(picks.length){
-      const h=document.createElement('div');
-      h.style.cssText='font-size:12px;color:var(--text-dim);padding:2px 4px';
-      h.textContent='📖 검증된 정석 — 모음집에서 오늘 자리 기준'; box.appendChild(h);
+    const perPhase = {start:3, mid:4, end:3};
+    const h=document.createElement('div');
+    h.style.cssText='font-size:12px;color:var(--text-dim);padding:2px 4px';
+    h.textContent='📖 검증된 정석 — 자리의 흐름대로'; box.appendChild(h);
+    let first = true;
+    for(const ph of PHASES){
+      const perCat = {}, picks = [];
+      for(const e of fit){
+        if((e.phase||'mid')!==ph) continue;
+        if((perCat[e.c]||0)>=2) continue;  // 단계 안에서도 카테고리 다양성
+        picks.push(e); perCat[e.c]=(perCat[e.c]||0)+1;
+        if(picks.length>=perPhase[ph]) break;
+      }
+      if(!picks.length) continue;
+      const cl=document.createElement('div'); cl.className='sec-label';
+      cl.style.cssText='padding:8px 4px 0'; cl.textContent=`${PHASE_KO[ph]} — ${PHASE_DESC[ph]}`; box.appendChild(cl);
       const toasts = dupSort(picks.map(canonToToast));
-      const byCat = new Map();
-      toasts.forEach(t=>{ const k=t.canonCat||'기타'; if(!byCat.has(k)) byCat.set(k,[]); byCat.get(k).push(t); });
-      let first = true;
-      byCat.forEach((list,cat)=>{
-        const cl=document.createElement('div'); cl.className='sec-label';
-        cl.style.cssText='padding:8px 4px 0'; cl.textContent=cat; box.appendChild(cl);
-        list.forEach(t=>{ box.appendChild(cardEl(t, first?0:1, toasts, {top:first})); first=false; });
-      });
+      toasts.forEach(t=>{ box.appendChild(cardEl(t, first?0:1, toasts, {top:first})); first=false; });
     }
   }
   // 2) 생성형은 곁들임 — 5개까지만
@@ -938,6 +985,29 @@ function saveNote(){
   personIds.forEach(pid=>updPerson(pid, p=>p.facts.push({body, at:note.at, eventId:detailEventId})));
   updEvent(detailEventId, e=>e.briefing=null); // notes changed → stale briefing
   openEventDetail(detailEventId);
+}
+
+/* ---- 내 건배사 직접 추가 ---- */
+function myCanon(){ return db('tc_mycanon', []); }
+function openMySheet(){
+  closeSheets();
+  ['myCall','myResp','myExpl'].forEach(id=>document.getElementById(id).value='');
+  const sel = document.getElementById('myCat');
+  if(!sel.options.length) CANON_CATS.slice(1).forEach(c=>{
+    const o=document.createElement('option'); o.value=c; o.textContent=c; sel.appendChild(o);
+  });
+  openSheet('mySheet');
+}
+function saveMyToast(){
+  const call = document.getElementById('myCall').value.trim();
+  const resp = document.getElementById('myResp').value.trim();
+  if(!call || !resp) return;
+  const e = {id:uid(), c:document.getElementById('myCat').value,
+    phase:document.getElementById('myPhase').value,
+    call, resp, expl:document.getElementById('myExpl').value.trim()||'내가 직접 추가한 건배사.',
+    occ:['범용'], role:'무난', tone:'무난', fresh:'스테디', pop:2, mine:true};
+  dbSet('tc_mycanon', myCanon().concat([e]));
+  closeSheets(); renderCanon();
 }
 
 /* ---- 음성 메모 (Phase 4) ---- */
