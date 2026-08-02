@@ -700,14 +700,17 @@ function renderTrendHome(box){
     ver.forEach((t,i)=>box.appendChild(cardEl(t,i,ver,{top:true})));
   }
   if(CANON.length){
-    // 첫인상 픽 = '요즘' 결만, 자리의 흐름대로 2·2·2 (2026-08-02 강프로)
-    const pool = CANON.filter(e=>e.fresh==='요즘'&&e.role!=='비추');
+    // 첫인상 픽 = '요즘' + 삼행시(스테디) 풀에서 단계별 2개 무작위 —
+    // 들어갈 때마다 조금씩 달라진다 (2026-08-02 강프로)
+    const pool = CANON.filter(e=>e.role!=='비추' &&
+      (e.fresh==='요즘' || (e.c==='삼행시' && e.fresh==='스테디')));
+    const shuffle = a=>a.map(x=>[Math.random(),x]).sort((p,q)=>p[0]-q[0]).map(x=>x[1]);
     const h=document.createElement('div');
     h.style.cssText='font-size:12px;color:var(--text-dim);padding:8px 4px 2px';
-    h.textContent='📖 요즘 감각 정석 — 자리의 흐름대로 · 마음에 들면 ★'; box.appendChild(h);
+    h.textContent='📖 오늘의 정석 — 자리의 흐름대로 · 마음에 들면 ★'; box.appendChild(h);
     let first = !ver.length;
     for(const ph of PHASES){
-      const picks = pool.filter(e=>(e.phase||'mid')===ph).sort((a,b)=>b.pop-a.pop).slice(0,2);
+      const picks = shuffle(pool.filter(e=>(e.phase||'mid')===ph)).slice(0,2);
       if(!picks.length) continue;
       const cl=document.createElement('div'); cl.className='sec-label';
       cl.style.cssText='padding:6px 4px 0'; cl.textContent=`${PHASE_KO[ph]} — ${PHASE_DESC[ph]}`; box.appendChild(cl);
