@@ -141,6 +141,8 @@ h3.rec{font-size:13px;color:var(--text-dim);font-weight:700;margin:18px 0 8px 2p
 .rp{flex:1;min-width:0}
 .rp .who{display:block;font-size:11.5px;font-weight:700;letter-spacing:1px;color:var(--paper-dim);margin-bottom:2px}
 .rp .word{font-size:clamp(24px,8vw,44px);font-weight:800;letter-spacing:-1px;line-height:1.2;word-break:keep-all;overflow-wrap:break-word;display:block}
+.rp .rom{display:block;font-size:13px;color:var(--paper-dim);margin-top:2px;letter-spacing:.5px}
+.engline{font-size:12px;color:var(--text-dim);margin-top:5px;line-height:1.45}
 .rp.call .word{color:var(--brass);text-shadow:0 0 24px rgba(217,169,60,.35)}
 .rp.resp .word{color:var(--celadon);text-shadow:0 0 24px rgba(111,184,154,.3)}
 #rdUsed{width:100%;margin-top:3vh;background:var(--ink-800);border:1px solid var(--ink-600);color:var(--paper);border-radius:12px;min-height:44px;font-size:14px;cursor:pointer;display:none}
@@ -171,7 +173,7 @@ body:has(.sheet.open) .wf-back, body:has(.sheet.open) .wf-theme-btn{display:none
   <div class="tabs">
     <div class="tab on" data-tab="today">오늘</div>
     <div class="tab" data-tab="canon">모음집</div>
-    <div class="tab" data-tab="clients">광고주</div>
+    <div class="tab" data-tab="clients">광고주 소식</div>
     <div class="tab" data-tab="log">기록</div>
   </div>
 
@@ -320,13 +322,14 @@ body:has(.sheet.open) .wf-back, body:has(.sheet.open) .wf-theme-btn{display:none
   <div id="rdTop"><span id="rdBadge"></span><button id="rdClose">닫기</button></div>
   <div id="rdBody">
     <div class="rd-sec" id="rdLeadSec"><div class="rd-label">대사</div><div id="rdLead"></div></div>
+    <div class="rd-sec" id="rdEngSec"><div class="rd-label">🌐 For non-Korean colleagues</div><div id="rdEng"></div></div>
     <div class="rd-sec" id="rdBuildSec"><div class="rd-label">빌드업 — 천천히</div><div id="rdBuild"></div></div>
     <div class="rd-sec rd-dim" id="rdNoteSec"><div class="rd-label">참고</div><div id="rdNote"></div></div>
   </div>
   <div id="rdPair">
     <div class="rp-row">
-      <div class="rp call"><span class="who">나 — 선창</span><span class="word" id="rdCall"></span></div>
-      <div class="rp resp"><span class="who">다 함께 — 후창</span><span class="word" id="rdResp"></span></div>
+      <div class="rp call"><span class="who">나 — 선창</span><span class="word" id="rdCall"></span><span class="rom" id="rdCallRom"></span></div>
+      <div class="rp resp"><span class="who">다 함께 — 후창</span><span class="word" id="rdResp"></span><span class="rom" id="rdRespRom"></span></div>
     </div>
     <button id="rdUsed" onclick="markUsed()">🍻 이 자리에서 이 건배사를 썼음</button>
   </div>
@@ -523,9 +526,12 @@ function canonToToast(e){
       duration_sec:15};
   }
   const tail = /[다요!)]$/.test(e.expl.trim()) ? '' : ' —';
+  // 혼합/영어 위주 자리: 외국인이 후창에 참여할 수 있게 로마자+영어 가이드를 붙인다 (2026-08-02 강프로)
+  const aid = state.lang_mix!=='all_korean';
   return {lang:'ko', track:'canon', canonCat:e.c,
     call_word:e.call, response_word:e.resp,
     lead_in:`${e.expl}${tail} 제가 '${e.call}' 하면, '${e.resp}'로 받아주시면 감사하겠습니다.`,
+    rom_call:aid?(e.romc||''):'', rom_resp:aid?(e.romr||''):'', eng_guide:aid?(e.eng||''):'',
     buildup:'', note:[PHASE_KO[e.phase]||'', e.note, e.role!=='무난'?'입장: '+e.role:'', FRESH_ICO[e.fresh]+' '+e.fresh].filter(Boolean).join('  ·  '),
     duration_sec:12};
 }
@@ -641,6 +647,7 @@ function cardEl(t, i, list, opts){
       : `<button class="star${isSaved(t)?' on':''}">★</button>`)+
     `</div>`+
     `<div class="pair"><span class="c">${esc(t.call_word)}</span><span class="arrow">→</span><span class="r">${esc(t.response_word)}</span></div>`+
+    (t.eng_guide?`<div class="engline">🌐 ${esc(t.eng_guide)}${t.rom_call?` &nbsp;<b>${esc(t.rom_call)} → ${esc(t.rom_resp||t.rom_call)}</b>`:''}</div>`:'')+
     `<div class="lead1 serif">${esc(firstLine(t))}</div>`+
     (dup?`<div class="dupline ${dup.red?'red':'green'}">${dup.text}</div>`:'')+
     (opts.saved?(()=>{const evs=usedAt(keyOf(t));return evs.length?`<div class="dupline" style="color:var(--text-dim)">🍻 ${evs.slice(0,2).map(e=>esc(e.title)+' ('+(e.date||'').slice(5)+')').join(', ')}${evs.length>2?' 외 '+(evs.length-2):''}</div>`:''})():'');
@@ -760,15 +767,21 @@ function renderResults(caption){
   // 📖 정석 — 자리의 흐름대로: 🥂 시작 → 🍻 중반 → 🌙 마무리
   if(CANON.length){
     let fit = CANON.filter(canonMatchesToday);
-    fit.sort((a,b)=>((b.tone===state.tone)-(a.tone===state.tone)) || (b.pop-a.pop));
+    // 영어 위주 자리: 사실상 전부 영어 — 영문 컬렉션이 앞서고, 한국어는
+    // 재미로 가르쳐 줄 만한 것 단계별 1개까지만 (2026-08-02 강프로)
+    const engFirst = state.lang_mix==='mostly_english';
+    fit.sort((a,b)=>(engFirst?((b.en?1:0)-(a.en?1:0)):0) ||
+      ((b.tone===state.tone)-(a.tone===state.tone)) || (b.pop-a.pop));
     const perPhase = {start:3, mid:4, end:3};
     let first = true;
     for(const ph of PHASES){
-      const perCat = {}, picks = [];
+      const perCat = {}, picks = []; let koCnt = 0, enCnt = 0;
       for(const e of fit){
         if((e.phase||'mid')!==ph) continue;
         if((perCat[e.c]||0)>=2) continue;
-        picks.push(e); perCat[e.c]=(perCat[e.c]||0)+1;
+        if(engFirst && !e.en && koCnt>=1) continue;
+        if(engFirst && e.en && enCnt>=perPhase[ph]-1) continue;  // 한국어 1자리 예약
+        picks.push(e); perCat[e.c]=(perCat[e.c]||0)+1; e.en?enCnt++:koCnt++;
         if(picks.length>=perPhase[ph]) break;
       }
       if(!picks.length) continue;
@@ -1331,6 +1344,10 @@ function fillReader(){
   document.getElementById('rdNoteSec').style.display = t.note?'':'none';
   document.getElementById('rdCall').textContent = t.call_word;
   document.getElementById('rdResp').textContent = t.response_word;
+  document.getElementById('rdCallRom').textContent = t.rom_call||'';
+  document.getElementById('rdRespRom').textContent = t.rom_resp||'';
+  document.getElementById('rdEng').textContent = t.eng_guide||'';
+  document.getElementById('rdEngSec').style.display = t.eng_guide?'':'none';
   document.getElementById('rdPrev').disabled = readerIdx===0;
   document.getElementById('rdNext').disabled = readerIdx===readerList.length-1;
   const ev = activeEvent(); const ub = document.getElementById('rdUsed');

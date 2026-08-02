@@ -54,8 +54,12 @@ SCHEMA = {
                     "buildup": {"type": "string"},
                     "note": {"type": "string"},
                     "duration_sec": {"type": "integer"},
+                    # foreigner aid for lang=ko/bridge in mixed settings; "" when N/A
+                    "rom_call": {"type": "string"},
+                    "rom_resp": {"type": "string"},
+                    "eng_guide": {"type": "string"},
                 },
-                "required": ["lang", "track", "lead_in", "call_word", "response_word", "buildup", "note", "duration_sec"],
+                "required": ["lang", "track", "lead_in", "call_word", "response_word", "buildup", "note", "duration_sec", "rom_call", "rom_resp", "eng_guide"],
                 "additionalProperties": False,
             },
         }
@@ -76,8 +80,10 @@ def _occasions(p):
 
 
 def cache_key(p):
-    # MODEL is part of the key: a model switch must not serve the old model's output
-    parts = [MODEL, "+".join(sorted(_occasions(p)))]
+    # MODEL is part of the key: a model switch must not serve the old model's output.
+    # v3 = mix-plan overhaul (mostly_english all-English + foreigner aid fields);
+    # bump invalidates cache entries produced by older prompts.
+    parts = [MODEL, "v3", "+".join(sorted(_occasions(p)))]
     parts += [str(p.get(k, "")) for k in
               ("audience_scope", "execs", "age_mix", "my_role", "lang_mix", "tone", "round",
                "occasion_note", "trend")]
