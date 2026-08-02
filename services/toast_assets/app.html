@@ -518,10 +518,18 @@ const PHASES = ['start','mid','end'];
 const PHASE_KO = {start:'🥂 시작', mid:'🍻 중반', end:'🌙 마무리'};
 const PHASE_DESC = {start:'반가움·인사, 첫 잔', mid:'분위기 이어가는 잔', end:'다음을 기약하는 막잔'};
 // 순서: 클래식·결의·실적·감사가 앞 (2026-08-02 강프로)
-const CANON_CATS = ['전체','클래식','결의·파이팅','실적·프로젝트','감사·노고','품격·성어','파트너십','환영·송별','축하','송년·신년','요즘·구호','삼행시','건강·가족','유머·주의'];
+const CANON_CATS = ['전체','클래식','결의·파이팅','실적·프로젝트','감사·노고','품격·성어','파트너십','환영·송별','축하','송년·신년','요즘·구호','삼행시','건강·가족','유머·주의','영문'];
 let canonCat = '전체';
 const OCC_MAP = {'클라이언트 만찬':['클라이언트'],'내부 만찬':[],'워크숍':['실적'],'송년/신년':['송년','신년'],'승진·영전':['승진'],'환영':['환영'],'송별':['송별'],'실적 달성':['실적']};
 function canonToToast(e){
+  if(e.en){
+    // 영문 정석: 큰 글씨는 영어 원문, 대사엔 한국어 뜻·타이밍 안내
+    return {lang:'en', track:'canon', canonCat:e.c,
+      call_word:e.call, response_word:e.resp,
+      lead_in:e.expl, buildup:'',
+      note:[PHASE_KO[e.phase]||'', e.role!=='무난'?'입장: '+e.role:'', '🌐 English'].filter(Boolean).join('  ·  '),
+      duration_sec:15};
+  }
   const tail = /[다요!)]$/.test(e.expl.trim()) ? '' : ' —';
   return {lang:'ko', track:'canon', canonCat:e.c,
     call_word:e.call, response_word:e.resp,
@@ -530,6 +538,7 @@ function canonToToast(e){
     duration_sec:12};
 }
 function canonMatchesToday(e){
+  if(e.en && state.lang_mix==='all_korean') return false;  // 전원 한국인 자리엔 영문 제외
   const occs = state.occasion.flatMap(o=>OCC_MAP[o]||[]);
   const occOk = (e.occ||[]).includes('범용') || (e.occ||[]).some(o=>occs.includes(o));
   const notRisky = e.fresh!=='한물' && e.fresh!=='주의' && e.role!=='비추';

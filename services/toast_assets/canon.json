@@ -1,7 +1,7 @@
 {
  "_meta": {
   "built": "2026-07-31",
-  "method": "2025-26 트렌드 기사 + 건배사 모음집 다수의 반복 출현 빈도 기반. pop 3=모음집 단골, 2=자주 보임, 1=가끔. fresh: 스테디/요즘/한물/주의(호불호·리스크). role: 제안자 입장 힌트. 2026-08-01: 병렬 리서치(기사·모음집 6에이전트)로 확장, 중복·품질 게이트 통과분만. 2026-08-01: 병렬 리서치(기사·모음집 6에이전트)로 확장, 중복·품질 게이트 통과분만.",
+  "method": "2025-26 트렌드 기사 + 건배사 모음집 다수의 반복 출현 빈도 기반. pop 3=모음집 단골, 2=자주 보임, 1=가끔. fresh: 스테디/요즘/한물/주의(호불호·리스크). role: 제안자 입장 힌트. 2026-08-01: 병렬 리서치(기사·모음집 6에이전트)로 확장, 중복·품질 게이트 통과분만. 2026-08-01: 병렬 리서치(기사·모음집 6에이전트)로 확장, 중복·품질 게이트 통과분만. 2026-08-02: 영문 정석 35건(에티켓 가이드·Toastmasters·아이리시 전통·처칠 등 인용, 전 건 출처 확인) 추가.",
   "sources": [
    "accio.com 2025 건배사 트렌드",
    "jab-guyver.co.kr 2025-26 직장인 건배사",
@@ -10,7 +10,7 @@
    "word.toy0727.co.kr 2025 송년회 인기 30",
    "gosudaeri.com 회식 건배사 TOP20+"
   ],
-  "updated": "2026-08-01"
+  "updated": "2026-08-02"
  },
  "items": [
   {
@@ -3962,6 +3962,556 @@
    "fresh": "요즘",
    "pop": 1,
    "phase": "mid"
+  },
+  {
+   "c": "영문",
+   "en": true,
+   "call": "To your health!",
+   "resp": "To your health!",
+   "expl": "가장 오래되고 안전한 만능 건배사. 기록상 최초의 건배(서기 450년 보티건 왕 연회)도 'Good health!'였다. 만찬 시작에 호스트가 첫 잔을 열 때 표준.",
+   "occ": [
+    "범용",
+    "클라이언트"
+   ],
+   "phase": "start",
+   "role": "무난",
+   "tone": "격식",
+   "fresh": "스테디",
+   "pop": 3
+  },
+  {
+   "c": "영문",
+   "en": true,
+   "call": "Here's to us.",
+   "resp": "To us!",
+   "expl": "'우리를 위하여' — 짧고 포용적인 클래식. 분위기가 풀린 중반에 테이블 전체를 묶는 잔으로 좋다. 짧아서 비원어민 임원도 실수 여지가 없다.",
+   "occ": [
+    "범용"
+   ],
+   "phase": "mid",
+   "role": "무난",
+   "tone": "무난",
+   "fresh": "스테디",
+   "pop": 3
+  },
+  {
+   "c": "영문",
+   "en": true,
+   "call": "To absent friends.",
+   "resp": "Absent friends!",
+   "expl": "영국 해군 전통에서 정착한 관용 건배사. 오늘 못 온 동료·전임자를 기리는 잔으로, 오래 협업한 팀 만찬 중반에 진중한 순간을 만든다.",
+   "occ": [
+    "범용"
+   ],
+   "phase": "mid",
+   "role": "무난",
+   "tone": "격식",
+   "fresh": "스테디",
+   "pop": 2
+  },
+  {
+   "c": "영문",
+   "en": true,
+   "call": "May the roof above us never fall in, and may we friends gathered below never fall out.",
+   "resp": "Cheers!",
+   "expl": "아이리시 전통. '이 지붕이 무너지지 않고, 그 아래 모인 우리가 갈라서지 않기를' — fall in/fall out 언어유희. 호스트가 자기 자리(식당·자택)에서 여는 잔으로 특히 좋다.",
+   "occ": [
+    "범용",
+    "환영"
+   ],
+   "phase": "mid",
+   "role": "무난",
+   "tone": "진심",
+   "fresh": "스테디",
+   "pop": 2
+  },
+  {
+   "c": "영문",
+   "en": true,
+   "call": "May you live as long as you want, and never want as long as you live.",
+   "resp": "Cheers!",
+   "expl": "아이리시 전통. '원하는 만큼 오래 살고, 사는 동안 아쉬움 없기를' — want의 이중 의미(원하다/궁핍). 상대 개인을 향한 덕담 잔으로 무난.",
+   "occ": [
+    "범용"
+   ],
+   "phase": "mid",
+   "role": "무난",
+   "tone": "유쾌",
+   "fresh": "스테디",
+   "pop": 2
+  },
+  {
+   "c": "영문",
+   "en": true,
+   "call": "To a full belly, a heavy purse, and a light heart.",
+   "resp": "Hear, hear!",
+   "expl": "'배부름, 두둑한 지갑, 가벼운 마음을 위하여' — 식사·사업·행복을 한 줄에 담은 옛 격언형. 음식이 나온 뒤 중반 잔으로 어울린다.",
+   "occ": [
+    "범용"
+   ],
+   "phase": "mid",
+   "role": "무난",
+   "tone": "유쾌",
+   "fresh": "스테디",
+   "pop": 1
+  },
+  {
+   "c": "영문",
+   "en": true,
+   "call": "To good friends, good fortune, and the good sense to know the difference.",
+   "resp": "Hear, hear!",
+   "expl": "'좋은 친구와 행운, 그리고 그 둘을 구별할 분별력을 위하여' — 위트 있는 클래식. 관계가 어느 정도 쌓인 상대와의 자리 중반에 좋다.",
+   "occ": [
+    "범용",
+    "클라이언트"
+   ],
+   "phase": "mid",
+   "role": "무난",
+   "tone": "유쾌",
+   "fresh": "스테디",
+   "pop": 1
+  },
+  {
+   "c": "영문",
+   "en": true,
+   "call": "Here's to a partnership that delivers results for both teams.",
+   "resp": "Cheers!",
+   "expl": "딜 성사·파트너십 개시 만찬의 표준 문형. '양쪽 모두에 성과를 주는 파트너십'이라는 상호성 표현이 핵심이라 갑을 어느 쪽이 말해도 안전.",
+   "occ": [
+    "클라이언트"
+   ],
+   "phase": "mid",
+   "role": "리더면 더 좋음",
+   "tone": "격식",
+   "fresh": "스테디",
+   "pop": 2
+  },
+  {
+   "c": "영문",
+   "en": true,
+   "call": "Please join me in raising a glass to our hosts — and to the relationship between our teams.",
+   "resp": "Cheers!",
+   "expl": "초대받은 쪽(게스트)이 답례로 드는 잔의 표준형. 호스트 회사에 감사 후 양사 관계로 확장하는 구조라, 해외 출장 만찬에서 한국 측 임원이 쓰기 좋다.",
+   "occ": [
+    "클라이언트"
+   ],
+   "phase": "end",
+   "role": "리더면 더 좋음",
+   "tone": "격식",
+   "fresh": "스테디",
+   "pop": 2
+  },
+  {
+   "c": "영문",
+   "en": true,
+   "call": "To the work we do together — and the world it builds.",
+   "resp": "Hear, hear!",
+   "expl": "'함께하는 일과 그 일이 만드는 세상을 위하여' — 협업의 의미를 한 단계 끌어올리는 잔. 장기 프로젝트 파트너와의 자리 중반에 진정성 있게 들린다.",
+   "occ": [
+    "클라이언트",
+    "실적"
+   ],
+   "phase": "mid",
+   "role": "무난",
+   "tone": "진심",
+   "fresh": "스테디",
+   "pop": 1
+  },
+  {
+   "c": "영문",
+   "en": true,
+   "call": "May we always be fired with enthusiasm for our work — and never fired enthusiastically by our clients.",
+   "resp": "Hear, hear!",
+   "expl": "fired(불타오르다/해고되다) 언어유희의 비즈니스 정석 유머 토스트. 에이전시-클라이언트 자리에서 긴장을 푸는 중반 잔. 유머라 발음·타이밍 연습 필요.",
+   "occ": [
+    "클라이언트",
+    "범용"
+   ],
+   "phase": "mid",
+   "role": "무난",
+   "tone": "유쾌",
+   "fresh": "스테디",
+   "pop": 2
+  },
+  {
+   "c": "영문",
+   "en": true,
+   "call": "To the company we keep profitable.",
+   "resp": "To the company!",
+   "expl": "company(회사/함께하는 사람들) 이중 의미 언어유희. 짧아서 임팩트 있고, 사내 팀 만찬이나 합작사 자리에 어울린다.",
+   "occ": [
+    "실적",
+    "범용"
+   ],
+   "phase": "mid",
+   "role": "무난",
+   "tone": "유쾌",
+   "fresh": "스테디",
+   "pop": 1
+  },
+  {
+   "c": "영문",
+   "en": true,
+   "call": "Here's to work — may we never be without it.",
+   "resp": "Hear, hear!",
+   "expl": "'일을 위하여 — 일이 끊이지 않기를' — 수주 산업(에이전시·컨설팅)에서 특히 통하는 클래식. 계약 갱신·신규 수주 자리에 잘 맞는다.",
+   "occ": [
+    "실적",
+    "클라이언트"
+   ],
+   "phase": "mid",
+   "role": "무난",
+   "tone": "유쾌",
+   "fresh": "스테디",
+   "pop": 1
+  },
+  {
+   "c": "영문",
+   "en": true,
+   "call": "Please join me in raising a glass to our colleagues from [company] — welcome, and here's to a productive visit ahead.",
+   "resp": "Welcome!",
+   "expl": "방문단·해외 팀을 맞는 환영 만찬 첫 잔의 표준 문형. 회사명을 넣고 '생산적인 방문'으로 마무리하는 구조. 호스트 측 최상급자가 여는 게 관례.",
+   "occ": [
+    "환영",
+    "클라이언트"
+   ],
+   "phase": "start",
+   "role": "리더면 더 좋음",
+   "tone": "격식",
+   "fresh": "스테디",
+   "pop": 2
+  },
+  {
+   "c": "영문",
+   "en": true,
+   "call": "To old friends and new memories.",
+   "resp": "To old friends!",
+   "expl": "'오랜 친구와 새로운 추억을 위하여' — 오랜만에 재회한 파트너·주재원 복귀 만찬의 시작 잔으로 좋다.",
+   "occ": [
+    "환영",
+    "범용"
+   ],
+   "phase": "start",
+   "role": "무난",
+   "tone": "진심",
+   "fresh": "스테디",
+   "pop": 2
+  },
+  {
+   "c": "영문",
+   "en": true,
+   "call": "Here's to [name]'s new journey — may it be as bright and promising as they are.",
+   "resp": "To [name]!",
+   "expl": "이임·전출자를 보내는 송별 잔의 표준형. 이름을 넣어 부르면 좌중이 'To [name]!'으로 받는다. 상급자가 말하면 무게가 실린다.",
+   "occ": [
+    "송별"
+   ],
+   "phase": "end",
+   "role": "리더면 더 좋음",
+   "tone": "진심",
+   "fresh": "스테디",
+   "pop": 1
+  },
+  {
+   "c": "영문",
+   "en": true,
+   "call": "May the next chapter be your finest.",
+   "resp": "Hear, hear!",
+   "expl": "'다음 장(章)이 당신 최고의 장이 되기를' — 퇴임·이직 송별의 정석 마무리. 짧고 품위 있어 격식 자리에서 안전.",
+   "occ": [
+    "송별"
+   ],
+   "phase": "end",
+   "role": "무난",
+   "tone": "진심",
+   "fresh": "스테디",
+   "pop": 2
+  },
+  {
+   "c": "영문",
+   "en": true,
+   "call": "To the years behind you — and the adventures still ahead.",
+   "resp": "Cheers!",
+   "expl": "'지나온 세월과 앞으로의 모험을 위하여' — 공로를 기리며 미래를 축원하는 송별·은퇴 잔. 장기 근속자에게 특히 어울린다.",
+   "occ": [
+    "송별"
+   ],
+   "phase": "end",
+   "role": "무난",
+   "tone": "진심",
+   "fresh": "스테디",
+   "pop": 2
+  },
+  {
+   "c": "영문",
+   "en": true,
+   "call": "May the road rise up to meet you, and may the wind be always at your back.",
+   "resp": "Cheers!",
+   "expl": "가장 유명한 아이리시 축원의 앞 두 행. '길이 그대를 마중 나오고, 바람이 늘 등을 밀어주기를'. 전체 버전은 종교색이 있어 비즈니스에선 이 앞부분만 쓰는 게 관례. 떠나는 이를 보내는 마지막 잔.",
+   "occ": [
+    "송별"
+   ],
+   "phase": "end",
+   "role": "무난",
+   "tone": "진심",
+   "fresh": "스테디",
+   "pop": 3
+  },
+  {
+   "c": "영문",
+   "en": true,
+   "call": "Here's to the team — and to what we'll build next.",
+   "resp": "To the team!",
+   "expl": "마일스톤 달성 축하의 표준 문형. 이룬 것을 인정하고 다음으로 시선을 돌리는 구조라, 프로젝트 완료 회식에서 리더가 들면 가장 좋다.",
+   "occ": [
+    "실적"
+   ],
+   "phase": "mid",
+   "role": "리더면 더 좋음",
+   "tone": "무난",
+   "fresh": "스테디",
+   "pop": 2
+  },
+  {
+   "c": "영문",
+   "en": true,
+   "call": "To success!",
+   "resp": "To success!",
+   "expl": "성과 자리의 최소 단위 관용구. 좌중이 핵심어를 그대로 복창하는 것이 표준 예법(비즈니스 커뮤니케이션 교재의 대표 예시). 어떤 성과 자리든 실패 없는 잔.",
+   "occ": [
+    "실적",
+    "범용"
+   ],
+   "phase": "mid",
+   "role": "무난",
+   "tone": "무난",
+   "fresh": "스테디",
+   "pop": 3
+  },
+  {
+   "c": "영문",
+   "en": true,
+   "call": "So raise your glasses and join me as we look forward to new challenges, to new successes, and to new friends!",
+   "resp": "Cheers!",
+   "expl": "비즈니스 커뮤니케이션 교재(Business Communication for Success)에 실린 축하 연설 마무리 정석. 3연속 병렬(challenges–successes–friends)이 리듬을 만든다. 행사 마무리 잔.",
+   "occ": [
+    "실적",
+    "범용"
+   ],
+   "phase": "end",
+   "role": "리더면 더 좋음",
+   "tone": "격식",
+   "fresh": "스테디",
+   "pop": 1
+  },
+  {
+   "c": "영문",
+   "en": true,
+   "call": "May the best day of your past be the worst day of your future.",
+   "resp": "Hear, hear!",
+   "expl": "아이리시 계열 클래식. '지난날 최고의 날이 앞날 최악의 날이 되기를' — 즉 앞으로는 더 좋아지기만 하라는 뜻. 실적 축하와 새 출발 어느 쪽에도 맞는다.",
+   "occ": [
+    "실적",
+    "송별",
+    "범용"
+   ],
+   "phase": "mid",
+   "role": "무난",
+   "tone": "진심",
+   "fresh": "스테디",
+   "pop": 2
+  },
+  {
+   "c": "영문",
+   "en": true,
+   "call": "Here's to the life you've built — and the good health to enjoy every day of it.",
+   "resp": "Cheers!",
+   "expl": "'당신이 일군 것과 그것을 누릴 건강을 위하여' — 은퇴·장기 공로자를 위한 잔. 성취와 건강 축원을 한 문장에 담아 격조 있다.",
+   "occ": [
+    "송별",
+    "실적"
+   ],
+   "phase": "end",
+   "role": "리더면 더 좋음",
+   "tone": "진심",
+   "fresh": "스테디",
+   "pop": 1
+  },
+  {
+   "c": "영문",
+   "en": true,
+   "call": "May good fortune follow you wherever the road leads.",
+   "resp": "Cheers!",
+   "expl": "'어느 길로 가든 행운이 따르기를' — 앞날을 축원하는 범용 마무리 잔. 협상이 끝났든 프로젝트가 끝났든 두루 쓸 수 있다.",
+   "occ": [
+    "송별",
+    "범용"
+   ],
+   "phase": "end",
+   "role": "무난",
+   "tone": "진심",
+   "fresh": "스테디",
+   "pop": 1
+  },
+  {
+   "c": "영문",
+   "en": true,
+   "call": "A toast to your health — may we drink one together in ten years' time, and a few in between.",
+   "resp": "Cheers!",
+   "expl": "'10년 뒤에도 함께 잔을 들고, 그 사이에도 몇 번 더' — 재회를 기약하는 마무리 잔의 정석. 장기 파트너십 만찬의 끝에 쓰면 관계 지속 의지가 자연스럽게 전달된다.",
+   "occ": [
+    "클라이언트",
+    "범용"
+   ],
+   "phase": "end",
+   "role": "무난",
+   "tone": "진심",
+   "fresh": "스테디",
+   "pop": 1
+  },
+  {
+   "c": "영문",
+   "en": true,
+   "call": "Until we meet again!",
+   "resp": "Until we meet again!",
+   "expl": "아이리시 축원 마지막 행에서 정착한 작별 관용구. 만찬의 마지막 잔, 공항 배웅 전 자리에서 좌중이 그대로 복창한다. 짧아서 가장 실패 확률이 낮은 마무리.",
+   "occ": [
+    "송별",
+    "범용"
+   ],
+   "phase": "end",
+   "role": "무난",
+   "tone": "무난",
+   "fresh": "스테디",
+   "pop": 3
+  },
+  {
+   "c": "영문",
+   "en": true,
+   "call": "On behalf of [company], thank you for this wonderful evening — please join me in raising a glass to our hosts.",
+   "resp": "To our hosts!",
+   "expl": "게스트 측 대표가 만찬을 닫으며 호스트에게 감사를 표하는 표준 문형. 해외 만찬에서 한국 측이 초대받았을 때 마지막에 반드시 하나 나가야 하는 잔.",
+   "occ": [
+    "클라이언트",
+    "범용"
+   ],
+   "phase": "end",
+   "role": "리더면 더 좋음",
+   "tone": "격식",
+   "fresh": "스테디",
+   "pop": 2
+  },
+  {
+   "c": "영문",
+   "en": true,
+   "call": "May you have the hindsight to know where you've been, the foresight to know where you're going, and the insight to know when you've gone too far.",
+   "resp": "Hear, hear!",
+   "expl": "아이리시 계열 축원. hindsight–foresight–insight 3운(韻)이 재치의 핵심. '과했음을 아는 통찰까지'라는 반전으로 웃음이 터지는, 마무리 직전의 유쾌한 잔.",
+   "occ": [
+    "범용",
+    "송별"
+   ],
+   "phase": "end",
+   "role": "무난",
+   "tone": "유쾌",
+   "fresh": "스테디",
+   "pop": 2
+  },
+  {
+   "c": "영문",
+   "en": true,
+   "call": "May we always have a reason to gather — and the sense to do it often.",
+   "resp": "Cheers!",
+   "expl": "'모일 이유가 늘 있고, 자주 모일 분별이 있기를' — 다음 만남을 기약하는 가벼운 마무리 잔. 정기 교류를 만들고 싶은 파트너에게 좋다.",
+   "occ": [
+    "범용",
+    "클라이언트"
+   ],
+   "phase": "end",
+   "role": "무난",
+   "tone": "유쾌",
+   "fresh": "스테디",
+   "pop": 1
+  },
+  {
+   "c": "영문",
+   "en": true,
+   "call": "In the words of Winston Churchill: 'Here's to a year of toil — a year of struggle and peril, and a long step forward towards victory. May we all come through safe and with honour.'",
+   "resp": "Hear, hear!",
+   "expl": "처칠이 1942년 1월 1일 기차 안 신년 건배로 남긴 실제 토스트(국제처칠협회 기록). 힘든 한 해·난제 프로젝트를 앞둔 킥오프 만찬에서 '고생길이지만 전진'이라는 결의를 담아 쓴다. 출처: Winston Churchill.",
+   "occ": [
+    "실적",
+    "범용"
+   ],
+   "phase": "mid",
+   "role": "리더면 더 좋음",
+   "tone": "격식",
+   "fresh": "스테디",
+   "pop": 2
+  },
+  {
+   "c": "영문",
+   "en": true,
+   "call": "As Oscar Wilde said — 'After a good dinner, one can forgive anybody, even one's own relations.' To a very good dinner.",
+   "resp": "Cheers!",
+   "expl": "오스카 와일드의 유명 경구를 그대로 인용하는 만찬 전용 유머 토스트. 식사가 훌륭했을 때 마무리 직전에 쓰면 좌중이 웃으며 닫힌다. 협상이 다소 팽팽했던 자리의 긴장 해소에도 좋다. 출처: Oscar Wilde.",
+   "occ": [
+    "범용",
+    "클라이언트"
+   ],
+   "phase": "end",
+   "role": "무난",
+   "tone": "유쾌",
+   "fresh": "스테디",
+   "pop": 2
+  },
+  {
+   "c": "영문",
+   "en": true,
+   "call": "Mark Twain said, 'Be good and you will be lonesome.' To good company tonight.",
+   "resp": "Cheers!",
+   "expl": "마크 트웨인의 경구를 받아 '오늘 밤 좋은 동행'으로 돌리는 관용 인용형. 격의가 어느 정도 풀린 자리 중반에 위트로 쓴다. 출처: Mark Twain.",
+   "occ": [
+    "범용"
+   ],
+   "phase": "mid",
+   "role": "무난",
+   "tone": "유쾌",
+   "fresh": "스테디",
+   "pop": 2
+  },
+  {
+   "c": "영문",
+   "en": true,
+   "call": "In Benjamin Franklin's words: 'Be at war with your vices, at peace with your neighbors, and let every new year find you a better man.'",
+   "resp": "Hear, hear!",
+   "expl": "벤저민 프랭클린의 신년 격언을 인용하는 정통 토스트. 연말연시 글로벌 파트너 만찬, 신년회에서 격식 있게 쓴다. 출처: Benjamin Franklin.",
+   "occ": [
+    "범용",
+    "실적"
+   ],
+   "phase": "end",
+   "role": "리더면 더 좋음",
+   "tone": "격식",
+   "fresh": "스테디",
+   "pop": 2
+  },
+  {
+   "c": "영문",
+   "en": true,
+   "call": "There are good ships and wood ships, ships that sail the sea — but the best ships are friendships, and may they always be.",
+   "resp": "To friendship!",
+   "expl": "아이리시 전통으로 전해지는 유명 각운 토스트(ships/friendships). 파트너십 만찬에서 '결국 남는 건 관계'라는 메시지로 통하며, 암송해 가면 반드시 박수가 나온다. 출처: 아이리시 전통구.",
+   "occ": [
+    "클라이언트",
+    "범용",
+    "환영"
+   ],
+   "phase": "mid",
+   "role": "무난",
+   "tone": "진심",
+   "fresh": "스테디",
+   "pop": 3
   }
  ]
 }
