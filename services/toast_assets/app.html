@@ -557,7 +557,7 @@ async function renderCanon(){
     if(hot.length){
       hot.sort((a,b)=>b.pop-a.pop);
       const h=document.createElement('h3'); h.className='rec';
-      h.textContent=`🔥 지금 뜨는 (${hot.length}) — 20·30 사이 분위기용`; box.appendChild(h);
+      h.textContent=`🔥 실사용 검증 (${hot.length}) — 실제 자리에서 통한 것들`; box.appendChild(h);
       box.appendChild(canonPanel(hot));
     }
   }
@@ -648,7 +648,7 @@ function renderTrendHome(box){
     if(hot.length){
       const h=document.createElement('div');
       h.style.cssText='font-size:12px;color:var(--text-dim);padding:2px 4px';
-      h.textContent='🔥 지금 뜨는 — 요즘 술자리 트렌드'; box.appendChild(h);
+      h.textContent='🔥 실사용 검증 — 실제 자리에서 통한 건배사'; box.appendChild(h);
       const ts = hot.map(canonToToast);
       ts.forEach((t,i)=>box.appendChild(cardEl(t,i,ts,{top:true})));
     }
