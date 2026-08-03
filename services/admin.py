@@ -14,6 +14,10 @@ def handle(method, path, body, ctx=None):
     if not auth.is_admin(user):
         return ("html", _forbidden())
 
+    if method == "GET" and path == "/admin/usage":
+        from services import _usage
+        return ("html", _usage.render_page(user, body))
+
     if method == "POST" and path == "/admin/set_role":
         target = body.get("username", [""])[0].strip()
         role   = body.get("role", ["user"])[0]
@@ -458,7 +462,7 @@ tr.row-blocked td{{opacity:.65;background:#fff5f5}}
 </head><body>
 <nav>
   <a href="/admin" class="nav-brand">⚙️ Admin</a>
-  <span class="nav-user">🔑 {current_user} &nbsp;·&nbsp; <a href="/">← Wayfinder</a> &nbsp;·&nbsp; <a href="/logout">로그아웃</a></span>
+  <span class="nav-user">🔑 {current_user} &nbsp;·&nbsp; <a href="/admin/usage">📊 Usage</a> &nbsp;·&nbsp; <a href="/">← Wayfinder</a> &nbsp;·&nbsp; <a href="/logout">로그아웃</a></span>
 </nav>
 <div class="container">
   <h1>⚙️ 관리자 페이지</h1>

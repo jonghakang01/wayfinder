@@ -26,6 +26,7 @@ if os.path.exists(_env_path):
                 os.environ.setdefault(_k.strip(), _v.strip())
 
 from services import auth
+from services import _usage
 
 def load_services():
     services = {}
@@ -976,6 +977,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == svc_path or path.startswith(svc_path + "/"):
                 if not auth.has_service_access(ctx["user"], svc_path):
                     return self.redirect("/")
+                _usage.record(ctx["user"], svc_path)
                 return self.dispatch(svc.handle("GET", path, query, ctx))
         self.send_html("<h2>404 Not Found</h2>", 404)
 
@@ -1026,6 +1028,7 @@ class Handler(BaseHTTPRequestHandler):
             if path.startswith(svc_path):
                 if not auth.has_service_access(ctx["user"], svc_path):
                     return self.redirect("/")
+                _usage.record(ctx["user"], svc_path)
                 return self.dispatch(svc.handle("POST", path, body, ctx))
         self.send_html("<h2>404</h2>", 404)
 
