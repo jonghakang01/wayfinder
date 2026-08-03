@@ -1336,6 +1336,13 @@ def _render_review(user: str) -> str:
                 f'data-matched="{"1" if is_matched else "0"}">{txn}{receipt_block}</div>')
         body_html = "".join(items)
 
+    # SAP trip robot launcher — a custom-protocol link the Windows registry
+    # maps to sap-robot-edge.bat (install-robot-protocol.bat, one-time). Only
+    # meaningful on the admin's own PC, so everyone else is spared the button.
+    robot_btn = (('<a class="btn btn-ghost btn-sm" href="wayfinder-robot://start" '
+                  'title="Launch the robot Edge (Knox Portal + GTE tabs, CDP relay). '
+                  'One-time setup: run install-robot-protocol.bat">🤖 Robot</a>')
+                 if user == ADMIN else '')
     download_btn = (('<span class="fb-pop-wrap">'
                      '<button class="fb-more-btn" id="rvExport" aria-expanded="false">⬇ Export <span class="chev">▾</span></button>'
                      '<div class="fb-menu" id="rvExportMenu">'
@@ -1575,6 +1582,7 @@ body:has(.fb-menu.open) .wf-back,body:has(.fb-menu.open) #wfThemeBtn{{display:no
       </select>
     </span>
     <button class="btn btn-ghost btn-sm" id="rvReset">↺ Reset</button>
+    {robot_btn}
     {download_btn}
   </div>
 

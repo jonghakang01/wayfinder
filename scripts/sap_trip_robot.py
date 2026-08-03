@@ -6,15 +6,21 @@ expense per line from a cardconv trip export. Every line pauses for a human
 look before Save (Q2) — this script never submits anything unseen.
 
 Usage:
-  1. Windows: run sap-robot-edge.bat, sign in, open the trip's expense screen
-  2. Windows: python cdp_relay.py <wsl-gateway-ip> 9223 9222   (once per boot)
+  1. Windows: run sap-robot-edge.bat (opens portals + starts the CDP relay)
+  2. Open the trip's "Other Expense" screen in the robot Edge
   3. cardconv Review -> Export -> "json (Trip)" -> save the file
   4. WSL:  LD_LIBRARY_PATH=$HOME/.local/chromium-libs \\
-           python3 scripts/sap_trip_robot.py <trip_submit_*.json> "<trip name>"
+           python3 scripts/sap_trip_robot.py <trip_submit_*.json> "<trip name>" \\
+           [--confirm] [--domestic]
 
-Per line: [Enter]=save  s=skip  q=quit. Failures are collected, not fatal.
+Default is fully automatic — fill, Save, New, next line (강프로 2026-08-03,
+after the first line was verified on screen). --confirm restores the
+per-line pause ([Enter]=save s=skip q=quit); --domestic sets Vendor Name
+kind to Domestic (default Overseas — Korea/India trips). Every save is
+verified against the grid's Total counter; failures skip, never abort.
 """
 import json
+import re as _re
 import subprocess
 import sys
 from datetime import date
@@ -100,17 +106,32 @@ def fill_line(pg, line, overseas):
     pg.fill(SEL["vendor_name"], line.get("merchant") or "")
 
 
+def _grid_total(pg):
+    m = _re.search(r"Total\s*(\d+)", pg.evaluate("() => document.body.innerText"))
+    return int(m.group(1)) if m else None
+
+
+def _ensure_form_open(pg):
+    """New both opens the collapsed form (list mode) and resets a stale one —
+    without the reset, a field the next line does not touch (e.g. cashRsn on
+    a card line after a cash line) would silently carry over."""
+    pg.click(SEL["new"])
+    pg.wait_for_timeout(1200)
+
+
 def main():
-    if len(sys.argv) < 3:
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    confirm = "--confirm" in sys.argv
+    overseas = "--domestic" not in sys.argv
+    if len(args) < 2:
         print(__doc__)
         sys.exit(1)
-    export = json.loads(Path(sys.argv[1]).read_text())
-    trip = sys.argv[2]
+    export = json.loads(Path(args[0]).read_text())
+    trip = args[1]
     lines = export.get("trips", {}).get(trip)
     if not lines:
         print(f"trip '{trip}' not in export; available: {list(export.get('trips', {}))}")
         sys.exit(1)
-    overseas = input("Overseas trip? [y/N] ").strip().lower() == "y"
 
     failures = []
     with sync_playwright() as p:
@@ -122,30 +143,37 @@ def main():
             sys.exit(1)
         pg = pages[0]
         pg.on("dialog", lambda d: (print(f"  [dialog] {d.message[:120]}"), d.accept()))
-        print(f"Screen: {pg.title()} | {len(lines)} line(s) for '{trip}'\n")
+        print(f"Screen: {pg.title()} | {len(lines)} line(s) for '{trip}' "
+              f"| mode: {'confirm each' if confirm else 'auto-save'}\n")
 
         for i, line in enumerate(lines, 1):
             head = (f"[{i}/{len(lines)}] {line.get('date')}  "
                     f"{line.get('merchant')}  ${line.get('amount')}")
             print(head)
             try:
+                _ensure_form_open(pg)
                 fill_line(pg, line, overseas)
             except Exception as e:
                 print(f"  fill failed: {e}")
                 failures.append((head, str(e)))
                 continue
-            ans = input("  filled — check the screen. [Enter]=Save  s=skip  q=quit: ").strip().lower()
-            if ans == "q":
-                break
-            if ans == "s":
-                failures.append((head, "skipped by user"))
-                continue
+            if confirm:
+                ans = input("  filled — check the screen. [Enter]=Save  s=skip  q=quit: ").strip().lower()
+                if ans == "q":
+                    break
+                if ans == "s":
+                    failures.append((head, "skipped by user"))
+                    continue
             try:
+                before = _grid_total(pg)
                 pg.click(SEL["save"])
-                pg.wait_for_timeout(1500)
-                pg.click(SEL["new"])
+                pg.wait_for_timeout(2500)
+                after = _grid_total(pg)
+                if before is not None and after is not None and after <= before:
+                    raise RuntimeError(
+                        f"grid Total stayed at {after} — the save did not land")
                 pg.wait_for_timeout(500)
-                print("  saved.")
+                print(f"  saved (Total {before} -> {after}).")
             except Exception as e:
                 print(f"  save failed: {e}")
                 failures.append((head, str(e)))
