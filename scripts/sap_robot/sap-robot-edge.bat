@@ -11,4 +11,4 @@ powershell -NoProfile -Command "$gw=(Get-NetIPAddress -AddressFamily IPv4 -Inter
 
 start msedge.exe --remote-debugging-port=9222 --user-data-dir="%LOCALAPPDATA%\EdgeSAPRobot" --no-first-run "http://w2.samsung.net/portalapp/home" "http://gate3.cheil.com/gte/exp_2010_m.do"
 
-start "SAP Trip Robot" wsl.exe bash -lc "~/webapp/scripts/sap_robot/run-trip-robot.sh"
+start "SAP Trip Robot" cmd /k wsl.exe bash -lc "~/webapp/scripts/sap_robot/run-trip-robot.sh"
