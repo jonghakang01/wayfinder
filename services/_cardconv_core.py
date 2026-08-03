@@ -4327,6 +4327,66 @@ def _select_review_entries(username: str, query: dict) -> list:
     return entries
 
 
+def _effective_usage(e, rcpts: dict) -> str:
+    """A row's usage tag — the matched ledger receipt is the source of truth,
+    receipt-less rows keep it on the pool transaction (same rule the Review
+    page renders by)."""
+    rc = rcpts.get((e.get("receipt") or {}).get("id"))
+    if e.get("matched") and rc is not None:
+        return rc.get("usage") or "Regular"
+    return e.get("usage") or "Regular"
+
+
+def _handle_trip_export(username: str, query: dict):
+    """GET /cardconv/trip/export — JSON of trip-tagged rows for the SAP trip
+    submission robot (one submission per line; spec 2026-08-03).
+
+    Same selection semantics as the xlsx download (ids, or open + from/to);
+    keeps only rows whose usage tag names a trip. Lines carry every value the
+    bulk xlsx would have carried, so the robot maps them onto the SAP screen.
+    """
+    entries = _select_review_entries(username, query)
+    rcpts = {r.get("id"): r for r in _load_receipts(username)}
+    trips = {}
+    for e in entries:
+        tag = _effective_usage(e, rcpts)
+        if tag == "Regular":
+            continue
+        rc = rcpts.get((e.get("receipt") or {}).get("id"))
+        rb = (rc or {}).get("card_brand") or ""
+        companions = (e.get("receipt") or {}).get("companions") or e.get("companions")
+        purpose = e.get("purpose") or ""
+        if companions:
+            purpose = (purpose + " w/ " + companions).strip()
+        trips.setdefault(tag, []).append({
+            "date":         e.get("date"),
+            "merchant":     re.sub(r"\s+", " ", str(e.get("merchant") or "")).strip(),
+            "amount":       round(float(e.get("amount") or 0), 2),
+            "currency":     FIXED["currency"],
+            "gl":           e.get("gl"),
+            "ser":          str(e.get("ser") or "").strip(),
+            "purpose":      purpose,
+            "receipt_type": "A" if (e.get("cash") or rb == "other") else "D",
+            "cash_reason":  (e.get("cash_reason") or
+                             (rc or {}).get("cash_reason") or "") if e.get("cash") else "",
+            "cost_center":  FIXED["cost_center"],
+            "employee_id":  FIXED["employee_id"],
+            "tx_id":        e.get("id"),
+        })
+    if not trips:
+        return ("html", "<h2 style='padding:40px'>No trip-tagged rows in the "
+                        "selection — set a trip name in the usage tag first "
+                        "(anything other than Regular).</h2>", 404)
+    payload = {
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "user": username,
+        "trips": trips,
+    }
+    data = json.dumps(payload, ensure_ascii=False, indent=2).encode()
+    out_fn = f"trip_submit_{_export_tag(username)}_{date.today().isoformat()}.json"
+    return ("file_inline", data, "application/json", out_fn)
+
+
 def _handle_review_download(username: str, query: dict):
     """GET /cardconv/review/download — xlsx of open (or explicitly selected)
     transactions, built on demand from the pool."""
@@ -4347,6 +4407,14 @@ def _handle_review_download(username: str, query: dict):
         e["receipt_type"] = "A" if (e.get("cash") or rb == "other") else "D"
         if e.get("cash") and rc is not None:
             e["cash_reason"] = rc.get("cash_reason") or e.get("cash_reason")
+    # Trip-tagged rows (usage other than Regular) are submitted one by one in
+    # SAP's trip flow, not via this bulk upload — keeping them here would
+    # double-submit them (강프로 2026-08-03, spec trip-submission-automation).
+    entries = [e for e in entries if _effective_usage(e, rcpts) == "Regular"]
+    if not entries:
+        return ("html", "<h2 style='padding:40px'>Nothing to download — the "
+                        "selection holds only trip-tagged rows, which go "
+                        "through the trip submission flow instead.</h2>", 404)
     try:
         xlsx_bytes, out_fn = _build_xlsx_from_entries(entries, username)
     except FileNotFoundError as e:

@@ -1345,6 +1345,8 @@ def _render_review(user: str) -> str:
                      'title="Receipt report: expense table + labeled receipt images (replaces the PDF)">⬇ xlsx (Receipt)</button>'
                      '<button id="rvDownloadBoth" class="fb-menu-item" '
                      'title="Download the SAP xlsx and the receipt xlsx together">⬇ Both <small>SAP + Receipt</small></button>'
+                     '<button id="rvDownloadTrip" class="fb-menu-item" '
+                     'title="Trip-tagged rows only (usage other than Regular) — feeds the SAP trip submission robot. These rows are excluded from the SAP xlsx.">✈ json (Trip)</button>'
                      '</div></span>')
                     if total else '')
     if li:
@@ -1942,6 +1944,11 @@ if(rvDl){{
     wfProgress.downloadUrl('/cardconv/review/expense_report?' + rvDlParams().toString(),
       'Building your expense report \u2014 receipt images take about a second each\u2026');
     rvOfferInProgress();
+  }});
+  $('rvDownloadTrip').addEventListener('click', () => {{
+    rvCloseExport();
+    wfProgress.downloadUrl('/cardconv/trip/export?' + rvDlParams().toString(),
+      'Collecting trip-tagged rows…');
   }});
   // Both at once: hidden iframes so the two attachment downloads don't race.
   $('rvDownloadBoth').addEventListener('click', () => {{
