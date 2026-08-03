@@ -81,4 +81,8 @@ URL이 이미 출장(Biz Trip No)에 스코프됨 — 사용자가 해당 출장
 
 ## 리스크 / 미결 질문
 - R. SAP 화면 구조에 전적으로 의존 — 화면 개편 시 셀렉터 수선 필요(설정 분리로 완화).
-- ~~Q1~~ Phase A로 해소. Q2=건마다 확인 후 제출(승인). Q3=엑셀에서 제외(승인, Phase B 반영).
+- ~~Q1~~ Phase A로 해소. ~~Q2~~ 1회차 화면 검증 후 **전자동(Save 포함)으로 변경**(강프로
+  2026-08-03 "save까지 알아서") — 매 건 그리드 Total 증가로 저장 검증, `--confirm`으로
+  건별 확인 모드 복귀 가능. Q3=엑셀에서 제외(승인, Phase B 반영).
+- 추가(2026-08-03): Review 툴바 🤖 Robot 버튼(admin 전용) = `wayfinder-robot://` 프로토콜
+  → sap-robot-edge.bat(중계기 자동기동+포털 2탭). 1회 등록 = install-robot-protocol.bat.
