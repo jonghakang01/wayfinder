@@ -86,3 +86,9 @@ URL이 이미 출장(Biz Trip No)에 스코프됨 — 사용자가 해당 출장
   건별 확인 모드 복귀 가능. Q3=엑셀에서 제외(승인, Phase B 반영).
 - 추가(2026-08-03): Review 툴바 🤖 Robot 버튼(admin 전용) = `wayfinder-robot://` 프로토콜
   → sap-robot-edge.bat(중계기 자동기동+포털 2탭). 1회 등록 = install-robot-protocol.bat.
+- 추가(2026-08-03 밤, 원버튼화): 🤖 버튼이 **로봇 콘솔까지 기동** — bat이
+  run-trip-robot.sh(WSL 창)를 함께 띄우고, 로봇은 인자 없이 시작하면 ①Downloads의
+  최신 trip_submit_*.json 자동 선택(24h 초과 시 확인 질문) ②출장 1개면 자동/여럿이면
+  번호 선택 ③Other Expense 화면이 열릴 때까지 최대 15분 폴링 대기 후 자동 기입.
+  flock으로 이중 실행 방지. 수동 실행(파일·출장명 인자)도 그대로 동작.
+  → 남은 수동 = 태그 기입·✈ export 클릭·🤖 클릭·SAP 화면 진입뿐(터미널 단계 소멸).

@@ -2,16 +2,19 @@
 
 Drives the robot Edge (sap-robot-edge.bat + cdp_relay.py on the Windows side)
 into the "Business Trip Settlement Other Expense" screen and keys in one
-expense per line from a cardconv trip export. Every line pauses for a human
-look before Save (Q2) — this script never submits anything unseen.
+expense per line from a cardconv trip export.
 
-Usage:
-  1. Windows: run sap-robot-edge.bat (opens portals + starts the CDP relay)
-  2. Open the trip's "Other Expense" screen in the robot Edge
-  3. cardconv Review -> Export -> "json (Trip)" -> save the file
-  4. WSL:  LD_LIBRARY_PATH=$HOME/.local/chromium-libs \\
-           python3 scripts/sap_trip_robot.py <trip_submit_*.json> "<trip name>" \\
-           [--confirm] [--domestic]
+One-button flow (2026-08-03): the Review 🤖 button's bat launches this script
+in its own console with NO arguments — auto mode. It then picks the newest
+trip_submit_*.json from the Windows Downloads folder and waits (up to 15 min)
+for the "Other Expense" screen to appear in the robot Edge; the moment the
+user reaches that screen, filling starts on its own.
+
+Manual usage stays available:
+  WSL:  LD_LIBRARY_PATH=$HOME/.local/chromium-libs \\
+        python3 scripts/sap_trip_robot.py [trip_submit_*.json] ["<trip name>"] \\
+        [--confirm] [--domestic]
+  (no args = auto-pick export; no trip name = auto if single, prompt if many)
 
 Default is fully automatic — fill, Save, New, next line (강프로 2026-08-03,
 after the first line was verified on screen). --confirm restores the
@@ -23,6 +26,7 @@ import json
 import re as _re
 import subprocess
 import sys
+import time
 from datetime import date
 from pathlib import Path
 
@@ -45,6 +49,71 @@ SEL = {
     "new":          "button#btnNew",
 }
 RECEIPT_OPT = {"A": "Cash", "D": "Corporate Credit Card"}
+DOWNLOADS = Path("/mnt/c/Users/Jongha Kang/Downloads")
+SCREEN_WAIT_MIN = 15
+
+
+def _pick_export():
+    """Auto mode: the freshest trip_submit_*.json in the Windows Downloads
+    folder — the ✈ export the user clicked moments before 🤖. A stale file
+    means they probably forgot to export, so make them say yes to it."""
+    files = sorted(DOWNLOADS.glob("trip_submit_*.json"),
+                   key=lambda f: f.stat().st_mtime, reverse=True)
+    if not files:
+        print(f"no trip_submit_*.json in {DOWNLOADS}\n"
+              "click '✈ json (Trip)' on the Review page first, then rerun.")
+        sys.exit(1)
+    f = files[0]
+    age_h = (time.time() - f.stat().st_mtime) / 3600
+    print(f"export: {f.name} ({age_h:.1f}h old)")
+    if age_h > 24:
+        ans = input("  this export is over a day old — did you mean to make a "
+                    "fresh one? [Enter]=use it anyway  q=quit: ").strip().lower()
+        if ans == "q":
+            sys.exit(0)
+    return f
+
+
+def _pick_trip(trips):
+    names = list(trips)
+    if len(names) == 1:
+        return names[0]
+    print("the export holds several trips:")
+    for i, n in enumerate(names, 1):
+        print(f"  {i}. {n} ({len(trips[n])} line(s))")
+    while True:
+        ans = input("which one? number: ").strip()
+        if ans.isdigit() and 1 <= int(ans) <= len(names):
+            return names[int(ans) - 1]
+
+
+def _find_screen(p):
+    """Connect to the robot Edge and return the 'Other Expense' page, polling
+    until it exists. Reconnects every attempt: the relay may still be starting,
+    and a fresh connection is the reliable way to see newly opened tabs."""
+    url = f"http://{_gateway_ip()}:9223"
+    said = False
+    deadline = time.time() + SCREEN_WAIT_MIN * 60
+    while time.time() < deadline:
+        b = None
+        try:
+            b = p.chromium.connect_over_cdp(url)
+            pages = [pg for c in b.contexts for pg in c.pages
+                     if SCREEN_URL_PART in pg.url]
+            if pages:
+                return b, pages[0]
+            b.close()
+        except Exception:
+            if b:
+                b.close()
+        if not said:
+            print("waiting for you — in the robot Edge, open the trip's "
+                  "'Other Expense' entry screen. I'll start the moment it "
+                  f"appears (up to {SCREEN_WAIT_MIN} min).")
+            said = True
+        time.sleep(3)
+    print(f"gave up after {SCREEN_WAIT_MIN} min — the screen never appeared.")
+    sys.exit(1)
 
 
 def _gateway_ip():
@@ -123,25 +192,23 @@ def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     confirm = "--confirm" in sys.argv
     overseas = "--domestic" not in sys.argv
-    if len(args) < 2:
-        print(__doc__)
+    export_path = Path(args[0]) if args else _pick_export()
+    export = json.loads(export_path.read_text())
+    trips = export.get("trips", {})
+    if not trips:
+        print(f"{export_path.name} holds no trips — re-export from Review.")
         sys.exit(1)
-    export = json.loads(Path(args[0]).read_text())
-    trip = args[1]
-    lines = export.get("trips", {}).get(trip)
+    trip = args[1] if len(args) > 1 else _pick_trip(trips)
+    lines = trips.get(trip)
     if not lines:
-        print(f"trip '{trip}' not in export; available: {list(export.get('trips', {}))}")
+        print(f"trip '{trip}' not in export; available: {list(trips)}")
         sys.exit(1)
+    print(f"trip: '{trip}' — {len(lines)} line(s), "
+          f"mode: {'confirm each' if confirm else 'auto-save'}")
 
     failures = []
     with sync_playwright() as p:
-        b = p.chromium.connect_over_cdp(f"http://{_gateway_ip()}:9223")
-        pages = [pg for c in b.contexts for pg in c.pages if SCREEN_URL_PART in pg.url]
-        if not pages:
-            print("Expense screen not found — open the trip's 'Other Expense' "
-                  "screen in the robot Edge first.")
-            sys.exit(1)
-        pg = pages[0]
+        b, pg = _find_screen(p)
         pg.on("dialog", lambda d: (print(f"  [dialog] {d.message[:120]}"), d.accept()))
         print(f"Screen: {pg.title()} | {len(lines)} line(s) for '{trip}' "
               f"| mode: {'confirm each' if confirm else 'auto-save'}\n")
