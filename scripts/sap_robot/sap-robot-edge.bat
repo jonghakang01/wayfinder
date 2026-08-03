@@ -21,8 +21,8 @@ echo [%date% %time%] relay step done (err=%errorlevel%) >> "%BATLOG%"
 
 REM Knox Portal first — SSO must settle before GTE opens (강프로 2026-08-03),
 REM so the GTE tab follows after a pause instead of opening together.
-powershell -NoProfile -Command "Start-Process msedge.exe -ArgumentList '--remote-debugging-port=9222','--user-data-dir=%LOCALAPPDATA%\EdgeSAPRobot','--no-first-run','http://w2.samsung.net/portalapp/home'" >> "%BATLOG%" 2>&1
+powershell -NoProfile -Command "Start-Process msedge.exe -ArgumentList '--remote-debugging-port=9222','--user-data-dir=C:\Temp\EdgeSAPRobot','--no-first-run','http://w2.samsung.net/portalapp/home'" >> "%BATLOG%" 2>&1
 echo [%date% %time%] edge portal detached (err=%errorlevel%) >> "%BATLOG%"
 
-powershell -NoProfile -Command "Start-Sleep 8; Start-Process msedge.exe -ArgumentList '--user-data-dir=%LOCALAPPDATA%\EdgeSAPRobot','http://gate3.cheil.com/gte/exp_2010_m.do'" >> "%BATLOG%" 2>&1
+powershell -NoProfile -Command "Start-Sleep 8; Start-Process msedge.exe -ArgumentList '--user-data-dir=C:\Temp\EdgeSAPRobot','http://gate3.cheil.com/gte/exp_2010_m.do'" >> "%BATLOG%" 2>&1
 echo [%date% %time%] gte tab detached (err=%errorlevel%) >> "%BATLOG%"
