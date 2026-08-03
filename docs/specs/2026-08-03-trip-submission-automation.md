@@ -58,8 +58,27 @@
 - [ ] SAP 화면 요소를 못 찾으면 그 자리에서 멈추고 어떤 요소인지 알려준다
 - [ ] cardconv 기존 엑셀 내보내기/매칭 동작 불변 (pytest + smoke 통과)
 
+## Phase A 결과 — 필드 매핑 (2026-08-03 실화면 실측)
+화면 = `gate3.cheil.com/gte/exp_2010_p05.do` "Business Trip Settlement Other Expense".
+URL이 이미 출장(Biz Trip No)에 스코프됨 — 사용자가 해당 출장 화면을 연 상태에서 로봇 시작.
+한 건 입력 → Save → 그리드에 쌓임(Total N) → New → 다음 건.
+
+| 화면 항목 | 요소 id | cardconv 값 |
+|---|---|---|
+| Receipt Type* | `rctScCd` | receipt_type: A→Cash, D→Corporate Credit Card |
+| Inv. Date* | `docDt` | date (MM-DD-YYYY로 변환) |
+| Purpose* | `exCntnt` | purpose (+companions) |
+| Reason for Cash | `cashRsn` | cash_reason (cash 건만) |
+| Account/Item* | `acttCd` (+`rctActtList` 최근목록) | gl |
+| Amount* | `totDocAmt` | amount |
+| Vendor Name* | `hbrdCdu`(Domestic/Overseas) + `upNm` | merchant (해외출장이면 Overseas) |
+| Currency*/환율 | `crncyCd`/`aplcExrt` | USD/1.0 (기본값 그대로) |
+| Payee·Posting Date·Tax Code·Cost Center·Biz Trip No | prefilled | 건드리지 않음 |
+| 저장 | `btnSave` → `btnNew` | 건마다 확인 후 |
+
+리허설에서 확정할 것: docDt 달력 위젯 입력 방식, acttCd 직접 입력 시 이름 자동조회
+여부, Save 시 confirm/alert 처리.
+
 ## 리스크 / 미결 질문
 - R. SAP 화면 구조에 전적으로 의존 — 화면 개편 시 셀렉터 수선 필요(설정 분리로 완화).
-- Q1. 상신 화면 진입 경로(메뉴/URL)와 한 건당 입력 항목 — **Phase A에서 실화면으로 확정**.
-- Q2. 최종 제출까지 자동으로 갈지, 건마다 사람 확인 후 제출할지 — 기본은 확인 후 제출 제안.
-- Q3. 출장명이 기입된 건은 기존 SAP 엑셀(비출장 일괄용)에서 빼야 하는지.
+- ~~Q1~~ Phase A로 해소. Q2=건마다 확인 후 제출(승인). Q3=엑셀에서 제외(승인, Phase B 반영).
