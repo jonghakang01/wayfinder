@@ -22,7 +22,7 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-SCREEN_URL_PART = "exp_2010"
+SCREEN_URL_PART = "exp_2010_p05"   # the create screen only — exp_2010_m.do is the Maintain list
 # Tag-qualified on purpose: the page pairs a visible control with a hidden
 # input of the SAME id, and a bare #id resolves to the hidden one first.
 SEL = {
