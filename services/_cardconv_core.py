@@ -1908,7 +1908,10 @@ _OCR_PROMPT = (
     'the receipt makes the order unambiguous (a 4-digit year, or a written month '
     'name such as "Feb"). '
     '1b) time: the transaction time printed on the receipt as "HH:MM" in 24-hour '
-    'format (convert AM/PM, e.g. "1:45 PM" -> "13:45"); null if no time is printed, '
+    'format (convert AM/PM, e.g. "1:45 PM" -> "13:45"); include seconds as '
+    '"HH:MM:SS" whenever the receipt prints them (e.g. "13:45:22" — seconds '
+    'distinguish two purchases in the same minute from two copies of one '
+    'receipt); null if no time is printed, '
     '2) merchant name, '
     '3) printed_amount: the PRINTED/typed total (number only), '
     '4) handwritten_amount: any HAND-WRITTEN final amount including tip (number only, '
@@ -1930,9 +1933,13 @@ _OCR_PROMPT = (
     'currency symbols, wording and locale: "$"/"USD" -> "USD"; "₩"/"원"/"KRW"/Korean '
     'receipt text -> "KRW"; "₹"/"Rs"/"INR"/Indian receipt (GST, rupees) -> "INR"; '
     '"HK$"/"HKD"/Hong Kong receipt (Chinese text, HK addresses) -> "HKD"; '
+    '"R$"/Brazilian receipt (Portuguese text, CNPJ/CPF, Brazilian addresses) -> '
+    '"BRL"; Argentine receipt (Spanish text, CUIT, IVA, "AR$", Argentine '
+    'addresses) -> "ARS"; '
     'other clear signals -> that ISO code (e.g. "EUR", "JPY"). Use "USD" only when '
     'the receipt is clearly US-based or shows "$" with English/US formatting; a bare '
-    '"$" on a Hong Kong receipt means HKD, not USD. '
+    '"$" on a Hong Kong receipt means HKD, on a Brazilian receipt BRL, and on an '
+    'Argentine receipt ARS — not USD. '
     '7) handwriting_notes: the full transcription from STEP 1 — every annotation '
     '(handwritten or typed overlay) on this receipt as one string '
     '(e.g. "W/ SEA, D2C  ✓20%"), null if none. '
@@ -2007,21 +2014,28 @@ def _coerce_companions(v):
 
 
 def _coerce_time(v):
-    """Normalize an OCR time to 'HH:MM' 24h, or None. Accepts HH:MM(:SS) and AM/PM."""
+    """Normalize an OCR time to 'HH:MM[:SS]' 24h, or None. Accepts AM/PM.
+
+    Seconds are kept when printed — duplicate detection compares timestamps
+    exactly, and the seconds digit is what tells two same-minute purchases
+    apart from two copies of one receipt."""
     if not isinstance(v, str):
         return None
-    m = re.match(r"\s*(\d{1,2}):(\d{2})(?::\d{2})?\s*([AaPp][Mm])?\s*$", v)
+    m = re.match(r"\s*(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([AaPp][Mm])?\s*$", v)
     if not m:
         return None
     h, mnt = int(m.group(1)), int(m.group(2))
-    ap = (m.group(3) or "").lower()
+    sec = int(m.group(3)) if m.group(3) is not None else None
+    ap = (m.group(4) or "").lower()
     if ap == "pm" and h < 12:
         h += 12
     if ap == "am" and h == 12:
         h = 0
     if not (0 <= h <= 23 and 0 <= mnt <= 59):
         return None
-    return f"{h:02d}:{mnt:02d}"
+    if sec is not None and not (0 <= sec <= 59):
+        sec = None
+    return f"{h:02d}:{mnt:02d}" + (f":{sec:02d}" if sec is not None else "")
 
 
 def _coerce_currency(v):
@@ -2032,7 +2046,8 @@ def _coerce_currency(v):
     if s in ("NULL", "NONE", "UNKNOWN", ""):
         return None
     aliases = {"₩": "KRW", "원": "KRW", "WON": "KRW", "₹": "INR", "RS": "INR",
-               "RUPEE": "INR", "RUPEES": "INR", "$": "USD", "US$": "USD", "HK$": "HKD"}
+               "RUPEE": "INR", "RUPEES": "INR", "$": "USD", "US$": "USD", "HK$": "HKD",
+               "R$": "BRL", "REAL": "BRL", "REAIS": "BRL", "AR$": "ARS"}
     s = aliases.get(s, s)
     return s if (len(s) == 3 and s.isalpha()) else None
 
@@ -2043,7 +2058,8 @@ def _coerce_currency(v):
 
 FX_TOLERANCE = 0.05          # ±5% band around the ECB reference conversion
 _FX_CACHE_FILE = DATA_DIR / "fx_cache.json"
-_FX_FALLBACK = {"KRW": 1510.0, "INR": 94.0, "HKD": 7.8, "EUR": 0.86, "JPY": 146.0}  # offline approx (2026-07; HKD is USD-pegged)
+_FX_FALLBACK = {"KRW": 1510.0, "INR": 94.0, "HKD": 7.8, "EUR": 0.86, "JPY": 146.0,
+                "BRL": 5.1, "ARS": 1490.0}  # offline approx (2026-08; HKD is USD-pegged)
 
 
 def _fx_rate(currency: str, date_str: str = None):
@@ -2051,7 +2067,10 @@ def _fx_rate(currency: str, date_str: str = None):
 
     ECB reference rates via frankfurter.app (free, no key), cached on disk.
     Weekends/holidays resolve to the previous business day server-side.
-    Returns None for unknown currencies with no fallback.
+    Currencies outside the ECB list (ARS — Argentina) fall through to
+    open.er-api.com, which only serves the current rate, so dated lookups
+    resolve to today's rate there. Returns None for unknown currencies with
+    no fallback.
     """
     if not currency or currency == "USD":
         return 1.0
@@ -2063,17 +2082,27 @@ def _fx_rate(currency: str, date_str: str = None):
             return cache[key]
     except Exception:
         cache = {}
-    try:
-        import urllib.request
-        url = f"https://api.frankfurter.dev/v1/{date_str or 'latest'}?base=USD&symbols={currency}"
-        # NB: frankfurter.dev returns 403 for the default Python-urllib UA.
-        req = urllib.request.Request(url, headers={"User-Agent": "wayfinder-cardconv/1.0"})
-        with urllib.request.urlopen(req, timeout=6) as resp:
-            rate = json.load(resp)["rates"][currency]
+
+    def _remember(rate):
         cache[key] = rate
         _ensure_dirs()
         _FX_CACHE_FILE.write_text(json.dumps(cache))
         return rate
+
+    import urllib.request
+    try:
+        url = f"https://api.frankfurter.dev/v1/{date_str or 'latest'}?base=USD&symbols={currency}"
+        # NB: frankfurter.dev returns 403 for the default Python-urllib UA.
+        req = urllib.request.Request(url, headers={"User-Agent": "wayfinder-cardconv/1.0"})
+        with urllib.request.urlopen(req, timeout=6) as resp:
+            return _remember(json.load(resp)["rates"][currency])
+    except Exception:
+        pass
+    try:
+        req = urllib.request.Request("https://open.er-api.com/v6/latest/USD",
+                                     headers={"User-Agent": "wayfinder-cardconv/1.0"})
+        with urllib.request.urlopen(req, timeout=6) as resp:
+            return _remember(json.load(resp)["rates"][currency])
     except Exception:
         return _FX_FALLBACK.get(currency)
 
@@ -2554,20 +2583,25 @@ def _apply_ledger_filters(entries: list, status: str, dfrom: str, dto: str,
     )
 
 
-def _times_close(a, b, tol_min: int = 5) -> bool:
-    """True when either printed time is unknown or they differ ≤ tol_min minutes.
+def _times_close(a, b) -> bool:
+    """True when either printed time is unknown, or both name the same moment
+    at the finest precision they share.
 
-    Copies of the same receipt print the same transaction time; two separate
-    same-amount purchases at one merchant rarely do. A small tolerance absorbs
-    OCR misreads of a digit."""
+    Copies of the same receipt print an identical transaction timestamp; two
+    separate same-amount purchases at one merchant print different ones — even
+    seconds apart (강프로 2026-08-03: exact comparison, no tolerance). A side
+    without seconds is compared at minute precision."""
     if not a or not b:
         return True
-    try:
-        ah, am = map(int, a.split(":"))
-        bh, bm = map(int, b.split(":"))
-    except ValueError:
+    pa = re.match(r"(\d{1,2}):(\d{2})(?::(\d{2}))?$", a.strip())
+    pb = re.match(r"(\d{1,2}):(\d{2})(?::(\d{2}))?$", b.strip())
+    if not pa or not pb:
         return True
-    return abs((ah * 60 + am) - (bh * 60 + bm)) <= tol_min
+    if (int(pa.group(1)), int(pa.group(2))) != (int(pb.group(1)), int(pb.group(2))):
+        return False
+    if pa.group(3) is None or pb.group(3) is None:
+        return True
+    return int(pa.group(3)) == int(pb.group(3))
 
 
 def _mark_duplicates(entries: list):

@@ -52,3 +52,40 @@ def test_band_matching_logic():
     assert abs(33.10 - usd_est) <= usd_est * core.FX_TOLERANCE
     # but not a wildly different amount
     assert abs(45.00 - usd_est) > usd_est * core.FX_TOLERANCE
+
+
+def test_coerce_currency_latam():
+    f = core._coerce_currency
+    assert f("R$") == "BRL"
+    assert f("BRL") == "BRL"
+    assert f("AR$") == "ARS"
+    assert f("ARS") == "ARS"
+
+
+def test_fx_rate_secondary_source_serves_ars(monkeypatch, tmp_path):
+    # frankfurter (ECB) has no ARS -> the er-api fallback answers.
+    import io
+    import urllib.request
+
+    def fake_urlopen(req, timeout=None):
+        url = req.full_url if hasattr(req, "full_url") else req
+        if "frankfurter" in url:
+            raise OSError("ECB list has no ARS")
+        return io.BytesIO(b'{"rates": {"ARS": 1488.45}}')
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(core, "_FX_CACHE_FILE", tmp_path / "fx.json")
+    monkeypatch.setattr(core, "_ensure_dirs", lambda: None)
+    assert core._fx_rate("ARS") == 1488.45
+
+
+def test_fx_fallback_covers_latam(monkeypatch, tmp_path):
+    import urllib.request
+
+    def boom(*a, **k):
+        raise OSError("offline")
+
+    monkeypatch.setattr(urllib.request, "urlopen", boom)
+    monkeypatch.setattr(core, "_FX_CACHE_FILE", tmp_path / "fx.json")
+    assert core._fx_rate("ARS") == core._FX_FALLBACK["ARS"]
+    assert core._fx_rate("BRL") == core._FX_FALLBACK["BRL"]
