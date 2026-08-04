@@ -529,6 +529,27 @@ def render(todos, habits, user, readonly=False, group_by="date"):
                 f'<span class="tk-section-n">{len(items)}</span></div>'
                 f'{"".join(_row(t) for t in items)}</div>')
 
+    def _project_add(pj):
+        """Add straight into a project, from the project's own section.
+
+        Grouped by project, the field at the top of the page is the wrong door:
+        it drops the task in "No project" and you have to reopen it to say where
+        it belongs. This one already knows."""
+        if readonly:
+            return ""
+        label = f"＋ Add task to {pj}" if pj else "＋ Add task with no project"
+        hint = f"Add to {pj}…" if pj else "Add a task…"
+        return (
+            f'<button type="button" class="tk-padd-link" onclick="tkPAdd(this)">'
+            f'{label}</button>'
+            f'<form class="tk-padd" method="POST" action="/todo/add" autocomplete="off" hidden>'
+            f'<input type="hidden" name="next" value="{back}">'
+            f'<input type="hidden" name="project" value="{_attr(pj)}">'
+            f'<input class="tk-padd-input" type="text" name="title" required '
+            f'placeholder="{_attr(hint)}" aria-label="{_attr(label)}">'
+            f'<button class="btn btn-primary" type="submit">Add</button>'
+            f'</form>')
+
     if by_project:
         # The list's spine becomes the project. Dates do not disappear — they
         # stay on each row as the due chip, which is where a date belongs once
@@ -545,7 +566,8 @@ def render(todos, habits, user, readonly=False, group_by="date"):
             f'<div class="tk-section" data-project="{_attr(pj)}">'
             f'<div class="tk-section-head tk-section-head--project"><span>{pj}</span>'
             f'<span class="tk-section-n">{len(by_pj[pj])}</span></div>'
-            f'{"".join(_row(t) for t in sorted(by_pj[pj], key=_order))}</div>'
+            f'{"".join(_row(t) for t in sorted(by_pj[pj], key=_order))}'
+            f'{_project_add(pj)}</div>'
             for pj in named)
         loose = sorted(by_pj.get("", []), key=_order)
         if loose or habit_open:
@@ -555,7 +577,8 @@ def render(todos, habits, user, readonly=False, group_by="date"):
                 f'<span>No project</span>'
                 f'<span class="tk-section-n">{len(loose) + len(habit_open)}</span></div>'
                 f'{"".join(_habit_row(h) for h in habit_open)}'
-                f'{"".join(_row(t) for t in loose)}</div>')
+                f'{"".join(_row(t) for t in loose)}'
+                f'{_project_add("")}</div>')
     else:
         now_html = ("".join(_habit_row(h) for h in habit_open)
                     + "".join(_row(t) for t in buckets["now"]))
@@ -813,6 +836,20 @@ def render(todos, habits, user, readonly=False, group_by="date"):
   box-shadow:0 0 0 4px var(--accent-glow)}}
 .tk-quick .btn{{height:auto;min-height:56px;padding:0 24px;font-size:1rem;
   border-radius:var(--radius-lg)}}
+.tk-padd-link{{display:block;width:100%;min-height:44px;padding:10px 14px;text-align:left;
+  background:none;border:0;cursor:pointer;font-size:var(--text-sm);color:var(--text-muted)}}
+/* display:block on a class outranks the browser's own [hidden] rule, so the
+   link would stay on screen next to the field it just opened. */
+.tk-padd-link[hidden]{{display:none}}
+.tk-padd-link:hover{{color:var(--accent)}}
+.tk-padd{{display:flex;gap:8px;padding:8px 14px 12px}}
+.tk-padd[hidden]{{display:none}}
+.tk-padd-input{{flex:1;min-width:0;min-height:44px;padding:0 14px;font-size:1rem;
+  background:var(--surface-2);border:1px solid var(--border-bright);
+  border-radius:var(--radius-md);color:var(--text)}}
+.tk-padd-input::placeholder{{color:var(--text-muted)}}
+.tk-padd-input:focus{{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-glow)}}
+.tk-padd .btn{{height:auto;min-height:44px}}
 .tk-summary{{font-size:var(--text-sm);color:var(--text-muted);margin:0 2px 14px}}
 .tk-filter{{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px}}
 .tk-filter .wf-input{{width:auto;flex:1;min-width:140px;min-height:44px}}
@@ -972,6 +1009,7 @@ a.tk-row{{text-decoration:none;color:inherit}}
   .tk-sheet-grid:not(.tk-sheet-grid--tight){{grid-template-columns:1fr}}
   /* 17px keeps the field above the 16px floor that stops iOS zooming on focus */
   .tk-quick-input{{font-size:17px}}
+  .tk-padd-input{{font-size:16px}}
   .tk-row{{padding:14px}}
   .tk-group{{display:flex;width:100%}}
   .tk-gtab{{flex:1;justify-content:center;min-height:44px;padding:10px 14px}}
@@ -1205,6 +1243,16 @@ function tkShowPlace(pid) {{
     if (hit && !first) first = r;
   }});
   if (first) first.scrollIntoView({{block: 'center', behavior: 'smooth'}});
+}}
+function tkPAdd(link) {{
+  // The link hands its place to the field it opens — two "add" affordances
+  // stacked in one section would be one too many.
+  var form = link.nextElementSibling;
+  if (!form) return;
+  link.hidden = true;
+  form.hidden = false;
+  var input = form.querySelector('input[name=title]');
+  if (input) input.focus();
 }}
 function tkFilter() {{
   // The project select is absent while the list is grouped by project.
