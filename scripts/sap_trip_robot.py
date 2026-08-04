@@ -90,14 +90,19 @@ def _pick_trip(trips):
 def _find_screen(p):
     """Connect to the robot Edge and return the 'Other Expense' page, polling
     until it exists. Reconnects every attempt: the relay may still be starting,
-    and a fresh connection is the reliable way to see newly opened tabs."""
+    and a fresh connection is the reliable way to see newly opened tabs.
+
+    Two very different situations used to print the same "waiting for you":
+    the browser not being there at all, and the browser being there on the
+    wrong page. The first one needs the user to do something else entirely."""
     url = f"http://{_gateway_ip()}:9223"
-    said = False
+    said = None
     deadline = time.time() + SCREEN_WAIT_MIN * 60
     while time.time() < deadline:
-        b = None
+        b, reachable = None, False
         try:
             b = p.chromium.connect_over_cdp(url)
+            reachable = True
             pages = [pg for c in b.contexts for pg in c.pages
                      if SCREEN_URL_PART in pg.url]
             if pages:
@@ -106,13 +111,21 @@ def _find_screen(p):
         except Exception:
             if b:
                 b.close()
-        if not said:
-            print("waiting for you — in the robot Edge, open the trip's "
-                  "'Other Expense' entry screen. I'll start the moment it "
-                  f"appears (up to {SCREEN_WAIT_MIN} min).")
-            said = True
+        state = "screen" if reachable else "browser"
+        if said != state:
+            if reachable:
+                print("robot Edge found — now open the trip's 'Other Expense' "
+                      "entry screen. I'll start the moment it appears "
+                      f"(up to {SCREEN_WAIT_MIN} min).")
+            else:
+                print("the robot Edge is not open. Double-click "
+                      '"Open Robot Edge" on your Desktop, sign in, then open '
+                      "the trip's 'Other Expense' screen — I'll pick it up "
+                      f"from here (waiting up to {SCREEN_WAIT_MIN} min).")
+            said = state
         time.sleep(3)
-    print(f"gave up after {SCREEN_WAIT_MIN} min — the screen never appeared.")
+    print(f"gave up after {SCREEN_WAIT_MIN} min — "
+          f"{'the screen' if said == 'screen' else 'the robot Edge'} never appeared.")
     sys.exit(1)
 
 

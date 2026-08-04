@@ -132,7 +132,10 @@ def handle(method, path, body, ctx=None):
                     sent += 1
                 except Exception:
                     failed += 1
-            return ("html", render_admin(user, notify_result=f"✅ {sent}명 발송 완료" + (f", ❌ {failed}명 실패" if failed else "")))
+            return ("html", render_admin(
+                user,
+                notify_result=f"✅ Sent to {sent}"
+                              + (f", ❌ {failed} failed" if failed else "")))
         return ("redirect", "/admin")
 
     # /admin/view/{username}/todo|habit
