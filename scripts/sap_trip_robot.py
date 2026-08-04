@@ -258,9 +258,17 @@ def main():
                 print(f"  save failed: {e}")
                 failures.append((head, str(e)))
 
-    print(f"\ndone. {len(lines) - len(failures)}/{len(lines)} saved.")
+    saved = len(lines) - len(failures)
+    print(f"\ndone. {saved}/{len(lines)} saved.")
     for head, why in failures:
         print(f"  ✗ {head} — {why}")
+    if failures:
+        # Exiting 0 with nothing saved looked exactly like a clean run — on
+        # 2026-08-04 GTE refused every Save and the robot still reported
+        # success. The exit code has to carry the bad news too.
+        print("\nnothing was saved." if not saved else
+              f"\n{len(failures)} line(s) still need doing.")
+        sys.exit(2)
 
 
 if __name__ == "__main__":
