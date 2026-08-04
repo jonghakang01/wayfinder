@@ -10,11 +10,8 @@
     "english-ui": 18,
     "mobile-bp": 1
   },
-  "services/admin.py": {
-    "english-ui": 19,
-    "mobile-bp": 1,
-    "token-color": 44
-  },
+  "services/_usage.py": {},
+  "services/admin.py": {},
   "services/aeo.py": {
     "mobile-bp": 1,
     "token-color": 106

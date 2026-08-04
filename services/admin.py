@@ -1,12 +1,14 @@
 from services import auth, email as email_svc
 
 META = {
-    "name": "관리자",
+    "name": "Admin",
     "path": "/admin",
     "icon": "⚙️",
-    "description": "사용자 권한 관리",
+    "description": "Users and usage",
     "admin_only": True,
 }
+
+TABS = (("users", "👤 Users"), ("usage", "📊 Usage"))
 
 
 def handle(method, path, body, ctx=None):
@@ -15,8 +17,13 @@ def handle(method, path, body, ctx=None):
         return ("html", _forbidden())
 
     if method == "GET" and path == "/admin/usage":
-        from services import _usage
-        return ("html", _usage.render_page(user, body))
+        # The Usage page became a tab; bookmarks and old links keep working.
+        app = (body or {}).get("app", [""])[0]
+        return ("redirect", "/admin?tab=usage" + (f"&app={app}" if app else ""))
+
+    if method == "GET" and path == "/admin":
+        tab = (body or {}).get("tab", ["users"])[0]
+        return ("html", render_admin(user, tab=tab, query=body))
 
     if method == "POST" and path == "/admin/set_role":
         target = body.get("username", [""])[0].strip()
@@ -140,12 +147,13 @@ def _render_view(target_user, service_name, admin_user):
     from services import todo as tsvc, habits as hsvc
 
     banner = (
-        f'<div style="position:sticky;top:0;background:#f59e0b;color:#1c1917;'
-        f'padding:9px 20px;font-size:13px;font-weight:600;z-index:9999;'
-        f'display:flex;align-items:center;justify-content:space-between;'
-        f'border-bottom:2px solid #d97706">'
-        f'<span>👁️ 관리자 열람: <strong>{target_user}</strong>님의 데이터 (읽기 전용)</span>'
-        f'<a href="/admin" style="color:#1c1917;text-decoration:none;font-weight:700">← 관리자 페이지</a>'
+        f'<div style="position:sticky;top:0;background:var(--amber-500);'
+        f'color:var(--bg-deep);padding:9px 20px;font-size:.82rem;font-weight:700;'
+        f'z-index:9999;display:flex;align-items:center;'
+        f'justify-content:space-between;gap:12px">'
+        f'<span>👁️ Admin view: <strong>{target_user}</strong> (read-only)</span>'
+        f'<a href="/admin" style="color:var(--bg-deep);text-decoration:none;'
+        f'font-weight:800">← Admin</a>'
         f'</div>'
     )
 
@@ -192,7 +200,8 @@ def _drive_token_exists(username):
     return os.path.exists(os.path.join(DATA_ROOT, "cardconv", "tokens", f"{username}.json"))
 
 
-def render_admin(current_user, notify_result="", reset_result=None):
+def render_admin(current_user, notify_result="", reset_result=None,
+                 tab="users", query=None):
     users = auth.load_users()
     settings = auth.load_settings()
     available_svcs = settings.get("available_services", [])
@@ -210,39 +219,40 @@ def render_admin(current_user, notify_result="", reset_result=None):
         is_self  = username == current_user
         is_adm   = role == "admin"
 
-        # 소속 · 부서 · Drive 연동 Google 계정 (강프로 2026-07-24). Drive 계정은
-        # 토큰에 이메일이 없어 수기 기입 — 토큰 보유 유저는 로그인 이메일로 프리필.
+        # Office · department · the Google account linked to Drive (2026-07-24).
+        # The Drive token carries no email, so it is typed in — accounts that do
+        # hold a token get their login email offered as a guess.
         drive = info.get("drive_account", "")
         drive_guess = ""
         if not drive and _drive_token_exists(username):
             drive_guess = email_raw if "@" in email_raw else (username if "@" in username else "")
         cur_office = info.get("company", "")
-        office_opts = '<option value="">— 소속 —</option>' + "".join(
+        office_opts = '<option value="">— Office —</option>' + "".join(
             f'<option value="{o}"{" selected" if o == cur_office else ""}>{o}</option>'
             for o in auth.OFFICES)
         profile_col = f'''<form method="POST" action="/admin/set_profile" class="prof-form">
           <input type="hidden" name="username" value="{username}">
           <select name="company">{office_opts}</select>
-          <input name="department" value="{info.get("department", "")}" placeholder="부서">
-          <input name="drive_account" value="{drive or drive_guess}" placeholder="Drive 연동 Google 계정"
-            {'style="color:#94a3b8" title="추정값(미저장) — 저장을 눌러 확정"' if (not drive and drive_guess) else 'title="Google Drive를 연동한 Google 계정"'}>
-          <button type="submit" class="svc-save-btn">저장</button>
+          <input name="department" value="{info.get("department", "")}" placeholder="Department">
+          <input name="drive_account" value="{drive or drive_guess}" placeholder="Drive Google account"
+            {'class="is-guess" title="Guess, not saved — press Save to confirm"' if (not drive and drive_guess) else 'title="The Google account linked to Google Drive"'}>
+          <button type="submit" class="svc-save-btn">Save</button>
         </form>'''
 
-        name_style = "color:#ef4444;text-decoration:line-through" if blocked else ""
-        blocked_tag = ' <span class="badge" style="background:#fee2e2;color:#b91c1c;font-size:11px">🚫 Blocked</span>' if blocked else ""
+        name_cls = " is-blocked" if blocked else ""
+        blocked_tag = ' <span class="badge blk-badge">🚫 Blocked</span>' if blocked else ""
         badge = (
             '<span class="badge adm-badge">🔑 Admin</span>' if is_adm
             else '<span class="badge usr-badge">👥 User</span>'
         )
 
         if is_self:
-            control   = '<span class="self-tag">본인</span>'
-            svc_col   = '<span class="svc-all-badge">전체 접근</span>'
+            control   = '<span class="self-tag">You</span>'
+            svc_col   = '<span class="svc-all-badge">Full access</span>'
             action_col = ""
         elif is_adm:
             adm_active  = "seg-active adm-active"
-            confirm_adm = f"return confirm('{username}님의 Admin 권한을 제거할까요?')"
+            confirm_adm = f"return confirm('Remove admin rights from {username}?')"
             control = f'''<div class="seg-wrap">
               <form method="POST" action="/admin/set_role" style="display:contents">
                 <input type="hidden" name="username" value="{username}">
@@ -255,11 +265,11 @@ def render_admin(current_user, notify_result="", reset_result=None):
                 <button class="seg-btn" type="submit" onclick="{confirm_adm}">User</button>
               </form>
             </div>'''
-            svc_col   = '<span class="svc-all-badge">전체 접근</span>'
-            action_col = ""  # Admin 계정은 Block/Delete 없음
+            svc_col   = '<span class="svc-all-badge">Full access</span>'
+            action_col = ""  # admin accounts get no Block/Delete
         else:
             usr_active  = "seg-active"
-            confirm_usr = f"return confirm('{username}님에게 Admin 권한을 부여할까요?')"
+            confirm_usr = f"return confirm('Give {username} admin rights?')"
             control = f'''<div class="seg-wrap">
               <form method="POST" action="/admin/set_role" style="display:contents">
                 <input type="hidden" name="username" value="{username}">
@@ -284,7 +294,7 @@ def render_admin(current_user, notify_result="", reset_result=None):
               <input type="hidden" name="username" value="{username}">
               <input type="hidden" name="scope" value="{",".join(_VISIBLE_SERVICES)}">
               {checks}
-              <button type="submit" class="svc-save-btn">저장</button>
+              <button type="submit" class="svc-save-btn">Save</button>
             </form>'''
             # Block / Unblock / Delete
             if blocked:
@@ -295,15 +305,15 @@ def render_admin(current_user, notify_result="", reset_result=None):
             else:
                 block_btn = f'''<form method="POST" action="/admin/block_user" style="display:inline">
                   <input type="hidden" name="username" value="{username}">
-                  <button type="submit" class="action-btn block-btn" onclick="return confirm('{username}님을 차단할까요?')">🚫 Block</button>
+                  <button type="submit" class="action-btn block-btn" onclick="return confirm('Block {username}?')">🚫 Block</button>
                 </form>'''
             delete_btn = f'''<form method="POST" action="/admin/delete_user" style="display:inline">
               <input type="hidden" name="username" value="{username}">
-              <button type="submit" class="action-btn delete-btn" onclick="return confirm('{username}님을 완전히 삭제할까요? 되돌릴 수 없습니다.')">🗑 Delete</button>
+              <button type="submit" class="action-btn delete-btn" onclick="return confirm('Delete {username} for good? This cannot be undone.')">🗑 Delete</button>
             </form>'''
             reset_btn = f'''<form method="POST" action="/admin/reset_pw" style="display:inline">
               <input type="hidden" name="username" value="{username}">
-              <button type="submit" class="action-btn resetpw-btn" onclick="return confirm('{username}님에게 임시 비밀번호를 발급할까요? 기존 비밀번호는 무효화됩니다.')">🔑 PW 재설정</button>
+              <button type="submit" class="action-btn resetpw-btn" onclick="return confirm('Issue a temporary password for {username}? The current one stops working.')">🔑 Reset PW</button>
             </form>'''
             action_col = f'<div class="action-stack">{reset_btn}{block_btn}{delete_btn}</div>'
 
@@ -311,29 +321,29 @@ def render_admin(current_user, notify_result="", reset_result=None):
         <tr class="{"row-self" if is_self else "row-blocked" if blocked else ""}">
           <td class="col-name">
             <span class="u-icon">{"🔑" if is_adm else "🚫" if blocked else "👤"}</span>
-            <span class="u-name" style="{name_style}">{username}</span>{blocked_tag}
+            <span class="u-name{name_cls}">{username}</span>{blocked_tag}
           </td>
           <td>{badge}</td>
           <td class="col-email">{email}</td>
-          <td>{profile_col}</td>
-          <td>{svc_col}</td>
+          <td class="col-profile">{profile_col}</td>
+          <td class="col-svc">{svc_col}</td>
           <td>{control}</td>
           <td class="col-action">{action_col}</td>
         </tr>'''
 
-    # 전역 서비스 토글
+    # Global service toggles
     global_toggles = ""
     for svc in sorted(auth.CONTROLLED_SERVICES):
         is_on = svc in available_svcs
         btn_cls = "gtoggle-on" if is_on else "gtoggle-off"
-        btn_txt = f'{"✅" if is_on else "⬜"} {svc_labels.get(svc, svc)} ({"활성" if is_on else "비활성"})'
+        btn_txt = f'{"✅" if is_on else "⬜"} {svc_labels.get(svc, svc)} ({"on" if is_on else "off"})'
         global_toggles += f'''
         <form method="POST" action="/admin/toggle_service" style="display:inline">
           <input type="hidden" name="service" value="{svc}">
           <button type="submit" class="gtoggle-btn {btn_cls}">{btn_txt}</button>
         </form>'''
 
-    # 테스터 대기열 (Google OAuth 테스트 사용자 등록 대기)
+    # Google OAuth test-user queue
     tester_reqs = auth.load_tester_requests()
     if tester_reqs:
         tester_rows = ""
@@ -349,22 +359,22 @@ def render_admin(current_user, notify_result="", reset_result=None):
               <td>
                 <form method="POST" action="/admin/tester/done" style="display:inline">
                   <input type="hidden" name="email" value="{email}">
-                  <button type="submit" class="action-btn unblock-btn">✅ 등록완료</button>
+                  <button type="submit" class="action-btn unblock-btn">✅ Done</button>
                 </form>
               </td>
             </tr>'''
         all_emails = ", ".join(r.get("email", "") for r in tester_reqs)
         tester_section = f'''
   <div class="section-card">
-    <h2>🧪 테스터 대기열 <span style="font-size:13px;color:#64748b;font-weight:500">({len(tester_reqs)}명)</span></h2>
-    <p class="sec-desc">Google은 테스트 사용자 추가 API가 없습니다. 아래 이메일을
-      <a href="https://console.cloud.google.com/auth/audience" target="_blank" style="color:#3b82f6">OAuth 동의 화면 → Test users</a>
-      에 붙여넣고 등록한 뒤 "등록완료"를 누르세요.</p>
-    <button type="button" class="notify-send-btn" style="margin-bottom:14px"
-      onclick="navigator.clipboard.writeText('{all_emails}').then(()=>{{this.textContent='✅ 복사됨';setTimeout(()=>this.textContent='📋 전체 이메일 복사',1500)}})">📋 전체 이메일 복사</button>
-    <div class="tbl-wrap" style="margin-bottom:0">
+    <h2>🧪 Tester queue <span class="sec-count">({len(tester_reqs)})</span></h2>
+    <p class="sec-desc">Google has no API for adding test users. Paste these emails into
+      <a href="https://console.cloud.google.com/auth/audience" target="_blank" class="sec-link">OAuth consent screen → Test users</a>,
+      register them, then press Done.</p>
+    <button type="button" class="notify-send-btn spaced"
+      onclick="navigator.clipboard.writeText('{all_emails}').then(()=>{{this.textContent='✅ Copied';setTimeout(()=>this.textContent='📋 Copy all emails',1500)}})">📋 Copy all emails</button>
+    <div class="tbl-wrap flush">
       <table>
-        <thead><tr><th>Google 이메일</th><th>요청자</th><th>요청일</th><th>처리</th></tr></thead>
+        <thead><tr><th>Google email</th><th>Requested by</th><th>Requested</th><th>Action</th></tr></thead>
         <tbody>{tester_rows}</tbody>
       </table>
     </div>
@@ -376,101 +386,26 @@ def render_admin(current_user, notify_result="", reset_result=None):
     reset_banner = ""
     if reset_result:
         r_user, r_temp = reset_result
-        reset_banner = f'''<div class="reset-banner">🔑 <b>{r_user}</b>님의 임시 비밀번호:
+        reset_banner = f'''<div class="reset-banner">🔑 Temporary password for <b>{r_user}</b>:
       <code id="tempPw">{r_temp}</code>
-      <button type="button" class="notify-send-btn" style="padding:4px 12px;font-size:12px"
-        onclick="navigator.clipboard.writeText('{r_temp}').then(()=>{{this.textContent='✅ 복사됨'}})">📋 복사</button>
-      <div style="font-size:12px;color:#92400e;margin-top:6px">이 화면을 벗어나면 다시 볼 수 없습니다. 본인에게 전달하고, 로그인 페이지의 "비밀번호 변경"으로 새 비밀번호를 설정하게 하세요.</div>
+      <button type="button" class="notify-send-btn btn-tiny"
+        onclick="navigator.clipboard.writeText('{r_temp}').then(()=>{{this.textContent='✅ Copied'}})">📋 Copy</button>
+      <div class="reset-note">Leave this page and it is gone. Hand it over, and have them
+        set a new one via "Change password" on the login page.</div>
     </div>'''
 
-    return f'''<!DOCTYPE html>
-<html lang="ko"><head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>⚙️ 관리자 페이지</title>
-<link rel="stylesheet" href="/static/style.css">
-<style>
-.container{{ max-width: 1500px; }}
-h1{{ margin-top: 0; padding-top: 40px; }}
-h2{{ font-size:16px;font-weight:700;color:#1e293b;margin-bottom:14px }}
-.summary{{display:flex;gap:12px;margin-bottom:24px;flex-wrap:wrap}}
-.sum-card{{background:white;border:1px solid #e2e8f0;border-radius:10px;padding:14px 22px;display:flex;flex-direction:column;gap:4px}}
-.sum-val{{font-size:24px;font-weight:700;color:#1a1a1a}}
-.sum-lbl{{font-size:12px;color:#64748b;text-transform:uppercase;letter-spacing:.4px}}
-.tbl-wrap{{background:white;border:1px solid #e2e8f0;border-radius:12px;overflow:auto;margin-bottom:32px}}
-table{{width:100%;border-collapse:collapse;min-width:900px}}
-.prof-form{{display:flex;flex-direction:column;gap:4px;min-width:170px}}
-.prof-form input,.prof-form select{{padding:4px 8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;outline:none;background:white;color:#1e293b}}
-.prof-form input:focus,.prof-form select:focus{{border-color:#3b82f6}}
-.prof-form .svc-save-btn{{align-self:flex-start}}
-thead tr{{background:#f8fafc}}
-th{{text-align:left;padding:12px 16px;font-size:12px;color:#64748b;text-transform:uppercase;letter-spacing:.5px;font-weight:600;border-bottom:1px solid #e2e8f0;white-space:nowrap}}
-td{{padding:12px 16px;border-bottom:1px solid #f1f5f9;vertical-align:middle}}
-tr:last-child td{{border-bottom:none}}
-tr.row-self{{background:#f0f9ff}}
-.col-name{{white-space:nowrap}}
-.col-name .u-icon{{margin-right:8px}}
-.u-icon{{font-size:18px}}
-.u-name{{font-size:14px;font-weight:600;color:#1e293b}}
-.col-email{{font-size:13px;color:#64748b;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
-.badge{{font-size:12px;font-weight:600;padding:4px 10px;border-radius:20px;white-space:nowrap}}
-.adm-badge{{background:#dbeafe;color:#1d4ed8}}
-.usr-badge{{background:#f1f5f9;color:#475569}}
-.svc-all-badge{{font-size:12px;color:#166534;background:#f0fdf4;border:1px solid #bbf7d0;padding:4px 10px;border-radius:20px;white-space:nowrap}}
-.svc-form{{display:flex;align-items:center;gap:8px;flex-wrap:wrap}}
-.svc-check{{display:flex;align-items:center;gap:4px;font-size:12px;color:#475569;cursor:pointer;white-space:nowrap}}
-.svc-save-btn{{padding:4px 10px;background:#3b82f6;color:white;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap}}
-.svc-save-btn:hover{{background:#2563eb}}
-.seg-wrap{{display:inline-flex;background:#f1f5f9;border-radius:8px;padding:2px;gap:0}}
-.seg-btn{{padding:5px 13px;border:none;background:transparent;color:#64748b;font-size:12px;font-weight:600;cursor:pointer;border-radius:6px;transition:all .15s;white-space:nowrap}}
-.seg-btn.seg-active{{background:white;color:#1e293b;box-shadow:0 1px 3px rgba(0,0,0,.12)}}
-.seg-btn.adm-active{{background:#3b82f6;color:white;box-shadow:0 1px 3px rgba(59,130,246,.4)}}
-.self-tag{{font-size:12px;color:#94a3b8;padding:5px 12px;background:#f8fafc;border-radius:6px;border:1px solid #e2e8f0}}
-.col-view{{display:flex;gap:8px;align-items:center;flex-wrap:wrap}}
-.view-btn{{font-size:12px;font-weight:600;padding:6px 12px;border-radius:6px;text-decoration:none;background:#f0fdf4;color:#166534;border:1px solid #bbf7d0;white-space:nowrap;transition:background .15s}}
-.view-btn:hover{{background:#dcfce7}}
-.section-card{{background:white;border:1px solid #e2e8f0;border-radius:12px;padding:24px;margin-bottom:24px}}
-.gtoggle-btn{{padding:8px 18px;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;margin-right:8px;margin-bottom:8px}}
-.gtoggle-on{{background:#dcfce7;color:#166534;border:1px solid #bbf7d0}}
-.gtoggle-off{{background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0}}
-.notify-form{{display:flex;flex-direction:column;gap:12px}}
-.notify-form input,.notify-form textarea{{width:100%;padding:10px 14px;border:1px solid #e2e8f0;border-radius:8px;font-size:14px;outline:none;font-family:inherit}}
-.notify-form input:focus,.notify-form textarea:focus{{border-color:#3b82f6}}
-.notify-form textarea{{min-height:100px;resize:vertical}}
-.notify-send-btn{{align-self:flex-start;padding:9px 22px;background:#3b82f6;color:white;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer}}
-.notify-send-btn:hover{{background:#2563eb}}
-.notify-result{{padding:10px 16px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;color:#166534;font-size:13px;margin-bottom:16px}}
-.sec-desc{{font-size:13px;color:#64748b;margin-bottom:16px}}
-.action-btn{{padding:4px 10px;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap}}
-.block-btn{{background:#fef3c7;color:#92400e;border:1px solid #fde68a}}
-.block-btn:hover{{background:#fde68a}}
-.unblock-btn{{background:#d1fae5;color:#065f46;border:1px solid #6ee7b7}}
-.unblock-btn:hover{{background:#a7f3d0}}
-.delete-btn{{background:#fee2e2;color:#991b1b;border:1px solid #fca5a5}}
-.delete-btn:hover{{background:#fca5a5}}
-.resetpw-btn{{background:#e0e7ff;color:#3730a3;border:1px solid #c7d2fe}}
-.resetpw-btn:hover{{background:#c7d2fe}}
-.reset-banner{{background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:14px 18px;margin-bottom:16px;font-size:14px;color:#1e293b}}
-.reset-banner code{{background:#1e293b;color:#fbbf24;padding:3px 10px;border-radius:6px;font-size:15px;letter-spacing:.06em;margin:0 6px}}
-.action-stack{{display:flex;flex-direction:column;gap:6px;width:92px}}
-.action-stack form{{display:block!important}}
-.action-stack .action-btn{{width:100%;text-align:center}}
-tr.row-blocked td{{opacity:.65;background:#fff5f5}}
-.tq-email{{font-size:13px;font-weight:600;color:#1e293b}}
-.tq-meta{{font-size:12px;color:#64748b;white-space:nowrap}}
-</style>
-</head><body>
-<nav>
-  <a href="/admin" class="nav-brand">⚙️ Admin</a>
-  <span class="nav-user">🔑 {current_user} &nbsp;·&nbsp; <a href="/admin/usage">📊 Usage</a> &nbsp;·&nbsp; <a href="/">← Wayfinder</a> &nbsp;·&nbsp; <a href="/logout">로그아웃</a></span>
-</nav>
-<div class="container">
-  <h1>⚙️ 관리자 페이지</h1>
+    from services import _usage
+    tab = tab if tab in dict(TABS) else "users"
+    tabs_html = "".join(
+        f'<a class="adm-tab{" active" if key == tab else ""}" href="/admin?tab={key}"'
+        f'{" aria-current=\'true\'" if key == tab else ""}>{lab}</a>'
+        for key, lab in TABS)
 
+    users_body = f'''
   <div class="summary">
-    <div class="sum-card"><span class="sum-val">{total}</span><span class="sum-lbl">전체 사용자</span></div>
-    <div class="sum-card"><span class="sum-val" style="color:#1d4ed8">{admin_count}</span><span class="sum-lbl">Admin</span></div>
-    <div class="sum-card"><span class="sum-val" style="color:#475569">{total - admin_count}</span><span class="sum-lbl">User</span></div>
+    <div class="sum-card"><span class="sum-val">{total}</span><span class="sum-lbl">Total users</span></div>
+    <div class="sum-card"><span class="sum-val accent">{admin_count}</span><span class="sum-lbl">Admin</span></div>
+    <div class="sum-card"><span class="sum-val muted">{total - admin_count}</span><span class="sum-lbl">User</span></div>
   </div>
 
   {reset_banner}
@@ -478,13 +413,13 @@ tr.row-blocked td{{opacity:.65;background:#fff5f5}}
     <table>
       <thead>
         <tr>
-          <th>사용자</th>
-          <th>역할</th>
-          <th>이메일</th>
-          <th>소속 · 부서 · Drive 계정</th>
-          <th>서비스 권한</th>
-          <th>권한 변경</th>
-          <th>관리</th>
+          <th>User</th>
+          <th>Role</th>
+          <th>Email</th>
+          <th class="col-profile">Office · Department · Drive</th>
+          <th class="col-svc">Service access</th>
+          <th>Role change</th>
+          <th>Manage</th>
         </tr>
       </thead>
       <tbody>{rows}</tbody>
@@ -492,20 +427,151 @@ tr.row-blocked td{{opacity:.65;background:#fff5f5}}
   </div>
 
   <div class="section-card">
-    <h2>🌐 전역 서비스 제어</h2>
-    <p class="sec-desc">신규 가입 폼에서 선택 가능한 서비스를 제어합니다.</p>
+    <h2>🌐 Global service control</h2>
+    <p class="sec-desc">Which services a new account can pick on the signup form.</p>
     {global_toggles}
   </div>
 {tester_section}
   <div class="section-card">
-    <h2>📢 전체 공지 발송</h2>
-    <p class="sec-desc">이메일이 등록된 모든 사용자에게 발송됩니다.</p>
+    <h2>📢 Broadcast</h2>
+    <p class="sec-desc">Goes to every user who has an email on file.</p>
     {notify_msg}
     <form method="POST" action="/admin/notify" class="notify-form">
-      <input name="subject" placeholder="제목" required>
-      <textarea name="body" placeholder="내용 (줄바꿈 지원)"></textarea>
-      <button type="submit" class="notify-send-btn">📨 발송</button>
+      <input name="subject" placeholder="Subject" required>
+      <textarea name="body" placeholder="Message (line breaks kept)"></textarea>
+      <button type="submit" class="notify-send-btn">📨 Send</button>
     </form>
-  </div>
+  </div>'''
+
+    body = users_body if tab == "users" else _usage.render_body(current_user, query)
+
+    return f'''<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>⚙️ Admin · Wayfinder</title>
+<link rel="stylesheet" href="/static/style.css">
+<style>
+.container{{max-width:1500px}}
+h1{{margin:0;padding-top:32px}}
+h2{{font-size:1rem;font-weight:800;color:var(--text);margin:0 0 14px}}
+.adm-head{{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap}}
+.adm-tabs{{display:inline-flex;gap:4px;background:var(--surface-2);border-radius:var(--radius-full);
+  padding:4px;margin:18px 0 22px}}
+.adm-tab{{padding:9px 20px;border-radius:var(--radius-full);font-size:.88rem;font-weight:700;
+  color:var(--text-muted);text-decoration:none;white-space:nowrap;min-height:44px;
+  display:inline-flex;align-items:center}}
+.adm-tab.active{{background:var(--accent);color:var(--bg-deep)}}
+.summary{{display:flex;gap:12px;margin-bottom:22px;flex-wrap:wrap}}
+.sum-card{{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-md);
+  padding:14px 22px;display:flex;flex-direction:column;gap:4px}}
+.sum-val{{font-size:1.5rem;font-weight:800;color:var(--text)}}
+.sum-val.accent{{color:var(--accent)}}
+.sum-val.muted{{color:var(--text-muted)}}
+.sum-lbl{{font-size:.72rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em}}
+.tbl-wrap{{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);
+  overflow:auto;margin-bottom:24px}}
+.tbl-wrap.flush{{margin-bottom:0}}
+table{{width:100%;border-collapse:collapse;min-width:900px}}
+thead tr{{background:var(--surface-2)}}
+th{{text-align:left;padding:12px 16px;font-size:.72rem;color:var(--text-muted);text-transform:uppercase;
+  letter-spacing:.05em;font-weight:700;border-bottom:1px solid var(--border);white-space:nowrap}}
+td{{padding:12px 16px;border-bottom:1px solid var(--border);vertical-align:middle;color:var(--text)}}
+tr:last-child td{{border-bottom:none}}
+tr.row-self{{background:var(--surface-2)}}
+tr.row-blocked td{{opacity:.65}}
+.prof-form{{display:flex;flex-direction:column;gap:4px;min-width:170px}}
+.prof-form input,.prof-form select{{padding:6px 8px;border:1px solid var(--border-bright);
+  border-radius:var(--radius-sm);font-size:.78rem;outline:none;background:var(--surface-2);color:var(--text)}}
+.prof-form input:focus,.prof-form select:focus{{border-color:var(--accent)}}
+.prof-form .is-guess{{color:var(--text-muted)}}
+.prof-form .svc-save-btn{{align-self:flex-start}}
+.col-name{{white-space:nowrap}}
+.col-name .u-icon{{margin-right:8px}}
+.u-icon{{font-size:1.1rem}}
+.u-name{{font-size:.88rem;font-weight:700;color:var(--text)}}
+.u-name.is-blocked{{color:var(--red-500);text-decoration:line-through}}
+.col-email{{font-size:.82rem;color:var(--text-muted);max-width:180px;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}}
+.badge{{font-size:.72rem;font-weight:700;padding:4px 10px;border-radius:var(--radius-full);white-space:nowrap}}
+.adm-badge{{background:var(--accent-glow);color:var(--accent)}}
+.usr-badge{{background:var(--surface-2);color:var(--text-muted)}}
+.blk-badge{{background:var(--surface-2);color:var(--red-500)}}
+.svc-all-badge{{font-size:.72rem;color:var(--green-500);background:var(--surface-2);
+  border:1px solid var(--border-bright);padding:4px 10px;border-radius:var(--radius-full);white-space:nowrap}}
+.svc-form{{display:flex;align-items:center;gap:8px;flex-wrap:wrap}}
+.svc-check{{display:flex;align-items:center;gap:4px;font-size:.78rem;color:var(--text-muted);
+  cursor:pointer;white-space:nowrap;min-height:32px}}
+.svc-save-btn{{padding:6px 12px;background:var(--accent);color:var(--bg-deep);border:none;
+  border-radius:var(--radius-sm);font-size:.78rem;font-weight:700;cursor:pointer;white-space:nowrap}}
+.seg-wrap{{display:inline-flex;background:var(--surface-2);border-radius:var(--radius-md);padding:2px}}
+.seg-btn{{padding:7px 14px;border:none;background:transparent;color:var(--text-muted);font-size:.78rem;
+  font-weight:700;cursor:pointer;border-radius:var(--radius-sm);white-space:nowrap}}
+.seg-btn.seg-active{{background:var(--surface);color:var(--text)}}
+.seg-btn.adm-active{{background:var(--accent);color:var(--bg-deep)}}
+.self-tag{{font-size:.78rem;color:var(--text-muted);padding:6px 12px;background:var(--surface-2);
+  border-radius:var(--radius-sm);border:1px solid var(--border)}}
+.section-card{{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);
+  padding:22px;margin-bottom:22px}}
+.sec-desc{{font-size:.82rem;color:var(--text-muted);margin-bottom:16px}}
+.sec-count{{font-size:.8rem;color:var(--text-muted);font-weight:600}}
+.sec-link{{color:var(--accent)}}
+.gtoggle-btn{{padding:10px 18px;border:1px solid var(--border-bright);border-radius:var(--radius-md);
+  font-size:.82rem;font-weight:700;cursor:pointer;margin:0 8px 8px 0;min-height:44px}}
+.gtoggle-on{{background:var(--accent-glow);color:var(--accent);border-color:var(--accent)}}
+.gtoggle-off{{background:var(--surface-2);color:var(--text-muted)}}
+.notify-form{{display:flex;flex-direction:column;gap:12px}}
+.notify-form input,.notify-form textarea{{width:100%;padding:12px 14px;border:1px solid var(--border-bright);
+  border-radius:var(--radius-md);font-size:.92rem;outline:none;font-family:inherit;
+  background:var(--surface-2);color:var(--text);min-height:44px}}
+.notify-form input:focus,.notify-form textarea:focus{{border-color:var(--accent)}}
+.notify-form textarea{{min-height:100px;resize:vertical}}
+.notify-send-btn{{align-self:flex-start;padding:11px 22px;background:var(--accent);color:var(--bg-deep);
+  border:none;border-radius:var(--radius-md);font-size:.88rem;font-weight:700;cursor:pointer;min-height:44px}}
+.notify-send-btn.spaced{{margin-bottom:14px}}
+.notify-send-btn.btn-tiny{{padding:4px 12px;font-size:.75rem;min-height:32px}}
+.notify-result{{padding:10px 16px;background:var(--surface-2);border:1px solid var(--border-bright);
+  border-radius:var(--radius-md);color:var(--green-500);font-size:.82rem;margin-bottom:16px}}
+.action-btn{{padding:6px 10px;border:1px solid var(--border-bright);border-radius:var(--radius-sm);
+  font-size:.75rem;font-weight:700;cursor:pointer;white-space:nowrap;background:var(--surface-2);color:var(--text)}}
+.block-btn{{color:var(--amber-500)}}
+.unblock-btn{{color:var(--green-500)}}
+.delete-btn{{color:var(--red-500)}}
+.resetpw-btn{{color:var(--accent)}}
+.reset-banner{{background:var(--surface);border:1px solid var(--amber-500);border-radius:var(--radius-md);
+  padding:14px 18px;margin-bottom:16px;font-size:.9rem;color:var(--text)}}
+.reset-banner code{{background:var(--surface-2);color:var(--amber-500);padding:3px 10px;
+  border-radius:var(--radius-sm);font-size:.95rem;letter-spacing:.06em;margin:0 6px}}
+.reset-note{{font-size:.75rem;color:var(--text-muted);margin-top:6px}}
+.action-stack{{display:flex;flex-direction:column;gap:6px;width:104px}}
+.action-stack form{{display:block!important}}
+.action-stack .action-btn{{width:100%;text-align:center}}
+.tq-email{{font-size:.82rem;font-weight:700;color:var(--text)}}
+.tq-meta{{font-size:.78rem;color:var(--text-muted);white-space:nowrap}}
+{_usage.USAGE_CSS}
+@media(max-width:768px){{
+  h1{{padding-top:22px;font-size:1.4rem}}
+  .adm-tabs{{display:flex;width:100%}}
+  .adm-tab{{flex:1;justify-content:center;padding:9px 8px}}
+  .section-card{{padding:16px}}
+  .sum-card{{padding:12px 16px;flex:1;min-width:96px}}
+  td,th{{padding:10px 12px;vertical-align:top}}
+  /* Editing a stacked profile form or a checkbox grid on a phone is not the
+     job — scanning who exists is. Those columns drag every row to ~250px tall
+     while sitting off-screen, so they stand down until there is width. */
+  .col-profile,.col-svc{{display:none}}
+  table{{min-width:0}}
+}}
+</style>
+</head><body>
+<nav>
+  <a href="/admin" class="nav-brand">⚙️ Admin</a>
+  <span class="nav-user">🔑 {current_user} &nbsp;·&nbsp; <a href="/">← Wayfinder</a>
+    &nbsp;·&nbsp; <a href="/logout">Log out</a></span>
+</nav>
+<div class="container">
+  <h1>⚙️ Admin</h1>
+  <div class="adm-tabs" role="group" aria-label="Admin sections">{tabs_html}</div>
+  {body}
 </div>
 </body></html>'''

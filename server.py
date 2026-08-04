@@ -977,7 +977,8 @@ class Handler(BaseHTTPRequestHandler):
             if path == svc_path or path.startswith(svc_path + "/"):
                 if not auth.has_service_access(ctx["user"], svc_path):
                     return self.redirect("/")
-                _usage.record(ctx["user"], svc_path)
+                _usage.record(ctx["user"], svc_path,
+                              self.headers.get("User-Agent"))
                 return self.dispatch(svc.handle("GET", path, query, ctx))
         self.send_html("<h2>404 Not Found</h2>", 404)
 
@@ -1028,7 +1029,8 @@ class Handler(BaseHTTPRequestHandler):
             if path.startswith(svc_path):
                 if not auth.has_service_access(ctx["user"], svc_path):
                     return self.redirect("/")
-                _usage.record(ctx["user"], svc_path)
+                _usage.record(ctx["user"], svc_path,
+                              self.headers.get("User-Agent"))
                 return self.dispatch(svc.handle("POST", path, body, ctx))
         self.send_html("<h2>404</h2>", 404)
 
