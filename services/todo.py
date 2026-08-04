@@ -279,6 +279,11 @@ def handle(method, path, body, ctx=None):
                     t["due_date"] = body["due_date"][0].strip() or None
                 if "title" in body and body["title"][0].strip():
                     t["title"] = body["title"][0].strip()
+                if "has_note" in body:
+                    # parse_qs drops empty values, so an emptied textarea would
+                    # never reach here. The hidden flag says "the note field was
+                    # on screen", which is what makes clearing a note possible.
+                    t["note"] = (body.get("note") or [""])[0].strip()
             save(todos, user)
         elif path == "/todo/reorder":
             ids_str = body.get("ids", [""])[0]
@@ -483,6 +488,9 @@ def render(todos, habits, user, readonly=False, group_by="date"):
             chips += f'<span class="tk-chip">📍 {place["label"]}</span>'
         if prio == 1:
             chips += '<span class="tk-chip tk-chip--high">High</span>'
+        note = (t.get("note") or "").strip()
+        if note:
+            chips += '<span class="tk-chip" title="Has a note">📝</span>'
 
         done = bool(t.get("done"))
         check_action = "/todo/undone" if done else "/todo/done"
@@ -502,6 +510,7 @@ def render(todos, habits, user, readonly=False, group_by="date"):
             f'data-project="{_attr(project)}" data-prio="{prio}" '
             f'data-due="{due}" data-place="{_attr(place_id)}" '
             f'data-group="{_attr(t.get("group") or "")}" '
+            f'data-note="{_attr(note)}" '
             f'data-habit="{"1" if t.get("habit_id") else ""}" '
             f'data-memo="{"1" if is_memo else ""}">'
             f'{check}'
@@ -705,6 +714,10 @@ def render(todos, habits, user, readonly=False, group_by="date"):
           {place_opts}<option value="__new__">＋ Save current location…</option>
         </select></div>
     </div>
+    <div class="wf-field"><label class="wf-label" for="tkSnote">Note</label>
+      <input type="hidden" name="has_note" value="1">
+      <textarea class="wf-input tk-note-input" name="note" id="tkSnote" rows="3"
+                placeholder="Anything to remember about this task…"></textarea></div>
     <div class="tk-sheet-actions">
       <button class="btn btn-primary btn-lg" type="submit">Save</button>
       <button class="btn btn-ghost btn-lg" type="button" id="tkCancel" onclick="tkClose()">Cancel</button>
@@ -930,6 +943,7 @@ a.tk-row{{text-decoration:none;color:inherit}}
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
 .tk-sheet-grid{{display:grid;grid-template-columns:1fr 1fr;gap:12px}}
 .tk-sheet .wf-input{{min-height:44px}}
+.tk-note-input{{min-height:72px;resize:vertical;font-family:inherit;line-height:1.5}}
 .tk-sheet-actions{{display:flex;gap:8px;margin-top:4px}}
 .tk-sheet-actions .btn{{flex:1}}
 .tk-sheet-delete{{margin-top:14px;padding-top:14px;border-top:1px solid var(--border);
@@ -996,6 +1010,8 @@ function tkOpen(row, isNew) {{
   $('tkSdue').value = row.dataset.due || (isNew ? localToday : '');
   $('tkSprio').value = row.dataset.prio || '2';
   $('tkSproject').value = row.dataset.project || '';
+  var note = $('tkSnote');
+  if (note) note.value = row.dataset.note || '';
   var place = $('tkSplace');
   if (place) place.value = row.dataset.place || '';
   var np = $('tkNewPlaceForm');
