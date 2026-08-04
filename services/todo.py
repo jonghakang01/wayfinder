@@ -801,12 +801,18 @@ def render(todos, habits, user, readonly=False, group_by="date"):
 <link rel="stylesheet" href="/static/style.css">
 <style>
 .tk-wrap{{max-width:720px;margin:0 auto;padding:18px 16px 90px}}
-.tk-quick{{display:flex;gap:8px;margin-bottom:14px}}
-.tk-quick-input{{flex:1;min-width:0;padding:12px 14px;font-size:1rem;
-  background:var(--surface);border:1px solid var(--border-bright);border-radius:var(--radius-md);
-  color:var(--text)}}
-.tk-quick-input:focus{{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-glow)}}
-.tk-quick .btn{{height:auto;padding:0 18px}}
+/* Adding a task is the one thing this page exists for, so the field reads as
+   the primary target: taller than a form input, its own surface, accent edge. */
+.tk-quick{{display:flex;gap:10px;margin-bottom:18px}}
+.tk-quick-input{{flex:1;min-width:0;padding:0 18px;min-height:56px;font-size:1.0625rem;
+  background:var(--surface-2);border:2px solid var(--border-bright);border-radius:var(--radius-lg);
+  color:var(--text);transition:border-color .15s,box-shadow .15s,background .15s}}
+.tk-quick-input::placeholder{{color:var(--text-muted)}}
+.tk-quick-input:hover{{border-color:var(--accent)}}
+.tk-quick-input:focus{{outline:none;background:var(--surface);border-color:var(--accent);
+  box-shadow:0 0 0 4px var(--accent-glow)}}
+.tk-quick .btn{{height:auto;min-height:56px;padding:0 24px;font-size:1rem;
+  border-radius:var(--radius-lg)}}
 .tk-summary{{font-size:var(--text-sm);color:var(--text-muted);margin:0 2px 14px}}
 .tk-filter{{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px}}
 .tk-filter .wf-input{{width:auto;flex:1;min-width:140px;min-height:44px}}
@@ -964,7 +970,8 @@ a.tk-row{{text-decoration:none;color:inherit}}
 .tk-sheet-grid--tight .wf-input{{width:100%;min-width:0}}
 @media (max-width:768px){{
   .tk-sheet-grid:not(.tk-sheet-grid--tight){{grid-template-columns:1fr}}
-  .tk-quick-input{{font-size:16px}}
+  /* 17px keeps the field above the 16px floor that stops iOS zooming on focus */
+  .tk-quick-input{{font-size:17px}}
   .tk-row{{padding:14px}}
   .tk-group{{display:flex;width:100%}}
   .tk-gtab{{flex:1;justify-content:center;min-height:44px;padding:10px 14px}}
