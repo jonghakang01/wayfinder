@@ -1427,6 +1427,11 @@ def _render_review(user: str) -> str:
     submit_sap_btn = ('<button class="btn btn-primary btn-sm" id="rvSubmitSap" '
                       'title="Hand the selected trip rows to the SAP agent on your PC">'
                       '📤 Submit to SAP</button>' if user == ADMIN else '')
+    # Watching it type before it writes anything is the safe way to meet a real
+    # SAP screen for the first time — on a PC, or on someone else's PC later.
+    dry_run_box = ('<label class="rv-dry" title="Fill every field but never press Save">'
+                   '<input type="checkbox" id="rvDryRun"> fill only</label>'
+                   if user == ADMIN else '')
     download_btn = (('<span class="fb-pop-wrap">'
                      '<button class="fb-more-btn" id="rvExport" aria-expanded="false">⬇ Export <span class="chev">▾</span></button>'
                      '<div class="fb-menu" id="rvExportMenu">'
@@ -1591,6 +1596,9 @@ def _render_review(user: str) -> str:
 .rv-agent-job.warn{{color:var(--amber-500);font-weight:600}}
 .rv-agent-need{{font-size:.8rem;color:var(--text-muted)}}
 .rv-agent-need[hidden]{{display:none}}
+.rv-dry{{display:flex;align-items:center;gap:6px;font-size:.78rem;
+  color:var(--text-muted);cursor:pointer;margin-left:-4px}}
+.rv-dry input{{width:15px;height:15px;accent-color:var(--accent);cursor:pointer}}
 /* Pairing panel — the token and the two commands live on the page, because a
    browser prompt cannot be selected comfortably and is useless on a phone. */
 .rv-pair{{background:var(--surface-2);border:1px solid var(--border);
@@ -1731,7 +1739,7 @@ body:has(.fb-menu.open) .wf-back,body:has(.fb-menu.open) #wfThemeBtn{{display:no
       <input type="checkbox" id="rvSelAll" style="width:15px;height:15px;accent-color:var(--accent);cursor:pointer"> Select all
     </label>
     <span class="fb-selcount" id="rvSelCount" hidden>0 selected</span>
-    {submit_sap_btn}
+    {submit_sap_btn}{dry_run_box}
     <button class="btn btn-secondary btn-sm" id="rvMarkProg" title="Submitted to SAP, awaiting approval">⏳ Mark in progress</button>
     <button class="btn btn-primary btn-sm" id="rvMarkDone">✔ Mark completed</button>
     <button class="btn btn-ghost btn-sm" id="rvMarkOpen">↩ Reopen</button>
@@ -1912,7 +1920,14 @@ function rvAgentRender(d){{
   jb.hidden = false;
   const p = job.progress || {{}}, res = job.results || {{}};
   const fails = (res.failures || []).length;
-  if(job.state === 'done'){{
+  if(job.state === 'done' && job.dry_run){{
+    // A fill-only run saves nothing on purpose; reading its empty list as
+    // "everything was refused" would be exactly backwards.
+    jb.className = 'rv-agent-job';
+    jb.textContent = '🧪 Filled ' + (res.filled != null ? res.filled : (p.done || 0))
+      + '/' + (p.total || 0) + " for '" + job.trip + "' — nothing saved."
+      + (fails ? ' ' + fails + ' could not be filled: ' + (res.failures[0].why || '') : '');
+  }} else if(job.state === 'done'){{
     const saved = (res.saved || []).length, total = p.total || saved + fails;
     // Anything left undone is a warning, however many landed — a partial run
     // wearing a tick is how "nothing was saved" got read as success before.
@@ -1938,10 +1953,12 @@ async function rvAgentPoll(){{
 async function rvSubmitSap(){{
   const ids = Array.from(document.querySelectorAll('.rv-cb:checked')).map(cb => cb.dataset.id);
   if(!ids.length){{ alert('Select the trip rows to submit first.'); return; }}
-  if(!confirm('Hand ' + ids.length + ' row(s) to the SAP agent? It types them into GTE one by one.')) return;
+  const dry = $('rvDryRun') && $('rvDryRun').checked;
+  if(!confirm('Hand ' + ids.length + ' row(s) to the SAP agent? It types them into GTE one by one'
+              + (dry ? ' and saves nothing.' : ' and saves each one.'))) return;
   const r = await fetch('/cardconv/review/submit_sap', {{
     method: 'POST', headers: {{'Content-Type': 'application/json'}},
-    body: JSON.stringify({{ids: ids}})
+    body: JSON.stringify({{ids: ids, dry_run: !!dry}})
   }});
   const d = await r.json().catch(() => ({{}}));
   if(!d.ok){{ alert('Could not submit: ' + (d.error || r.status)); return; }}

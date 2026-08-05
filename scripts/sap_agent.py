@@ -202,8 +202,14 @@ def run_job(p, job, dry_run=False):
     _call("/cardconv/agent/result",
           {"job_id": job.get("id"),
            "saved": [i for i in saved if i],
-           "failures": failures})
-    print(f"done. {len(saved)}/{len(lines)} saved.")
+           "failures": failures,
+           # A fill-only run saves nothing by design; without this the page
+           # would read the empty list as "every line was refused".
+           "dry_run": bool(dry_run),
+           "filled": len(lines) - len(failures)})
+    print(f"done. {len(saved)}/{len(lines)} saved."
+          if not dry_run else
+          f"done. {len(lines) - len(failures)}/{len(lines)} filled, nothing saved.")
     return len(saved), failures
 
 
@@ -252,7 +258,10 @@ def main():
                 if not edge:
                     _open_edge()
                 try:
-                    run_job(p, job, dry_run)
+                    # The job can ask for fill-only too, so the safe first run
+                    # is a checkbox on the page rather than a command-line flag
+                    # nobody without a terminal can reach.
+                    run_job(p, job, dry_run or bool(job.get("dry_run")))
                 except Exception as e:
                     # Anything unhandled still has to close the job, or the
                     # page waits on a run that already ended.

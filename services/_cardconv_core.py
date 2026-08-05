@@ -4523,8 +4523,13 @@ def _handle_agent_submit(username: str, body: dict):
         return ("json", {"error": "select one trip at a time: "
                                   + ", ".join(trips)}, 400)
     trip, lines = next(iter(trips.items()))
+    dry = body.get("dry_run")
+    dry = dry[0] if isinstance(dry, list) else dry
     job = dict(_trip_payload(username, trips),
                id=uuid.uuid4().hex[:12], state="queued", trip=trip,
+               # Fill every field, press nothing. The first run against a real
+               # SAP screen should be watchable before it writes anything.
+               dry_run=str(dry).lower() in ("1", "true", "yes", "on"),
                progress={"done": 0, "total": len(lines)},
                results={}, note="")
     _save_agent_job(username, job)
@@ -4589,11 +4594,13 @@ def _handle_agent_result(username: str, body: dict):
     if open_ids:
         _handle_review_set_status(username,
                                  {"ids": open_ids, "status": "in_progress"})
+    filled = body.get("filled")
     job.update(state="done",
                progress={"done": len(saved),
                          "total": (job.get("progress") or {}).get("total",
                                                                   len(saved))},
-               results={"saved": saved, "failures": fails},
+               results={"saved": saved, "failures": fails,
+                        "filled": filled if isinstance(filled, int) else None},
                finished_at=datetime.now().isoformat(timespec="seconds"))
     _save_agent_job(username, job)
     _agent_seen(username)
