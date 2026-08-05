@@ -63,6 +63,9 @@ TEMPLATE   = _SVC_DIR / "cardconv_template.xlsx"  # bundled with service
 TEMPLATE_FALLBACK = Path(os.path.expanduser(
     "~/Desktop/US업무/법카 정산/Automation/for upload.xlsx"
 ))
+# Where the local trip robot drops the outcome of a run for Review to adopt.
+# Local-only by nature: on the server this file simply never appears.
+ROBOT_RESULT_FILE = Path("/tmp/wayfinder-robot-result.json")
 
 SCOPES = [
     'https://www.googleapis.com/auth/drive.file',
@@ -1735,7 +1738,7 @@ def _build_xlsx_from_entries(entries: list, username: str = "") -> tuple:
             cell("C", rnum, FIXED["payee"], "str"),
             cell("D", rnum, "", "num"),
             cell("E", rnum, inv_serial, "num"),
-            cell("F", rnum, FIXED["domestic"], "str"),
+            cell("F", rnum, e.get("domestic") or FIXED["domestic"], "str"),
             cell("G", rnum, merchant, "str"),
             cell("H", rnum, posting_serial, "num"),
             cell("I", rnum, gl, "num"),
@@ -4248,6 +4251,51 @@ def _handle_review_usage(username: str, body: dict):
     return ("json", {"ok": True})
 
 
+def _handle_review_vendor_kind(username: str, body: dict):
+    """POST /cardconv/review/vendor_kind — hand-set Domestic/Overseas.
+
+    Body: {"id": ..., "kind": "D" | "O" | "auto"}. "auto" drops the override
+    so the row reads its receipt's currency again — a receipt that arrives
+    later can then still correct it, which is why the override is stored only
+    where it was actually made. Matched rows mirror onto the ledger receipt
+    for the same reason the usage tag does: the Ledger's own export must not
+    disagree with Review."""
+    def _val(k):
+        v = body.get(k, "")
+        return (v[0] if isinstance(v, list) else str(v)).strip()
+    rid  = _val("id")
+    kind = _val("kind").upper()
+    if not rid:
+        return ("json", {"error": "missing id"}, 400)
+    if kind not in ("D", "O", "AUTO"):
+        return ("json", {"error": "bad kind"}, 400)
+    pool = _load_tx_pool(username)
+    entry = next((e for e in pool["entries"] if e.get("id") == rid), None)
+    if entry is None:
+        return ("json", {"error": "not found"}, 404)
+    if kind == "AUTO":
+        entry.pop("vendor_kind", None)
+    else:
+        entry["vendor_kind"] = kind
+    _save_tx_pool(username, pool)
+    rcpt_id = (entry.get("receipt") or {}).get("id")
+    if entry.get("matched") and rcpt_id:
+        ledger = _load_ledger(username)
+        for e in ledger["entries"]:
+            if e.get("id") == rcpt_id:
+                if kind == "AUTO":
+                    e.pop("vendor_kind", None)
+                else:
+                    e["vendor_kind"] = kind
+                _save_ledger(username, ledger)
+                break
+    rc = next((r for r in _load_receipts(username) if r.get("id") == rcpt_id),
+              None) if rcpt_id else None
+    return ("json", {"ok": True, "kind": _vendor_kind(entry, rc),
+                     "auto": kind == "AUTO",
+                     "currency": _row_currency(entry, rc)})
+
+
 def _handle_review_set_status(username: str, body: dict):
     """POST /cardconv/review/status — set open / in_progress / completed.
 
@@ -4337,6 +4385,67 @@ def _effective_usage(e, rcpts: dict) -> str:
     return e.get("usage") or "Regular"
 
 
+def _adopt_robot_result(username: str) -> str:
+    """Adopt the trip robot's last run: the rows it saved into SAP become
+    in_progress. Returns a note for Review, or "" when there is nothing.
+
+    The robot runs beside the local server with no session of its own, so it
+    leaves its outcome in a file and Review adopts it on the next render.
+    Without this the rows stay open and the next export hands the robot the
+    very same lines again — on 2026-08-04 a run that saved every line still
+    left all four rows open. Consumed once, then the file is removed. It never
+    exists on the server: the robot is local-only."""
+    try:
+        if not ROBOT_RESULT_FILE.exists():
+            return ""
+        res = json.loads(ROBOT_RESULT_FILE.read_text())
+    except Exception:
+        return ""
+    # Another card profile's run — leave the file for the profile it belongs to.
+    if str(res.get("user") or "") != username:
+        return ""
+    saved = {str(i) for i in (res.get("saved") or []) if i}
+    pool = _load_tx_pool(username)
+    ids = [e.get("id") for e in pool["entries"]
+           if e.get("id") in saved and (e.get("status") or "open") == "open"]
+    try:
+        ROBOT_RESULT_FILE.unlink()
+    except OSError:
+        pass
+    if not ids:
+        return ""
+    _handle_review_set_status(username, {"ids": ids, "status": "in_progress"})
+    trip = str(res.get("trip") or "").strip()
+    return (f"🤖 The robot saved {len(ids)} row(s)"
+            + (f" for '{trip}'" if trip else "")
+            + " into SAP — moved to In progress.")
+
+
+def _row_currency(e: dict, rc: dict = None) -> str:
+    """A row's original currency.
+
+    It lives on the ledger receipt, never on the pool transaction (the pool
+    predates the FX fields — the same reason Review's money column reads the
+    live receipt). Receipt-less rows therefore have no currency at all."""
+    cur = (rc or {}).get("ocr_currency") or e.get("ocr_currency") or ""
+    return str(cur).strip().upper()
+
+
+def _vendor_kind(e: dict, rc: dict = None) -> str:
+    """SAP's vendor kind — "D" Domestic / "O" Overseas (강프로 2026-08-05).
+
+    USD is Domestic; every other currency is Overseas. A row whose receipt
+    gave no currency — no receipt, or OCR found none — falls to Domestic,
+    which is what the bulk xlsx has always sent. Over half of open rows land
+    here, so a hand-set value wins: a KRW charge with no receipt is corrected
+    on Review rather than silently exported as Domestic."""
+    manual = e.get("vendor_kind")
+    if manual in ("D", "O"):
+        return manual
+    cur = _row_currency(e, rc)
+    return "O" if cur and cur != "USD" else "D"
+
+
 def _handle_trip_export(username: str, query: dict):
     """GET /cardconv/trip/export — JSON of trip-tagged rows for the SAP trip
     submission robot (one submission per line; spec 2026-08-03).
@@ -4362,7 +4471,13 @@ def _handle_trip_export(username: str, query: dict):
             "date":         e.get("date"),
             "merchant":     re.sub(r"\s+", " ", str(e.get("merchant") or "")).strip(),
             "amount":       round(float(e.get("amount") or 0), 2),
+            # The amount is always the settled USD figure (foreign receipts are
+            # mirrored at their USD estimate), so the currency label stays USD.
+            # The receipt's own currency rides alongside as the reason the
+            # vendor kind came out the way it did.
             "currency":     FIXED["currency"],
+            "vendor_kind":  _vendor_kind(e, rc),
+            "receipt_currency": _row_currency(e, rc),
             "gl":           e.get("gl"),
             "ser":          str(e.get("ser") or "").strip(),
             "purpose":      purpose,
@@ -4405,6 +4520,10 @@ def _handle_review_download(username: str, query: dict):
         rc = rcpts.get((e.get("receipt") or {}).get("id"))
         rb = (rc or {}).get("card_brand") or ""
         e["receipt_type"] = "A" if (e.get("cash") or rb == "other") else "D"
+        # Vendor kind (col F) used to be hardcoded Domestic for every line
+        # while the trip robot hardcoded Overseas for every line — the same
+        # charge left through two doors with opposite answers (2026-08-05).
+        e["domestic"] = _vendor_kind(e, rc)
         if e.get("cash") and rc is not None:
             e["cash_reason"] = rc.get("cash_reason") or e.get("cash_reason")
     # Trip-tagged rows (usage other than Regular) are submitted one by one in
@@ -4644,7 +4763,8 @@ def _handle_ledger_xlsx(username: str, query: dict):
         ws.cell(start,  2).value = FIXED["employee_id"]
         ws.cell(start,  3).value = FIXED["payee"]
         ws.cell(start,  5).value = inv_dt
-        ws.cell(start,  6).value = FIXED["domestic"]
+        # Ledger rows carry their currency directly (they ARE the receipts).
+        ws.cell(start,  6).value = _vendor_kind(e, e)
         ws.cell(start,  7).value = vendor
         ws.cell(start,  8).value = posting_dt
         ws.cell(start,  9).value = gl

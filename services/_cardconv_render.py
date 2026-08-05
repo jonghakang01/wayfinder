@@ -1105,6 +1105,11 @@ def _render_review(user: str) -> str:
     _sync_cash_pool(user)            # mirror cash receipts into the pool (no-op when in sync)
     _reconcile_settle_status(user)   # self-heal pre-sync mismatches (no-op when consistent)
     _heal_orphan_matches(user)       # self-heal one-sided match links (no-op when consistent)
+    # Rows the local trip robot saved into SAP move to In progress here — it
+    # has no session of its own, so this render is where its run lands.
+    robot_note = _adopt_robot_result(user)
+    robot_note_html = (
+        f'<div class="rv-robot-note">{_esc(robot_note)}</div>' if robot_note else '')
     pool    = _load_tx_pool(user)
     # Newest transactions first; dateless rows sink to the bottom.
     rows    = sorted(pool.get("entries", []),
@@ -1157,6 +1162,34 @@ def _render_review(user: str) -> str:
                 f'data-cur="{_esc(cur)}" onchange="rvChangeUsage(this)" '
                 f'title="Usage tag — synced with the Ledger">'
                 f'{opts}<option value="__new__">+ New…</option></select>')
+
+    _KIND_NAME = {"D": "Domestic", "O": "Overseas"}
+
+    def _kind_sel(e, rc):
+        """Domestic/Overseas picker for one row.
+
+        Auto follows the receipt currency, and its label says what auto
+        currently resolves to — the judgement is visible before the user
+        decides to override it. Over half of open rows have no receipt
+        currency at all and land on Domestic, which is exactly the set that
+        needs correcting by hand."""
+        cur  = _row_currency(e, rc)
+        # Same rule as the exports, asked of the currency alone.
+        auto = _vendor_kind({"ocr_currency": cur})
+        manual = e.get("vendor_kind") if e.get("vendor_kind") in ("D", "O") else ""
+        why = f"receipt currency {cur}" if cur else "no receipt currency"
+        opts = [("auto", f"Auto · {_KIND_NAME[auto]}"),
+                ("D", _KIND_NAME["D"]), ("O", _KIND_NAME["O"])]
+        sel_v = manual or "auto"
+        body = ''.join(
+            f'<option value="{v}"{" selected" if v == sel_v else ""}>{_esc(t)}</option>'
+            for v, t in opts)
+        return (f'<select class="rv-kind-sel{" manual" if manual else ""}" '
+                f'data-id="{_esc(e.get("id") or "")}" data-cur="{sel_v}" '
+                f'onchange="rvChangeKind(this)" '
+                f'title="SAP vendor kind — Auto follows the receipt currency '
+                f'(USD = Domestic, anything else = Overseas). Now: {_esc(why)}">'
+                f'{body}</select>')
 
     _FX_SYM = {"KRW": "₩", "JPY": "¥", "INR": "₹", "HKD": "HK$", "EUR": "€"}
 
@@ -1215,6 +1248,11 @@ def _render_review(user: str) -> str:
             live_rc = _rcpt_by_id.get(rc.get("id")) if r.get("cash") else None
             amt_html = (_money(live_rc.get("ocr_amount"), live_rc)
                         if live_rc else _money(r.get("amount")))
+            # Vendor kind (SAP Domestic/Overseas). Read the live receipt for
+            # the currency — the pool snapshot predates the FX fields.
+            kind_rc  = _rcpt_by_id.get(rc.get("id"))
+            row_kind = _vendor_kind(r, kind_rc)
+            kind_sel = _kind_sel(r, kind_rc)
             # Transaction (CSV line item) header
             txn = (
                 f'<label class="rv-cb-wrap"><input type="checkbox" class="rv-cb" data-id="{_esc(r.get("id",""))}"></label>'
@@ -1226,6 +1264,7 @@ def _render_review(user: str) -> str:
                   '<div class="rv-txn-meta">'
                     f'<span class="rv-amt">{amt_html}</span>'
                     f'{pay_chip}'
+                    f'{kind_sel}'
                   '</div>'
                 '</div>')
             # Inline matched-receipt mini card, or unmatched + loss-reason input
@@ -1269,7 +1308,10 @@ def _render_review(user: str) -> str:
                       '<div class="rv-card-info">'
                         f'<div class="rv-card-line">🗓 {_esc(rc.get("ocr_date")) or "–"}</div>'
                         f'<div class="rv-card-line rv-card-merchant">{_esc(rc.get("ocr_merchant")) or "–"}</div>'
-                        f'<div class="rv-card-line rv-card-amt">{_money((live_rc or rc).get("ocr_amount"), live_rc or rc)}</div>'
+                        # The pool snapshot has no FX fields, so reading it made
+                        # a ₩188,046 receipt print as "$188,046.00" — the live
+                        # ledger receipt is the one that knows its currency.
+                        f'<div class="rv-card-line rv-card-amt">{_money((live_rc or kind_rc or rc).get("ocr_amount"), live_rc or kind_rc or rc)}</div>'
                         f'<div class="rv-card-line">🏷 {usage_sel}</div>'
                         f'{reason_line}{comp}{link}'
                       '</div>'
@@ -1331,6 +1373,7 @@ def _render_review(user: str) -> str:
                 f'data-status="{st}" '
                 f'data-card="{_esc(brand)}" '
                 f'data-usage="{_esc(_row_usage(r))}" '
+                f'data-kind="{row_kind}" '
                 f'data-noreceipt="{"1" if r.get("no_receipt") else "0"}" '
                 f'data-cash="{"1" if r.get("cash") else "0"}" '
                 f'data-matched="{"1" if is_matched else "0"}">{txn}{receipt_block}</div>')
@@ -1482,6 +1525,16 @@ def _render_review(user: str) -> str:
   font-size:.76rem;padding:3px 6px;max-width:160px;cursor:pointer}}
 .rv-usage-sel:hover{{border-color:var(--border)}}
 .rv-usage-sel:focus{{border-color:var(--accent);outline:none}}
+/* Vendor kind: reads as a quiet chip until it is pinned by hand, which is
+   the state worth spotting when scanning for rows to correct. */
+.rv-kind-sel{{background:transparent;border:1px solid transparent;border-radius:6px;
+  color:var(--text-muted);font-size:.74rem;padding:2px 4px;cursor:pointer;max-width:150px}}
+.rv-kind-sel:hover{{border-color:var(--border);color:var(--text)}}
+.rv-kind-sel:focus{{border-color:var(--accent);outline:none}}
+.rv-kind-sel.manual{{color:var(--accent);font-weight:600}}
+.rv-robot-note{{background:var(--surface-2);border:1px solid var(--accent);
+  border-radius:var(--radius-md);padding:10px 14px;margin-bottom:12px;
+  font-size:.84rem;color:var(--text)}}
 .rv-comp-edit{{cursor:pointer;border-bottom:1px dashed var(--border-bright);font-size:.78rem}}
 .rv-comp-edit:hover{{color:var(--accent)}}
 .rv-nomatch{{color:var(--danger);font-size:.84rem;font-weight:700;margin-bottom:6px}}
@@ -1574,6 +1627,13 @@ body:has(.fb-menu.open) .wf-back,body:has(.fb-menu.open) #wfThemeBtn{{display:no
     <span class="fb-field"><span>Usage</span>
       <select id="rvUsage">{usage_opts}</select>
     </span>
+    <span class="fb-field"><span>Kind</span>
+      <select id="rvKind" title="SAP vendor kind — rows with no receipt currency read as Domestic, so this is how you find the ones to correct">
+        <option value="all">All</option>
+        <option value="D">Domestic</option>
+        <option value="O">Overseas</option>
+      </select>
+    </span>
     <span class="fb-field"><span>Sort</span>
       <select id="rvSort">
         <option value="date">Date ↓ newest first</option>
@@ -1598,6 +1658,7 @@ body:has(.fb-menu.open) .wf-back,body:has(.fb-menu.open) #wfThemeBtn{{display:no
     <span style="flex:1"></span>
     <span class="rv-hint" style="font-size:.76rem;color:var(--text-muted)">Click a card above to switch views</span>
   </div>
+  {robot_note_html}
 
   <div class="notepad-card">
     <div class="notepad-body" style="padding:12px 14px">
@@ -1647,13 +1708,14 @@ function rvSaveState(){{
       sort: $('rvSort').value, period: $('rvPeriod').value,
       from: $('rvFrom').value, to: $('rvTo').value,
       merchant: $('rvMerchant').value, card: $('rvCard').value,
-      usage: $('rvUsage').value, view: rvViewKey}}));
+      usage: $('rvUsage').value, kind: $('rvKind').value, view: rvViewKey}}));
   }} catch(e) {{}}
 }}
 function applyFilter(){{
   const from = $('rvFrom').value, to = $('rvTo').value;
   const mq = $('rvMerchant').value.trim().toLowerCase();
   const cardF = $('rvCard').value, usageF = $('rvUsage').value;
+  const kindF = $('rvKind').value;
   document.querySelectorAll('.rv-item').forEach(it => {{
     const d = it.dataset.date || '';
     const show = (it.dataset.status === rvView)
@@ -1665,7 +1727,8 @@ function applyFilter(){{
       && (!from || !d || d >= from) && (!to || !d || d <= to)
       && (!mq || (it.dataset.merchant || '').includes(mq))
       && (cardF === 'all' || (cardF === 'unknown' ? !it.dataset.card : it.dataset.card === cardF))
-      && (usageF === 'all' || it.dataset.usage === usageF);
+      && (usageF === 'all' || it.dataset.usage === usageF)
+      && (kindF === 'all' || it.dataset.kind === kindF);
     it.style.display = show ? '' : 'none';
     if(!show) it.querySelector('.rv-cb').checked = false;
   }});
@@ -1722,6 +1785,25 @@ async function rvChangeUsage(sel){{
   sel.dataset.cur = val;
   sel.closest('.rv-item').dataset.usage = val;
   rvSyncUsageFilter();
+}}
+
+// ── Domestic/Overseas (SAP vendor kind). Auto reads the receipt currency;
+//    picking D/O pins the row against it, and matched rows mirror onto the
+//    ledger receipt so the Ledger's own export cannot disagree ─────────────
+async function rvChangeKind(sel){{
+  const val = sel.value, prev = sel.dataset.cur || 'auto';
+  const r = await fetch('/cardconv/review/vendor_kind',
+    {{method:'POST', body: new URLSearchParams({{id: sel.dataset.id, kind: val}})}});
+  const d = await r.json().catch(() => ({{}}));
+  if(!d.ok){{
+    alert('Domestic/Overseas update failed: ' + (d.error || r.status));
+    sel.value = prev;
+    return;
+  }}
+  sel.dataset.cur = val;
+  sel.classList.toggle('manual', val !== 'auto');
+  sel.closest('.rv-item').dataset.kind = d.kind;
+  applyFilter();   // with a Kind filter on, the row may no longer belong here
 }}
 
 // Companion (w/) editor for receipt-less rows — stored on the pool
@@ -1850,6 +1932,7 @@ let _rvmDeb;
 $('rvMerchant').addEventListener('input', () => {{ clearTimeout(_rvmDeb); _rvmDeb = setTimeout(applyFilter, 250); }});
 $('rvCard').addEventListener('change', applyFilter);
 $('rvUsage').addEventListener('change', applyFilter);
+$('rvKind').addEventListener('change', applyFilter);
 $('rvSort').addEventListener('change', applySort);
 $('rvFrom').addEventListener('change', applyFilter);
 $('rvTo').addEventListener('change', applyFilter);
@@ -1863,7 +1946,7 @@ $('rvPeriod').addEventListener('change', () => {{
 $('rvReset').addEventListener('click', () => {{
   $('rvFrom').value = ''; $('rvTo').value = ''; $('rvMerchant').value = '';
   $('rvPeriod').value = 'all'; $('rvCustomRange').hidden = true;
-  $('rvCard').value = 'all'; $('rvUsage').value = 'all';
+  $('rvCard').value = 'all'; $('rvUsage').value = 'all'; $('rvKind').value = 'all';
   $('rvSort').value = 'date'; applySort();
   rvView = 'open'; rvMatchedF = 'all'; rvViewKey = 'open';
   document.querySelectorAll('.stat-click').forEach(c => c.classList.toggle('active', c.dataset.rvview === 'open'));
@@ -1882,6 +1965,7 @@ $('rvReset').addEventListener('click', () => {{
   if(s.card) $('rvCard').value = s.card;
   if(s.usage && Array.from($('rvUsage').options).some(o => o.value === s.usage))
     $('rvUsage').value = s.usage;
+  if(s.kind) $('rvKind').value = s.kind;
   if(s.sort && Array.from($('rvSort').options).some(o => o.value === s.sort))
     $('rvSort').value = s.sort;
   if(s.view && RV_VIEWS[s.view]){{

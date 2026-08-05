@@ -18,9 +18,11 @@ Manual usage stays available:
 
 Default is fully automatic — fill, Save, New, next line (강프로 2026-08-03,
 after the first line was verified on screen). --confirm restores the
-per-line pause ([Enter]=save s=skip q=quit); --domestic sets Vendor Name
-kind to Domestic (default Overseas — Korea/India trips). Every save is
-verified against the grid's Total counter; failures skip, never abort.
+per-line pause ([Enter]=save s=skip q=quit). Vendor Name kind now rides on
+each line (`vendor_kind`, from the export); --domestic is only the fallback
+for exports made before that key existed. Every save is verified against the
+grid's Total counter; failures skip, never abort. What actually saved is
+written to /tmp/wayfinder-robot-result.json for Review to adopt.
 """
 import json
 import re as _re
@@ -51,6 +53,8 @@ SEL = {
 RECEIPT_OPT = {"A": "Cash", "D": "Corporate Credit Card"}
 DOWNLOADS = Path("/mnt/c/Users/Jongha Kang/Downloads")
 SCREEN_WAIT_MIN = 15
+# Read and consumed by Review (_adopt_robot_result) on the next render.
+RESULT_FILE = Path("/tmp/wayfinder-robot-result.json")
 
 
 def _pick_export():
@@ -183,7 +187,13 @@ def fill_line(pg, line, overseas):
                 f"account {gl} did not resolve — pick it via the 🔍 popup, "
                 "then rerun this line")
     pg.fill(SEL["amount"], f'{line.get("amount", 0):.2f}')
-    pg.select_option(SEL["vendor_kind"], value="O" if overseas else "D")
+    # The export decides Domestic/Overseas per line (USD = Domestic, anything
+    # else Overseas — 강프로 2026-08-05). The --domestic flag stays as the
+    # fallback for exports made before the key existed.
+    kind = line.get("vendor_kind")
+    if kind not in ("D", "O"):
+        kind = "O" if overseas else "D"
+    pg.select_option(SEL["vendor_kind"], value=kind)
     _sync_selectric(pg, SEL["vendor_kind"])
     pg.fill(SEL["vendor_name"], line.get("merchant") or "")
 
@@ -199,6 +209,25 @@ def _ensure_form_open(pg):
     a card line after a cash line) would silently carry over."""
     pg.click(SEL["new"])
     pg.wait_for_timeout(1200)
+
+
+def _write_result(user, trip, saved_ids, total):
+    """Leave the run's outcome where Review can adopt it.
+
+    The robot has no session of its own, so it cannot mark the rows itself.
+    It drops the ids it actually saved into a file and the next Review render
+    moves them to In progress — without that the rows stay open and the next
+    export hands the robot the very same lines again (2026-08-04)."""
+    try:
+        RESULT_FILE.write_text(json.dumps({
+            "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "user": user or "",
+            "trip": trip,
+            "saved": saved_ids,
+            "total": total,
+        }, ensure_ascii=False))
+    except OSError as e:
+        print(f"  (could not write {RESULT_FILE}: {e} — mark the rows by hand)")
 
 
 def main():
@@ -220,6 +249,7 @@ def main():
           f"mode: {'confirm each' if confirm else 'auto-save'}")
 
     failures = []
+    saved_ids = []
     with sync_playwright() as p:
         b, pg = _find_screen(p)
         pg.on("dialog", lambda d: (print(f"  [dialog] {d.message[:120]}"), d.accept()))
@@ -253,10 +283,14 @@ def main():
                     raise RuntimeError(
                         f"grid Total stayed at {after} — the save did not land")
                 pg.wait_for_timeout(500)
+                if line.get("tx_id"):
+                    saved_ids.append(line["tx_id"])
                 print(f"  saved (Total {before} -> {after}).")
             except Exception as e:
                 print(f"  save failed: {e}")
                 failures.append((head, str(e)))
+
+    _write_result(export.get("user"), trip, saved_ids, len(lines))
 
     saved = len(lines) - len(failures)
     print(f"\ndone. {saved}/{len(lines)} saved.")
