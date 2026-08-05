@@ -1399,7 +1399,26 @@ def _render_review(user: str) -> str:
     <span class="rv-agent-job" id="rvAgentJob" hidden></span>
     <span style="flex:1"></span>
     <button class="btn btn-ghost btn-sm" id="rvAgentPair"
-            title="Issue this account's agent token and show it once — paste it into the agent on your PC">🔑 Pair a PC</button>
+            title="Issue this account's agent token and show it here — copy it into the agent on your PC">🔑 Pair a PC</button>
+  </div>
+  <div class="rv-pair" id="rvPairBox" hidden>
+    <div class="rv-pair-head">
+      <strong>Pair this PC</strong>
+      <span style="flex:1"></span>
+      <button class="btn btn-ghost btn-sm" id="rvPairClose">✕ Close</button>
+    </div>
+    <div class="rv-pair-step">1 — save this as <code>~/.wayfinder-agent.json</code> on the PC that runs the agent</div>
+    <div class="rv-pair-warn" id="rvPairWarn" hidden>A PC is already paired. Issuing a new token stops the old one working.</div>
+    <pre class="rv-pair-code" id="rvPairJson" hidden></pre>
+    <div class="rv-pair-row">
+      <button class="btn btn-primary btn-sm" id="rvPairCopy" hidden>📋 Copy</button>
+      <button class="btn btn-secondary btn-sm" id="rvPairReissue" hidden>🔄 Issue a new token</button>
+      <span class="rv-pair-hint" id="rvPairMsg"></span>
+    </div>
+    <div class="rv-pair-step">2 — open the robot Edge and reach the trip's Other Expense screen</div>
+    <div class="rv-pair-step">3 — start the agent, then come back here and use 📤 Submit to SAP</div>
+    <pre class="rv-pair-code">LD_LIBRARY_PATH=$HOME/.local/chromium-libs python3 ~/webapp/scripts/sap_agent.py --dry-run</pre>
+    <div class="rv-pair-hint">--dry-run fills every field and never presses Save — use it for the first run.</div>
   </div>''' if user == ADMIN else '')
     # Trip rows are submitted one by one through SAP's own screen, so this is
     # the agent's door — the xlsx download deliberately excludes them.
@@ -1568,6 +1587,24 @@ def _render_review(user: str) -> str:
 .rv-agent-job{{font-size:.8rem;color:var(--text)}}
 .rv-agent-job.ok{{color:var(--green-500);font-weight:600}}
 .rv-agent-job.warn{{color:var(--amber-500);font-weight:600}}
+/* Pairing panel — the token and the two commands live on the page, because a
+   browser prompt cannot be selected comfortably and is useless on a phone. */
+.rv-pair{{background:var(--surface-2);border:1px solid var(--border);
+  border-radius:var(--radius-md);padding:14px 16px;margin-bottom:12px;
+  display:flex;flex-direction:column;gap:9px}}
+.rv-pair[hidden]{{display:none}}
+.rv-pair-head{{display:flex;align-items:center;gap:10px;font-size:.9rem;color:var(--text)}}
+.rv-pair-step{{font-size:.82rem;color:var(--text-muted)}}
+.rv-pair-step code{{color:var(--text);font-size:.8rem}}
+.rv-pair-code{{background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius-sm);padding:9px 11px;margin:0;font-size:.78rem;
+  color:var(--text);overflow-x:auto;white-space:pre;user-select:all}}
+.rv-pair-row{{display:flex;align-items:center;gap:10px}}
+.rv-pair-hint{{font-size:.78rem;color:var(--text-muted)}}
+.rv-pair-warn{{font-size:.8rem;color:var(--amber-500);font-weight:600}}
+/* Browser default [hidden] loses to any class that sets display, and .btn sets
+   it twice (base + the mobile block), so every hideable part needs the pair. */
+.rv-pair-code[hidden],.rv-pair-warn[hidden],.rv-pair .btn[hidden]{{display:none!important}}
 .rv-robot-note{{background:var(--surface-2);border:1px solid var(--accent);
   border-radius:var(--radius-md);padding:10px 14px;margin-bottom:12px;
   font-size:.84rem;color:var(--text)}}
@@ -1832,6 +1869,7 @@ function rvAgentRender(d){{
   const strip = $('rvAgent');
   if(!strip || !d) return;
   const a = d.agent || {{}}, job = d.job;
+  rvPaired = !!a.paired;
   const txt = $('rvAgentText'), chips = $('rvAgentChips'), jb = $('rvAgentJob');
   strip.classList.toggle('online', !!a.online);
   if(!a.paired){{
@@ -1893,13 +1931,63 @@ async function rvSubmitSap(){{
   rvAgentPoll();
 }}
 
+// Pairing stays on the page: a token in a browser prompt cannot be selected
+// comfortably, reads like a broken dialog, and is unusable on a phone.
+let rvPaired = false;
+
+function rvPairMsg(text){{
+  const el = $('rvPairMsg');
+  el.textContent = text;
+  setTimeout(() => {{ if(el.textContent === text) el.textContent = ''; }}, 4000);
+}}
+
 if($('rvAgent')){{
-  $('rvAgentPair').addEventListener('click', async () => {{
-    if(!confirm('Issue a new agent token? Any PC using the old one stops working.')) return;
+  // Opening the panel must never retire a working token, so a PC that is
+  // already paired gets a warning and its own button instead of a dialog.
+  async function rvIssueToken(){{
     const r = await fetch('/cardconv/robot/pair', {{method: 'POST'}});
     const d = await r.json().catch(() => ({{}}));
-    if(!d.token){{ alert('Pairing failed: ' + (d.error || r.status)); return; }}
-    prompt('Paste this into the agent on your PC (shown once):', d.token);
+    if(!d.token){{ rvPairMsg('Pairing failed: ' + (d.error || r.status)); return; }}
+    // base_url comes from the page itself, so a token issued on prod points at
+    // prod — the agent cannot end up reporting to the wrong server.
+    $('rvPairJson').textContent = JSON.stringify(
+      {{base_url: location.origin, token: d.token}}, null, 2);
+    $('rvPairJson').hidden = false;
+    $('rvPairReissue').hidden = true;
+    $('rvPairWarn').hidden = true;
+    $('rvPairCopy').hidden = false;
+    rvPairMsg('');
+    rvAgentPoll();
+  }}
+
+  $('rvAgentPair').addEventListener('click', () => {{
+    $('rvPairBox').hidden = false;
+    if(rvPaired){{
+      $('rvPairJson').hidden = true;
+      $('rvPairCopy').hidden = true;
+      $('rvPairWarn').hidden = false;
+      $('rvPairReissue').hidden = false;
+      rvPairMsg('');
+    }} else {{
+      rvIssueToken();
+    }}
+  }});
+  $('rvPairReissue').addEventListener('click', rvIssueToken);
+  $('rvPairClose').addEventListener('click', () => {{ $('rvPairBox').hidden = true; }});
+  $('rvPairCopy').addEventListener('click', async () => {{
+    const text = $('rvPairJson').textContent;
+    try {{
+      await navigator.clipboard.writeText(text);
+      rvPairMsg('Copied.');
+    }} catch(e) {{
+      // clipboard needs a secure context — plain http on the server does not
+      // qualify, so fall back to selecting it for a manual copy.
+      const r = document.createRange();
+      r.selectNodeContents($('rvPairJson'));
+      const s = window.getSelection();
+      s.removeAllRanges(); s.addRange(r);
+      rvPairMsg('Selected — press Ctrl+C.');
+    }}
   }});
   if($('rvSubmitSap')) $('rvSubmitSap').addEventListener('click', rvSubmitSap);
   rvAgentPoll();
