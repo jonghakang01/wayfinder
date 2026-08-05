@@ -56,6 +56,8 @@ def handle(method, path, body, ctx=None):
     if method == "POST" and path == "/cardconv/agent/result":
         return _handle_agent_result(user, body)
     # Session-authed side of the same feature.
+    if method == "GET" and path == "/cardconv/robot/installer":
+        return _handle_installer(user)
     if method == "GET" and path == "/cardconv/robot/state":
         return _handle_robot_state(user)
     if method == "POST" and path == "/cardconv/review/submit_sap":

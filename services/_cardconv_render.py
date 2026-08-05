@@ -1406,23 +1406,55 @@ def _render_review(user: str) -> str:
   </div>
   <div class="rv-pair" id="rvPairBox" hidden>
     <div class="rv-pair-head">
-      <strong>Pair this PC</strong>
+      <strong>Set up the SAP agent</strong>
+      <span class="rv-pair-hint">once per PC</span>
       <span style="flex:1"></span>
       <button class="btn btn-ghost btn-sm" id="rvPairClose">✕ Close</button>
     </div>
-    <div class="rv-pair-warn" id="rvPairWarn" hidden>This PC is already paired. Pairing again stops the old token working.</div>
-    <div class="rv-pair-step">One-time on the PC: double-click <code>Install SAP Agent</code> on your Desktop. After that the agent starts with Windows on its own.</div>
-    <div class="rv-pair-row">
-      <a class="btn btn-primary btn-sm" id="rvPairLink" href="#" hidden>🔗 Pair this PC</a>
-      <button class="btn btn-secondary btn-sm" id="rvPairReissue" hidden>🔄 Pair again</button>
-      <span class="rv-pair-hint" id="rvPairMsg"></span>
+
+    <div class="rv-step" id="rvStep1">
+      <span class="rv-step-n">1</span>
+      <div class="rv-step-body">
+        <div class="rv-step-t">Install the agent on this PC</div>
+        <div class="rv-step-d">Save the file and double-click it. It sets everything up and starts the agent with Windows from then on.</div>
+        <a class="btn btn-primary btn-sm" href="/cardconv/robot/installer" download>⬇ Download installer</a>
+      </div>
     </div>
-    <div class="rv-pair-step">Then open the robot Edge, reach the trip's Other Expense screen, and use 📤 Submit to SAP here.</div>
-    <details class="rv-pair-fallback">
-      <summary>The link did nothing?</summary>
-      <div class="rv-pair-step">The installer has not run on this PC yet. Run it, then click Pair again. Failing that, save this by hand as <code>~/.wayfinder-agent.json</code>:</div>
-      <pre class="rv-pair-code" id="rvPairJson" hidden></pre>
-    </details>
+
+    <div class="rv-step" id="rvStep2">
+      <span class="rv-step-n">2</span>
+      <div class="rv-step-body">
+        <div class="rv-step-t">Get this account's key</div>
+        <div class="rv-step-d">One key per account. Issuing a new one stops the key any other PC is using.</div>
+        <div class="rv-pair-warn" id="rvPairWarn" hidden>A PC is already paired — you only need this again to move to another PC.</div>
+        <button class="btn btn-secondary btn-sm" id="rvPairReissue" hidden>🔄 Issue a new key</button>
+      </div>
+    </div>
+
+    <div class="rv-step" id="rvStep3">
+      <span class="rv-step-n">3</span>
+      <div class="rv-step-body">
+        <div class="rv-step-t">Hand the key to this PC</div>
+        <div class="rv-step-d">One click — Windows passes it straight to the agent.</div>
+        <div class="rv-pair-row">
+          <a class="btn btn-primary btn-sm" id="rvPairLink" href="#" hidden>🔗 Pair this PC</a>
+          <span class="rv-pair-hint" id="rvPairMsg"></span>
+        </div>
+        <details class="rv-pair-fallback">
+          <summary>The link did nothing?</summary>
+          <div class="rv-step-d">Step 1 has not run on this PC yet. Run the installer, then click Pair this PC again. Failing that, save this by hand as <code>~/.wayfinder-agent.json</code>:</div>
+          <pre class="rv-pair-code" id="rvPairJson" hidden></pre>
+        </details>
+      </div>
+    </div>
+
+    <div class="rv-step" id="rvStep4">
+      <span class="rv-step-n">4</span>
+      <div class="rv-step-body">
+        <div class="rv-step-t">Select rows and press 📤 Submit to SAP</div>
+        <div class="rv-step-d">The agent opens the robot Edge for you. Sign in to Knox if it asks, reach the trip's Other Expense screen, and it keys the rows in.</div>
+      </div>
+    </div>
   </div>''' if user == ADMIN else '')
     # Trip rows are submitted one by one through SAP's own screen, so this is
     # the agent's door — the xlsx download deliberately excludes them.
@@ -1624,6 +1656,22 @@ def _render_review(user: str) -> str:
 /* Browser default [hidden] loses to any class that sets display, and .btn sets
    it twice (base + the mobile block), so every hideable part needs the pair. */
 .rv-pair-code[hidden],.rv-pair-warn[hidden],.rv-pair .btn[hidden]{{display:none!important}}
+.rv-step{{display:flex;gap:11px;align-items:flex-start;padding:9px 0;
+  border-top:1px solid var(--border)}}
+.rv-step:first-of-type{{border-top:0}}
+.rv-step-n{{flex:0 0 22px;height:22px;border-radius:50%;display:flex;
+  align-items:center;justify-content:center;font-size:.74rem;font-weight:700;
+  border:1px solid var(--border);color:var(--text-muted)}}
+.rv-step.done .rv-step-n{{border-color:var(--green-500);color:var(--green-500)}}
+.rv-step.done .rv-step-n::after{{content:'✓'}}
+.rv-step.done .rv-step-n{{font-size:0}}
+.rv-step.done .rv-step-n::after{{font-size:.78rem}}
+.rv-step.now .rv-step-n{{border-color:var(--accent);color:var(--accent)}}
+.rv-step-body{{display:flex;flex-direction:column;gap:5px;min-width:0;flex:1}}
+.rv-step-t{{font-size:.85rem;color:var(--text);font-weight:600}}
+.rv-step-d{{font-size:.78rem;color:var(--text-muted)}}
+.rv-step-d code{{color:var(--text)}}
+.rv-step .btn{{align-self:flex-start}}
 .rv-pair-fallback{{font-size:.8rem;color:var(--text-muted)}}
 .rv-pair-fallback summary{{cursor:pointer;padding:2px 0}}
 .rv-pair-fallback[open] summary{{margin-bottom:7px}}
@@ -1892,6 +1940,13 @@ function rvAgentRender(d){{
   if(!strip || !d) return;
   const a = d.agent || {{}}, job = d.job;
   rvPaired = !!a.paired;
+  // Installed and paired are both only knowable from the PC checking in, so
+  // one signal marks the first three steps done.
+  const up = !!a.online;
+  ['rvStep1','rvStep2','rvStep3'].forEach(id => {{
+    const el = $(id); if(el) el.classList.toggle('done', up);
+  }});
+  if($('rvStep4')) $('rvStep4').classList.toggle('now', up);
   const txt = $('rvAgentText');
   strip.classList.toggle('online', !!a.online);
   $('rvChipEdge').classList.toggle('on', !!a.edge);
@@ -1939,6 +1994,17 @@ function rvAgentRender(d){{
   txt.textContent = line;
   txt.className = 'rv-agent-state' + (cls ? ' ' + cls : '');
 
+  // A finished run has to announce itself: by then the user is looking at the
+  // SAP window, not at this tab. Once per job, never on a reload.
+  if(job && (job.state === 'done' || job.state === 'cancelled')
+     && job.id !== rvToldAbout){{
+    // Silent on the first poll: a result already sitting there when the page
+    // loads is old news. Every later finish gets announced, once.
+    if(!rvFirstPoll) rvAnnounce(line);
+    rvToldAbout = job.id;
+  }}
+  rvFirstPoll = false;
+
   // The button may only promise work a PC is actually listening for.
   const btn = $('rvSubmitSap');
   if(btn){{
@@ -1974,6 +2040,12 @@ async function rvSubmitSap(){{
 // Pairing stays on the page: a token in a browser prompt cannot be selected
 // comfortably, reads like a broken dialog, and is unusable on a phone.
 let rvPaired = false;
+let rvToldAbout = null;   // the job id already announced
+let rvFirstPoll = true;
+
+function rvAnnounce(text){{
+  alert(text);
+}}
 
 function rvPairMsg(text){{
   const el = $('rvPairMsg');
@@ -2020,8 +2092,9 @@ if($('rvAgent')){{
   $('rvAgentPair').addEventListener('click', () => {{
     // Ask without force: if a PC is already paired the server says so and
     // nothing is retired, whatever this page happens to believe.
-    $('rvPairBox').hidden = false;
-    rvIssueToken(false);
+    const box = $('rvPairBox');
+    box.hidden = !box.hidden;
+    if(!box.hidden) rvIssueToken(false);
   }});
   $('rvPairReissue').addEventListener('click', () => rvIssueToken(true));
   $('rvPairClose').addEventListener('click', () => {{ $('rvPairBox').hidden = true; }});

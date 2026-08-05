@@ -90,6 +90,61 @@ def test_reissuing_leaves_other_accounts_alone(monkeypatch, tmp_path):
     assert core.resolve_agent_token(theirs) == "them"
 
 
+# ── the installer the browser hands out ─────────────────────────────────────
+
+def test_installer_is_one_self_contained_ascii_file():
+    """Telling someone to download three files into one folder is how setup
+    fails, so the installer writes its own companions."""
+    b = core._build_installer()
+    assert not [x for x in b if x > 0x7E], "cmd cannot parse non-ASCII"
+    text = b.decode("ascii")
+    assert "run-agent.vbs" in text and "agent-pair.bat" in text
+    assert "wayfinder-agent" in text            # the protocol registration
+    assert text.startswith("@echo off")
+
+
+def test_installer_echo_lines_survive_quoting():
+    """Inside double quotes cmd stops treating & and > as special and stops
+    treating ^ as an escape — escaping there prints the carets themselves."""
+    assert core._bat_echo('a > b & c') == 'echo(a ^> b ^& c'
+    assert core._bat_echo('"a > b & c"') == 'echo("a > b & c"'
+    assert core._bat_echo('%PATH%') == 'echo(%%PATH%%'
+    assert core._bat_echo('  indented') == 'echo(  indented'
+    assert core._bat_echo('') == 'echo('
+
+
+def test_installer_reproduces_its_companions_verbatim():
+    """What the generated file writes has to equal what is in the repo."""
+    from pathlib import Path
+    here = Path(core._SVC_DIR).parent / "scripts" / "sap_robot"
+    text = core._build_installer().decode("ascii")
+    for name in ("run-agent.vbs", "agent-pair.bat"):
+        emitted = [ln.split(" ", 2)[2] for ln in text.splitlines()
+                   if ln.startswith(f'>> "%HERE%{name}" echo(')]
+        # strip the `echo(` prefix and undo the escaping cmd would undo
+        got = []
+        for e in emitted:
+            body, inq = e[len("echo("):], False
+            out = []
+            i = 0
+            while i < len(body):
+                c = body[i]
+                if c == '"':
+                    inq = not inq
+                    out.append(c)
+                elif c == "%" and body[i:i + 2] == "%%":
+                    out.append("%")
+                    i += 1
+                elif c == "^" and not inq and i + 1 < len(body):
+                    out.append(body[i + 1])
+                    i += 1
+                else:
+                    out.append(c)
+                i += 1
+            got.append("".join(out))
+        assert got == (here / name).read_text().splitlines(), name
+
+
 # ── presence ────────────────────────────────────────────────────────────────
 
 def test_unpaired_then_paired_then_online(monkeypatch, tmp_path):
