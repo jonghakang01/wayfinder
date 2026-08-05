@@ -235,14 +235,14 @@ def test_cancelling_nothing_is_refused(monkeypatch, tmp_path):
     assert core._handle_agent_cancel("me")[2] == 409
 
 
-def test_a_late_report_after_cancel_still_marks_what_landed(monkeypatch, tmp_path):
+def test_a_late_report_after_cancel_still_offers_what_landed(monkeypatch, tmp_path):
     """Rows the agent saved are in SAP whatever the page decided."""
-    pool = _online(monkeypatch, tmp_path, [_tx(1)])
+    _online(monkeypatch, tmp_path, [_tx(1)])
     core._handle_agent_submit("me", {"ids": ["t1"]})
     jid = core._load_agent_job("me")["id"]
     core._handle_agent_cancel("me")
     core._handle_agent_result("me", {"job_id": jid, "saved": ["t1"]})
-    assert pool["entries"][0]["status"] == "in_progress"
+    assert core._handle_robot_state("me")[1]["pending_move"] == ["t1"]
 
 
 def test_rows_without_a_trip_tag_are_refused(monkeypatch, tmp_path):
@@ -283,19 +283,41 @@ def test_progress_moves_the_job_to_running(monkeypatch, tmp_path):
     assert job["state"] == "running" and job["progress"]["done"] == 1
 
 
-def test_result_marks_only_the_rows_that_landed(monkeypatch, tmp_path):
+def test_result_records_what_landed_without_moving_it(monkeypatch, tmp_path):
+    """강프로 asked to be asked, so the move is offered rather than done."""
     pool = _online(monkeypatch, tmp_path, [_tx(1), _tx(2), _tx(3)])
     core._handle_agent_submit("me", {"ids": ["t1", "t2", "t3"]})
     jid = core._load_agent_job("me")["id"]
     out = core._handle_agent_result("me", {
         "job_id": jid, "saved": ["t1", "t3"],
         "failures": [{"tx_id": "t2", "why": "GTE refused the Save"}]})
-    assert out[1]["ok"] and out[1]["marked"] == 2
+    assert out[1]["ok"] and out[1]["saved"] == 2
     assert {e["id"]: e["status"] for e in pool["entries"]} == {
-        "t1": "in_progress", "t2": "open", "t3": "in_progress"}
+        "t1": "open", "t2": "open", "t3": "open"}
     job = core._load_agent_job("me")
     assert job["state"] == "done" and job["results"]["saved"] == ["t1", "t3"]
     assert job["results"]["failures"][0]["why"] == "GTE refused the Save"
+
+
+def test_the_offer_names_exactly_the_saved_rows(monkeypatch, tmp_path):
+    _online(monkeypatch, tmp_path, [_tx(1), _tx(2), _tx(3)])
+    core._handle_agent_submit("me", {"ids": ["t1", "t2", "t3"]})
+    jid = core._load_agent_job("me")["id"]
+    core._handle_agent_result("me", {"job_id": jid, "saved": ["t1", "t3"]})
+    st = core._handle_robot_state("me")[1]
+    assert sorted(st["pending_move"]) == ["t1", "t3"]
+
+
+def test_the_offer_disappears_once_the_rows_have_moved(monkeypatch, tmp_path):
+    """They can also be moved from the list by hand — an offer that outlives
+    what it offers is worse than none."""
+    pool = _online(monkeypatch, tmp_path, [_tx(1)])
+    core._handle_agent_submit("me", {"ids": ["t1"]})
+    jid = core._load_agent_job("me")["id"]
+    core._handle_agent_result("me", {"job_id": jid, "saved": ["t1"]})
+    assert core._handle_robot_state("me")[1]["pending_move"] == ["t1"]
+    pool["entries"][0]["status"] = "in_progress"
+    assert core._handle_robot_state("me")[1]["pending_move"] == []
 
 
 def test_a_run_that_saved_nothing_still_reports(monkeypatch, tmp_path):
@@ -307,7 +329,8 @@ def test_a_run_that_saved_nothing_still_reports(monkeypatch, tmp_path):
     out = core._handle_agent_result("me", {
         "job_id": jid, "saved": [],
         "failures": [{"tx_id": "t1", "why": "Save refused"}]})
-    assert out[1]["marked"] == 0
+    assert out[1]["saved"] == 0
+    assert core._handle_robot_state("me")[1]["pending_move"] == []
     assert pool["entries"][0]["status"] == "open"
     assert core._load_agent_job("me")["state"] == "done"
 
@@ -328,14 +351,14 @@ def test_a_result_for_an_unknown_job_is_refused(monkeypatch, tmp_path):
     assert core._handle_agent_result("me", {"job_id": "wrong", "saved": ["t1"]})[2] == 404
 
 
-def test_result_cannot_mark_rows_outside_the_pool(monkeypatch, tmp_path):
-    """The agent reports ids; the server still only touches its own rows."""
+def test_the_offer_never_names_a_row_outside_the_pool(monkeypatch, tmp_path):
+    """The agent reports ids; the server still only offers its own rows."""
     pool = _online(monkeypatch, tmp_path, [_tx(1)])
     core._handle_agent_submit("me", {"ids": ["t1"]})
     jid = core._load_agent_job("me")["id"]
-    out = core._handle_agent_result("me", {"job_id": jid,
-                                          "saved": ["t1", "someone-elses-row"]})
-    assert out[1]["marked"] == 1
+    core._handle_agent_result("me", {"job_id": jid,
+                                     "saved": ["t1", "someone-elses-row"]})
+    assert core._handle_robot_state("me")[1]["pending_move"] == ["t1"]
     assert [e["id"] for e in pool["entries"]] == ["t1"]
 
 

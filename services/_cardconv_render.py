@@ -1403,6 +1403,8 @@ def _render_review(user: str) -> str:
     <span class="rv-agent-state" id="rvAgentText">Checking the SAP agent…</span>
     <button class="btn btn-ghost btn-sm" id="rvAgentCancel" hidden
             title="Stop waiting on this run — use it when the PC went down mid-run">✕ Cancel run</button>
+    <button class="btn btn-secondary btn-sm" id="rvMovePending" hidden
+            title="Mark the rows the agent saved as submitted to SAP">⏳ Move to In progress</button>
     <span style="flex:1"></span>
     <details class="rv-agent-detail" id="rvAgentDetail">
       <summary>details</summary>
@@ -1948,6 +1950,10 @@ function rvAgentRender(d){{
   const fails = (res.failures || []).length;
   const busy = job && (job.state === 'queued' || job.state === 'running');
   $('rvAgentCancel').hidden = !busy;
+  const pending = rvPendingMove = d.pending_move || [];
+  const mv = $('rvMovePending');
+  mv.hidden = busy || !pending.length;
+  mv.textContent = '⏳ Move ' + pending.length + ' to In progress';
 
   // One line, and it says the next thing to do rather than listing states.
   // The three signals underneath are debugging aids; they belong in details.
@@ -1992,7 +1998,7 @@ function rvAgentRender(d){{
      && job.id !== rvToldAbout){{
     // Silent on the first poll: a result already sitting there when the page
     // loads is old news. Every later finish gets announced, once.
-    if(!rvFirstPoll) rvAnnounce(line);
+    if(!rvFirstPoll) rvAnnounce(line, d.pending_move || []);
     rvToldAbout = job.id;
   }}
   rvFirstPoll = false;
@@ -2033,10 +2039,27 @@ async function rvSubmitSap(){{
 // comfortably, reads like a broken dialog, and is unusable on a phone.
 let rvPaired = false;
 let rvToldAbout = null;   // the job id already announced
+let rvPendingMove = [];   // saved rows still waiting to be moved
 let rvFirstPoll = true;
 
-function rvAnnounce(text){{
+async function rvMoveSaved(ids){{
+  const r = await fetch('/cardconv/review/status', {{
+    method: 'POST', headers: {{'Content-Type': 'application/json'}},
+    body: JSON.stringify({{ids: ids, status: 'in_progress'}})
+  }});
+  const d = await r.json().catch(() => ({{}}));
+  if(!d.ok){{ alert('Could not move them: ' + (d.error || r.status)); return; }}
+  location.reload();          // the rows leave the open view
+}}
+
+function rvAnnounce(text, pending){{
   alert(text);
+  // Asked after the alert, not instead of it: rows left open are the ones the
+  // next export hands the agent again, so the offer has to be explicit.
+  if(pending && pending.length
+     && confirm(pending.length + ' row(s) were saved. Move them to In progress now?')){{
+    rvMoveSaved(pending);
+  }}
 }}
 
 function rvPairMsg(text){{
@@ -2104,6 +2127,7 @@ if($('rvAgent')){{
     }}, 2000);
   }});
   if($('rvSubmitSap')) $('rvSubmitSap').addEventListener('click', rvSubmitSap);
+  $('rvMovePending').addEventListener('click', () => rvMoveSaved(rvPendingMove));
   $('rvAgentCancel').addEventListener('click', async () => {{
     if(!confirm('Stop waiting on this run? Rows already saved in SAP stay saved.')) return;
     await fetch('/cardconv/review/cancel_sap', {{method: 'POST'}});

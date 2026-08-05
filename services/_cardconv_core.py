@@ -4670,10 +4670,10 @@ def _handle_agent_state(username: str, body: dict):
 def _handle_agent_result(username: str, body: dict):
     """POST /cardconv/agent/result — what actually landed in SAP.
 
-    This is where the rows finally move: the agent cannot mark them itself,
-    and leaving them open is what re-submitted them the next time round
-    (2026-08-04). Unlike the old file drop, this works from any server the
-    page is served from — the PC reaches in, not the other way round."""
+    The rows are recorded here but not moved: 강프로 asked to be asked
+    (2026-08-05), so Review offers the move once the run's own alert is out of
+    the way. Leaving them open is what re-submits them next time, so the offer
+    stands until it is taken — see `pending_move` below."""
     jid = body.get("job_id")
     jid = jid[0] if isinstance(jid, list) else jid
     job = _load_agent_job(username)
@@ -4681,13 +4681,6 @@ def _handle_agent_result(username: str, body: dict):
         return ("json", {"error": "unknown job"}, 404)
     saved = [str(i) for i in (body.get("saved") or []) if i]
     fails = body.get("failures") or []
-    pool = _load_tx_pool(username)
-    open_ids = [e.get("id") for e in pool["entries"]
-                if e.get("id") in set(saved)
-                and (e.get("status") or "open") == "open"]
-    if open_ids:
-        _handle_review_set_status(username,
-                                 {"ids": open_ids, "status": "in_progress"})
     filled = body.get("filled")
     job.update(state="done",
                progress={"done": len(saved),
@@ -4699,13 +4692,26 @@ def _handle_agent_result(username: str, body: dict):
     _touch_job(job)
     _save_agent_job(username, job)
     _agent_seen(username)
-    return ("json", {"ok": True, "marked": len(open_ids)})
+    return ("json", {"ok": True, "saved": len(saved)})
+
+
+def _pending_move(username: str, job: dict) -> list:
+    """Saved rows still sitting open — the offer Review keeps making.
+
+    Recomputed rather than stored: the user may move them from the list by
+    hand, and an offer that outlives what it is offering is worse than none."""
+    saved = {str(i) for i in ((job.get("results") or {}).get("saved") or []) if i}
+    if not saved:
+        return []
+    return [e.get("id") for e in _load_tx_pool(username)["entries"]
+            if e.get("id") in saved and (e.get("status") or "open") == "open"]
 
 
 def _handle_robot_state(username: str):
     """GET /cardconv/robot/state — everything Review's status strip shows."""
-    return ("json", {"agent": _agent_status(username),
-                     "job": _load_agent_job(username) or None})
+    job = _load_agent_job(username) or None
+    return ("json", {"agent": _agent_status(username), "job": job,
+                     "pending_move": _pending_move(username, job) if job else []})
 
 
 def _adopt_robot_result(username: str) -> str:
