@@ -1,5 +1,5 @@
 @echo off
-REM One-time setup for the cardconv Review 🤖 button (wayfinder-robot://).
+REM One-time setup for the cardconv Review [robot] button (wayfinder-robot://).
 REM The protocol does NOT launch the bat directly: a corporate security
 REM agent kills browser-spawned console trees within a second
 REM (2026-08-03). Instead the protocol fires a Scheduled Task, which

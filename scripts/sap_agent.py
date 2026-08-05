@@ -34,11 +34,29 @@ from sap_trip_robot import (SCREEN_URL_PART, SEL, _find_screen, _grid_total,  # 
                             _ensure_form_open, fill_line)
 
 CONFIG_FILE = Path.home() / ".wayfinder-agent.json"
+LOCK_FILE = Path.home() / ".wayfinder-agent.lock"
 POLL_SEC = 5          # matches the page's own polling, so the strip feels live
 HEARTBEAT_SEC = 10    # AGENT_ONLINE_SEC on the server is 25
 
 
-def _config():
+def _claim_single_instance():
+    """Hold a lock for as long as this process lives, or bail out.
+
+    Both the Startup entry and the pairing handler start the agent, so two can
+    easily be asked for. Two agents polling the same queue would pick up the
+    same job and key every line into SAP twice."""
+    import fcntl
+    f = LOCK_FILE.open("w")
+    try:
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return None
+    return f          # kept open on purpose: closing it drops the lock
+
+
+def _config(quiet: bool = False):
+    """(base_url, token). Returns None when quiet and nothing is configured —
+    the polling loop calls it every round to notice a fresh pairing."""
     cfg = {}
     try:
         cfg = json.loads(CONFIG_FILE.read_text())
@@ -47,9 +65,10 @@ def _config():
     base = os.environ.get("WAYFINDER_BASE_URL") or cfg.get("base_url") or ""
     token = os.environ.get("WAYFINDER_AGENT_TOKEN") or cfg.get("token") or ""
     if not base or not token:
-        print(f"no base_url/token — write {CONFIG_FILE}:\n"
-              '  {"base_url": "http://localhost:8080", "token": "<paste from '
-              'Review → Pair a PC>"}')
+        if quiet:
+            return None
+        print("this PC is not paired yet — open Review in the browser and "
+              'click "Pair a PC", then "Pair this PC".')
         sys.exit(1)
     return base.rstrip("/"), token
 
@@ -196,6 +215,10 @@ def main():
         sys.stdout.reconfigure(line_buffering=True)
     except AttributeError:
         pass
+    lock = _claim_single_instance()
+    if lock is None:
+        print("another agent is already running — nothing to do.")
+        return
     BASE, TOKEN = _config()
     once = "--once" in sys.argv
     dry_run = "--dry-run" in sys.argv
@@ -211,6 +234,12 @@ def main():
     last_beat = 0.0
     with sync_playwright() as p:
         while True:
+            # Re-read every round: pairing rewrites this file, and requiring a
+            # restart to notice would put the user back in a terminal.
+            fresh = _config(quiet=True)
+            if fresh and fresh != (BASE, TOKEN):
+                BASE, TOKEN = fresh
+                print(f"config changed — now reporting to {BASE}")
             edge, screen = _look_at_edge(p)
             now = time.time()
             if now - last_beat >= HEARTBEAT_SEC:
