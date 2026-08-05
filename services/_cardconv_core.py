@@ -4430,6 +4430,23 @@ def _issue_agent_token(username: str) -> str:
     return token
 
 
+def _handle_agent_pair(username: str, body: dict):
+    """POST /cardconv/robot/pair — hand out a token, but never by accident.
+
+    Minting retires the previous token, which silently stops a PC that is
+    happily working. The page used to decide whether that was safe from a
+    polled flag, so a click landing before the first poll wiped a live pairing
+    (observed 2026-08-05). The server refuses instead: without an explicit
+    force it reports that a PC is already paired and mints nothing."""
+    force = body.get("force")
+    force = force[0] if isinstance(force, list) else force
+    force = str(force).lower() in ("1", "true", "yes", "on")
+    if _agent_token_of(username) and not force:
+        return ("json", {"ok": True, "paired": True})
+    return ("json", {"ok": True, "paired": False,
+                     "token": _issue_agent_token(username)})
+
+
 def _agent_token_of(username: str) -> str:
     for t, r in _load_agent_tokens().items():
         if (r or {}).get("user") == username:

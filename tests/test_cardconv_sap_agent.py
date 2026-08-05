@@ -56,6 +56,33 @@ def test_reissuing_retires_the_previous_token(monkeypatch, tmp_path):
     assert core.resolve_agent_token(new) == "someone"
 
 
+def test_pairing_refuses_to_mint_over_a_live_pairing(monkeypatch, tmp_path):
+    """A click landing before the page knew a PC was paired used to wipe it —
+    the decision cannot live in the client (observed 2026-08-05)."""
+    _wire(monkeypatch, tmp_path, [])
+    first = core._handle_agent_pair("me", {})[1]
+    assert first["token"] and first["paired"] is False
+    again = core._handle_agent_pair("me", {})[1]
+    assert again["paired"] is True and "token" not in again
+    assert core.resolve_agent_token(first["token"]) == "me"   # still works
+
+
+def test_pairing_mints_when_told_to(monkeypatch, tmp_path):
+    _wire(monkeypatch, tmp_path, [])
+    old = core._handle_agent_pair("me", {})[1]["token"]
+    new = core._handle_agent_pair("me", {"force": True})[1]["token"]
+    assert new and new != old
+    assert core.resolve_agent_token(old) is None
+
+
+def test_force_accepts_the_shapes_a_form_post_sends(monkeypatch, tmp_path):
+    _wire(monkeypatch, tmp_path, [])
+    core._handle_agent_pair("me", {})
+    assert "token" in core._handle_agent_pair("me", {"force": ["true"]})[1]
+    assert "token" in core._handle_agent_pair("me", {"force": "1"})[1]
+    assert "token" not in core._handle_agent_pair("me", {"force": "no"})[1]
+
+
 def test_reissuing_leaves_other_accounts_alone(monkeypatch, tmp_path):
     _wire(monkeypatch, tmp_path, [])
     theirs = core._issue_agent_token("them")

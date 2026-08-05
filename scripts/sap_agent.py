@@ -22,6 +22,7 @@ Run:
 """
 import json
 import os
+import subprocess
 import sys
 import time
 import urllib.error
@@ -105,6 +106,26 @@ def _look_at_edge(p):
 def _gateway():
     from sap_trip_robot import _gateway_ip
     return _gateway_ip()
+
+
+def _open_edge():
+    """Ask Windows to start the robot Edge — the user should not have to.
+
+    Through the scheduled task rather than the .bat directly: a process tree
+    started from anything browser-ish is killed within about a second on this
+    network, and a task started by the scheduler is not in that tree (72차).
+    Signing in to Knox is still a person's job when the profile's session has
+    lapsed; that is the one step no agent can take."""
+    try:
+        r = subprocess.run(["schtasks.exe", "/run", "/tn", "WayfinderRobotEdge"],
+                           capture_output=True, timeout=25)
+        if r.returncode == 0:
+            print("  asked Windows to open the robot Edge.")
+            return True
+        print("  could not start the browser task — run 'Install SAP Agent' once.")
+    except Exception as e:
+        print(f"  could not start the browser task ({e})")
+    return False
 
 
 def run_job(p, job, dry_run=False):
@@ -197,6 +218,10 @@ def main():
                 last_beat = now
             job = _call("/cardconv/agent/job")
             if job and job.get("id"):
+                # Work arrived and no browser is up — open it rather than
+                # waiting fifteen minutes for someone to notice.
+                if not edge:
+                    _open_edge()
                 try:
                     run_job(p, job, dry_run)
                 except Exception as e:

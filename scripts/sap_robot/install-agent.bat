@@ -36,6 +36,18 @@ if errorlevel 1 (
   echo   done.
 )
 
+echo Registering the browser task so the agent can open Edge itself...
+REM On demand, not at logon: the agent triggers it when a job arrives. It has to
+REM be a task for the same reason the agent is one — a process tree spawned from
+REM anything browser-ish is killed within about a second on this network.
+schtasks /create /tn "WayfinderRobotEdge" /tr "\"%USERPROFILE%\Desktop\Open Robot Edge.bat\"" ^
+    /sc once /st 00:00 /rl limited /f >> "%LOG%" 2>&1
+if errorlevel 1 (
+  echo   FAILED — see %LOG%
+) else (
+  echo   done.
+)
+
 echo Starting the agent now...
 schtasks /run /tn "WayfinderAgent" >> "%LOG%" 2>&1
 if errorlevel 1 (

@@ -63,7 +63,7 @@ def handle(method, path, body, ctx=None):
     # Pairing must NOT live under /cardconv/agent/ — that prefix is the
     # token-authed door, and you cannot present the token you are asking for.
     if method == "POST" and path == "/cardconv/robot/pair":
-        return ("json", {"ok": True, "token": _issue_agent_token(user)})
+        return _handle_agent_pair(user, body)
     if method == "POST" and path == "/cardconv/review/vendor_kind":
         return _handle_review_vendor_kind(user, body)
     if method == "POST" and path == "/cardconv/review/companions":

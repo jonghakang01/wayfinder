@@ -1397,6 +1397,7 @@ def _render_review(user: str) -> str:
       <span class="rv-chip" id="rvChipScreen">Entry screen</span>
     </span>
     <span class="rv-agent-job" id="rvAgentJob" hidden></span>
+    <span class="rv-agent-need" id="rvAgentNeed" hidden></span>
     <span style="flex:1"></span>
     <button class="btn btn-ghost btn-sm" id="rvAgentPair"
             title="Issue this account's agent token and show it here — copy it into the agent on your PC">🔑 Pair a PC</button>
@@ -1588,6 +1589,8 @@ def _render_review(user: str) -> str:
 .rv-agent-job{{font-size:.8rem;color:var(--text)}}
 .rv-agent-job.ok{{color:var(--green-500);font-weight:600}}
 .rv-agent-job.warn{{color:var(--amber-500);font-weight:600}}
+.rv-agent-need{{font-size:.8rem;color:var(--text-muted)}}
+.rv-agent-need[hidden]{{display:none}}
 /* Pairing panel — the token and the two commands live on the page, because a
    browser prompt cannot be selected comfortably and is useless on a phone. */
 .rv-pair{{background:var(--surface-2);border:1px solid var(--border);
@@ -1886,6 +1889,16 @@ function rvAgentRender(d){{
   chips.hidden = !a.online;
   $('rvChipEdge').classList.toggle('on', !!a.edge);
   $('rvChipScreen').classList.toggle('on', !!a.screen);
+  // The agent opens Edge itself, so the only thing left to say is the part a
+  // person has to do: signing in, and reaching the entry screen.
+  const need = $('rvAgentNeed');
+  if(!a.online || a.screen){{ need.hidden = true; }}
+  else {{
+    need.hidden = false;
+    need.textContent = a.edge
+      ? 'Reach the trip’s Other Expense screen in the robot Edge (sign in to Knox if it asks).'
+      : 'The robot Edge is not up — Submit will open it, then sign in to Knox if it asks.';
+  }}
   // The button may only promise work a PC is actually listening for.
   const btn = $('rvSubmitSap');
   const busy = job && (job.state === 'queued' || job.state === 'running');
@@ -1948,9 +1961,15 @@ function rvPairMsg(text){{
 if($('rvAgent')){{
   // Opening the panel must never retire a working token, so a PC that is
   // already paired gets a warning and its own button instead of a dialog.
-  async function rvIssueToken(){{
-    const r = await fetch('/cardconv/robot/pair', {{method: 'POST'}});
+  async function rvIssueToken(force){{
+    // The server refuses to mint over a live pairing unless we say so, so the
+    // panel can be opened without the risk of stopping a working PC.
+    const r = await fetch('/cardconv/robot/pair', {{
+      method: 'POST', headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{force: !!force}})
+    }});
     const d = await r.json().catch(() => ({{}}));
+    if(d.paired && !d.token){{ rvShowAlreadyPaired(); return; }}
     if(!d.token){{ rvPairMsg('Pairing failed: ' + (d.error || r.status)); return; }}
     // base_url comes from the page itself, so a token issued on prod points at
     // prod — the agent cannot end up reporting to the wrong server.
@@ -1967,20 +1986,21 @@ if($('rvAgent')){{
     rvAgentPoll();
   }}
 
+  function rvShowAlreadyPaired(){{
+    $('rvPairJson').hidden = true;
+    $('rvPairLink').hidden = true;
+    $('rvPairWarn').hidden = false;
+    $('rvPairReissue').hidden = false;
+    rvPairMsg('');
+  }}
+
   $('rvAgentPair').addEventListener('click', () => {{
+    // Ask without force: if a PC is already paired the server says so and
+    // nothing is retired, whatever this page happens to believe.
     $('rvPairBox').hidden = false;
-    if(rvPaired){{
-      // Opening the panel must not retire a token a PC may still be using.
-      $('rvPairJson').hidden = true;
-      $('rvPairLink').hidden = true;
-      $('rvPairWarn').hidden = false;
-      $('rvPairReissue').hidden = false;
-      rvPairMsg('');
-    }} else {{
-      rvIssueToken();
-    }}
+    rvIssueToken(false);
   }});
-  $('rvPairReissue').addEventListener('click', rvIssueToken);
+  $('rvPairReissue').addEventListener('click', () => rvIssueToken(true));
   $('rvPairClose').addEventListener('click', () => {{ $('rvPairBox').hidden = true; }});
   // A paired PC starts checking in within seconds, so say so rather than
   // leaving the user guessing whether the click did anything.
