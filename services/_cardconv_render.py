@@ -1407,18 +1407,19 @@ def _render_review(user: str) -> str:
       <span style="flex:1"></span>
       <button class="btn btn-ghost btn-sm" id="rvPairClose">✕ Close</button>
     </div>
-    <div class="rv-pair-step">1 — save this as <code>~/.wayfinder-agent.json</code> on the PC that runs the agent</div>
-    <div class="rv-pair-warn" id="rvPairWarn" hidden>A PC is already paired. Issuing a new token stops the old one working.</div>
-    <pre class="rv-pair-code" id="rvPairJson" hidden></pre>
+    <div class="rv-pair-warn" id="rvPairWarn" hidden>This PC is already paired. Pairing again stops the old token working.</div>
+    <div class="rv-pair-step">One-time on the PC: double-click <code>Install SAP Agent</code> on your Desktop. After that the agent starts with Windows on its own.</div>
     <div class="rv-pair-row">
-      <button class="btn btn-primary btn-sm" id="rvPairCopy" hidden>📋 Copy</button>
-      <button class="btn btn-secondary btn-sm" id="rvPairReissue" hidden>🔄 Issue a new token</button>
+      <a class="btn btn-primary btn-sm" id="rvPairLink" href="#" hidden>🔗 Pair this PC</a>
+      <button class="btn btn-secondary btn-sm" id="rvPairReissue" hidden>🔄 Pair again</button>
       <span class="rv-pair-hint" id="rvPairMsg"></span>
     </div>
-    <div class="rv-pair-step">2 — open the robot Edge and reach the trip's Other Expense screen</div>
-    <div class="rv-pair-step">3 — start the agent, then come back here and use 📤 Submit to SAP</div>
-    <pre class="rv-pair-code">LD_LIBRARY_PATH=$HOME/.local/chromium-libs python3 ~/webapp/scripts/sap_agent.py --dry-run</pre>
-    <div class="rv-pair-hint">--dry-run fills every field and never presses Save — use it for the first run.</div>
+    <div class="rv-pair-step">Then open the robot Edge, reach the trip's Other Expense screen, and use 📤 Submit to SAP here.</div>
+    <details class="rv-pair-fallback">
+      <summary>The link did nothing?</summary>
+      <div class="rv-pair-step">The installer has not run on this PC yet. Run it, then click Pair again. Failing that, save this by hand as <code>~/.wayfinder-agent.json</code>:</div>
+      <pre class="rv-pair-code" id="rvPairJson" hidden></pre>
+    </details>
   </div>''' if user == ADMIN else '')
     # Trip rows are submitted one by one through SAP's own screen, so this is
     # the agent's door — the xlsx download deliberately excludes them.
@@ -1605,6 +1606,9 @@ def _render_review(user: str) -> str:
 /* Browser default [hidden] loses to any class that sets display, and .btn sets
    it twice (base + the mobile block), so every hideable part needs the pair. */
 .rv-pair-code[hidden],.rv-pair-warn[hidden],.rv-pair .btn[hidden]{{display:none!important}}
+.rv-pair-fallback{{font-size:.8rem;color:var(--text-muted)}}
+.rv-pair-fallback summary{{cursor:pointer;padding:2px 0}}
+.rv-pair-fallback[open] summary{{margin-bottom:7px}}
 .rv-robot-note{{background:var(--surface-2);border:1px solid var(--accent);
   border-radius:var(--radius-md);padding:10px 14px;margin-bottom:12px;
   font-size:.84rem;color:var(--text)}}
@@ -1950,21 +1954,25 @@ if($('rvAgent')){{
     if(!d.token){{ rvPairMsg('Pairing failed: ' + (d.error || r.status)); return; }}
     // base_url comes from the page itself, so a token issued on prod points at
     // prod — the agent cannot end up reporting to the wrong server.
+    const link = 'wayfinder-agent://pair?token=' + encodeURIComponent(d.token)
+               + '&base=' + encodeURIComponent(location.origin);
+    $('rvPairLink').href = link;
+    $('rvPairLink').hidden = false;
     $('rvPairJson').textContent = JSON.stringify(
       {{base_url: location.origin, token: d.token}}, null, 2);
     $('rvPairJson').hidden = false;
     $('rvPairReissue').hidden = true;
     $('rvPairWarn').hidden = true;
-    $('rvPairCopy').hidden = false;
-    rvPairMsg('');
+    rvPairMsg('Click Pair this PC — Windows hands it to the agent.');
     rvAgentPoll();
   }}
 
   $('rvAgentPair').addEventListener('click', () => {{
     $('rvPairBox').hidden = false;
     if(rvPaired){{
+      // Opening the panel must not retire a token a PC may still be using.
       $('rvPairJson').hidden = true;
-      $('rvPairCopy').hidden = true;
+      $('rvPairLink').hidden = true;
       $('rvPairWarn').hidden = false;
       $('rvPairReissue').hidden = false;
       rvPairMsg('');
@@ -1974,20 +1982,18 @@ if($('rvAgent')){{
   }});
   $('rvPairReissue').addEventListener('click', rvIssueToken);
   $('rvPairClose').addEventListener('click', () => {{ $('rvPairBox').hidden = true; }});
-  $('rvPairCopy').addEventListener('click', async () => {{
-    const text = $('rvPairJson').textContent;
-    try {{
-      await navigator.clipboard.writeText(text);
-      rvPairMsg('Copied.');
-    }} catch(e) {{
-      // clipboard needs a secure context — plain http on the server does not
-      // qualify, so fall back to selecting it for a manual copy.
-      const r = document.createRange();
-      r.selectNodeContents($('rvPairJson'));
-      const s = window.getSelection();
-      s.removeAllRanges(); s.addRange(r);
-      rvPairMsg('Selected — press Ctrl+C.');
-    }}
+  // A paired PC starts checking in within seconds, so say so rather than
+  // leaving the user guessing whether the click did anything.
+  $('rvPairLink').addEventListener('click', () => {{
+    rvPairMsg('Handed to the PC — waiting for the agent to check in…');
+    let tries = 0;
+    const t = setInterval(async () => {{
+      await rvAgentPoll();
+      if(++tries > 8) {{ clearInterval(t); return; }}
+      const on = $('rvAgent').classList.contains('online');
+      if(on){{ clearInterval(t); rvPairMsg('Paired — the agent is running.'); }}
+      else if(tries === 8){{ rvPairMsg('No check-in yet — has the installer been run on this PC?'); }}
+    }}, 2000);
   }});
   if($('rvSubmitSap')) $('rvSubmitSap').addEventListener('click', rvSubmitSap);
   rvAgentPoll();
