@@ -47,6 +47,23 @@ def handle(method, path, body, ctx=None):
         return _handle_review_reason(user, body)
     if method == "POST" and path == "/cardconv/review/usage":
         return _handle_review_usage(user, body)
+    # SAP agent — the PC-side robot. server.py resolves these from the agent
+    # token (no browser session) and dispatches straight here.
+    if method == "GET" and path == "/cardconv/agent/job":
+        return _handle_agent_job(user)
+    if method == "POST" and path == "/cardconv/agent/state":
+        return _handle_agent_state(user, body)
+    if method == "POST" and path == "/cardconv/agent/result":
+        return _handle_agent_result(user, body)
+    # Session-authed side of the same feature.
+    if method == "GET" and path == "/cardconv/robot/state":
+        return _handle_robot_state(user)
+    if method == "POST" and path == "/cardconv/review/submit_sap":
+        return _handle_agent_submit(user, body)
+    # Pairing must NOT live under /cardconv/agent/ — that prefix is the
+    # token-authed door, and you cannot present the token you are asking for.
+    if method == "POST" and path == "/cardconv/robot/pair":
+        return ("json", {"ok": True, "token": _issue_agent_token(user)})
     if method == "POST" and path == "/cardconv/review/vendor_kind":
         return _handle_review_vendor_kind(user, body)
     if method == "POST" and path == "/cardconv/review/companions":

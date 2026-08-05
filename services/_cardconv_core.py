@@ -4385,6 +4385,210 @@ def _effective_usage(e, rcpts: dict) -> str:
     return e.get("usage") or "Regular"
 
 
+# ── SAP agent: server keeps the work list and the state, the agent on the
+#    user's PC does the typing. GTE only opens under each user's own SSO, so
+#    the hands have to be there; deciding what to submit and remembering what
+#    happened is the server's job (spec 2026-08-05-sap-agent-multiuser).
+AGENT_TOKENS_FILE = DATA_DIR / "agent_tokens.json"
+# An agent that has not checked in for this long is treated as gone: the
+# button must not promise work to a PC that stopped listening.
+AGENT_ONLINE_SEC = 25
+
+
+def _load_agent_tokens() -> dict:
+    try:
+        return json.loads(AGENT_TOKENS_FILE.read_text())
+    except Exception:
+        return {}
+
+
+def _save_agent_tokens(toks: dict):
+    _ensure_dirs()
+    AGENT_TOKENS_FILE.write_text(json.dumps(toks, ensure_ascii=False, indent=2))
+
+
+def resolve_agent_token(token: str):
+    """The login a token belongs to, or None. Kept public: server.py resolves
+    the agent's identity before dispatch because the agent has no session."""
+    token = (token or "").strip()
+    if not token:
+        return None
+    rec = _load_agent_tokens().get(token)
+    return (rec or {}).get("user") or None
+
+
+def _issue_agent_token(username: str) -> str:
+    """Mint this user's agent token, retiring any earlier one — a token that
+    was pasted onto a PC that no longer runs it should stop working."""
+    toks = {t: r for t, r in _load_agent_tokens().items()
+            if (r or {}).get("user") != username}
+    token = uuid.uuid4().hex
+    toks[token] = {"user": username,
+                   "created_at": datetime.now().isoformat(timespec="seconds"),
+                   "last_seen": None, "state": {}}
+    _save_agent_tokens(toks)
+    return token
+
+
+def _agent_token_of(username: str) -> str:
+    for t, r in _load_agent_tokens().items():
+        if (r or {}).get("user") == username:
+            return t
+    return ""
+
+
+def _agent_seen(username: str, state: dict = None):
+    """Record a check-in. The timestamp is what tells Review the PC is there."""
+    toks = _load_agent_tokens()
+    for t, r in toks.items():
+        if (r or {}).get("user") == username:
+            r["last_seen"] = datetime.now().isoformat(timespec="seconds")
+            if state is not None:
+                r["state"] = state
+            _save_agent_tokens(toks)
+            return
+
+
+def _agent_status(username: str) -> dict:
+    """What Review shows: is the PC listening, and what does it see."""
+    rec = next((r for r in _load_agent_tokens().values()
+                if (r or {}).get("user") == username), None)
+    if not rec:
+        return {"paired": False, "online": False}
+    online = False
+    if rec.get("last_seen"):
+        try:
+            age = (datetime.now()
+                   - datetime.fromisoformat(rec["last_seen"])).total_seconds()
+            online = age <= AGENT_ONLINE_SEC
+        except ValueError:
+            online = False
+    st = rec.get("state") or {}
+    return {"paired": True, "online": online, "last_seen": rec.get("last_seen"),
+            "edge": bool(st.get("edge")), "screen": bool(st.get("screen"))}
+
+
+def _agent_job_file(username: str) -> Path:
+    return DATA_DIR / f"agent_job_{_pkey(username)}.json"
+
+
+def _load_agent_job(username: str) -> dict:
+    try:
+        return json.loads(_agent_job_file(username).read_text())
+    except Exception:
+        return {}
+
+
+def _save_agent_job(username: str, job: dict):
+    _ensure_dirs()
+    _agent_job_file(username).write_text(json.dumps(job, ensure_ascii=False, indent=2))
+
+
+def _handle_agent_submit(username: str, body: dict):
+    """POST /cardconv/review/submit_sap — queue the selected trip rows.
+
+    One job per user at a time: SAP's screen is a single form and the agent
+    types into it serially, so a second job would interleave keystrokes."""
+    raw = body.get("ids", [])
+    ids = [str(i) for i in (raw if isinstance(raw, list) else [raw]) if i]
+    if not ids:
+        return ("json", {"error": "no ids"}, 400)
+    st = _agent_status(username)
+    if not st.get("online"):
+        return ("json", {"error": "agent offline"}, 409)
+    cur = _load_agent_job(username)
+    if cur.get("state") in ("queued", "running"):
+        return ("json", {"error": "a job is already in progress"}, 409)
+    trips = _trip_lines(username, {"ids": [",".join(ids)]})
+    if not trips:
+        return ("json", {"error": "no trip-tagged rows in the selection"}, 400)
+    if len(trips) > 1:
+        return ("json", {"error": "select one trip at a time: "
+                                  + ", ".join(trips)}, 400)
+    trip, lines = next(iter(trips.items()))
+    job = dict(_trip_payload(username, trips),
+               id=uuid.uuid4().hex[:12], state="queued", trip=trip,
+               progress={"done": 0, "total": len(lines)},
+               results={}, note="")
+    _save_agent_job(username, job)
+    return ("json", {"ok": True, "job_id": job["id"], "trip": trip,
+                     "total": len(lines)})
+
+
+def _handle_agent_job(username: str):
+    """GET /cardconv/agent/job — the work waiting for this PC, or nothing."""
+    _agent_seen(username)
+    job = _load_agent_job(username)
+    if job.get("state") != "queued":
+        return ("json", {})
+    return ("json", job)
+
+
+def _handle_agent_state(username: str, body: dict):
+    """POST /cardconv/agent/state — the agent's heartbeat.
+
+    Carries what only the PC can know: whether the robot Edge is up and
+    whether the SAP entry screen is open. Review reads it back so the answer
+    to "why is nothing happening" is on screen instead of in a console."""
+    def _b(k):
+        v = body.get(k)
+        v = v[0] if isinstance(v, list) else v
+        return str(v).lower() in ("1", "true", "yes", "on")
+    _agent_seen(username, {"edge": _b("edge"), "screen": _b("screen")})
+    job = _load_agent_job(username)
+    jid = body.get("job_id")
+    jid = jid[0] if isinstance(jid, list) else jid
+    if job and jid and job.get("id") == jid:
+        done = body.get("done")
+        done = done[0] if isinstance(done, list) else done
+        try:
+            job.setdefault("progress", {})["done"] = int(done)
+        except (TypeError, ValueError):
+            pass
+        if job.get("state") == "queued":
+            job["state"] = "running"
+        _save_agent_job(username, job)
+    return ("json", {"ok": True})
+
+
+def _handle_agent_result(username: str, body: dict):
+    """POST /cardconv/agent/result — what actually landed in SAP.
+
+    This is where the rows finally move: the agent cannot mark them itself,
+    and leaving them open is what re-submitted them the next time round
+    (2026-08-04). Unlike the old file drop, this works from any server the
+    page is served from — the PC reaches in, not the other way round."""
+    jid = body.get("job_id")
+    jid = jid[0] if isinstance(jid, list) else jid
+    job = _load_agent_job(username)
+    if not job or (jid and job.get("id") != jid):
+        return ("json", {"error": "unknown job"}, 404)
+    saved = [str(i) for i in (body.get("saved") or []) if i]
+    fails = body.get("failures") or []
+    pool = _load_tx_pool(username)
+    open_ids = [e.get("id") for e in pool["entries"]
+                if e.get("id") in set(saved)
+                and (e.get("status") or "open") == "open"]
+    if open_ids:
+        _handle_review_set_status(username,
+                                 {"ids": open_ids, "status": "in_progress"})
+    job.update(state="done",
+               progress={"done": len(saved),
+                         "total": (job.get("progress") or {}).get("total",
+                                                                  len(saved))},
+               results={"saved": saved, "failures": fails},
+               finished_at=datetime.now().isoformat(timespec="seconds"))
+    _save_agent_job(username, job)
+    _agent_seen(username)
+    return ("json", {"ok": True, "marked": len(open_ids)})
+
+
+def _handle_robot_state(username: str):
+    """GET /cardconv/robot/state — everything Review's status strip shows."""
+    return ("json", {"agent": _agent_status(username),
+                     "job": _load_agent_job(username) or None})
+
+
 def _adopt_robot_result(username: str) -> str:
     """Adopt the trip robot's last run: the rows it saved into SAP become
     in_progress. Returns a note for Review, or "" when there is nothing.
@@ -4457,9 +4661,11 @@ def _vendor_kind(e: dict, rc: dict = None) -> str:
     return "O" if cur and cur != "USD" else "D"
 
 
-def _handle_trip_export(username: str, query: dict):
-    """GET /cardconv/trip/export — JSON of trip-tagged rows for the SAP trip
-    submission robot (one submission per line; spec 2026-08-03).
+def _trip_lines(username: str, query: dict) -> dict:
+    """{trip name: [line, ...]} for the SAP trip flow — one submission per line.
+
+    Shared by the ✈ JSON download and the agent job, so the file a human keys
+    in by hand and the work the agent picks up can never drift apart.
 
     Same selection semantics as the xlsx download (ids, or open + from/to);
     keeps only rows whose usage tag names a trip. Lines carry every value the
@@ -4499,21 +4705,33 @@ def _handle_trip_export(username: str, query: dict):
             "employee_id":  FIXED["employee_id"],
             "tx_id":        e.get("id"),
         })
-    if not trips:
-        return ("html", "<h2 style='padding:40px'>No trip-tagged rows in the "
-                        "selection — set a trip name in the usage tag first "
-                        "(anything other than Regular).</h2>", 404)
-    payload = {
+    return trips
+
+
+def _trip_payload(username: str, trips: dict) -> dict:
+    """The envelope both the ✈ download and the agent job travel in."""
+    return {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "user": username,
         # The login alone does not say which card profile these rows came from
         # — every profile shares it, while the rows live in per-profile files.
-        # The robot echoes this back so the writeback cannot land on the wrong
+        # Whoever carries this back cannot land the writeback on the wrong
         # ledger (and quietly lose itself doing so).
         "pkey": _pkey(username),
         "trips": trips,
     }
-    data = json.dumps(payload, ensure_ascii=False, indent=2).encode()
+
+
+def _handle_trip_export(username: str, query: dict):
+    """GET /cardconv/trip/export — the same lines as a downloadable file, kept
+    as the hand-keying path for when no agent is running."""
+    trips = _trip_lines(username, query)
+    if not trips:
+        return ("html", "<h2 style='padding:40px'>No trip-tagged rows in the "
+                        "selection — set a trip name in the usage tag first "
+                        "(anything other than Regular).</h2>", 404)
+    data = json.dumps(_trip_payload(username, trips),
+                      ensure_ascii=False, indent=2).encode()
     out_fn = f"trip_submit_{_export_tag(username)}_{date.today().isoformat()}.json"
     return ("file_inline", data, "application/json", out_fn)
 

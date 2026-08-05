@@ -1,5 +1,6 @@
 # 출장비 SAP 상신 자동화 — 다중 유저 (PC 에이전트 + 서버 큐)
-- 상태: draft
+- 상태: **approved** (강프로 2026-08-05) — Phase 1 착수
+- 결정: Q1 배포 정책 OK / Q2 파일럿 = 강프로 본인(→ *타인 PC·타인 사원번호는 첫 동료 배포까지 미검증으로 남음*) / Q3 admin 승인 / Q4 로그온 상시 실행 / Q5 Edge 전용 프로필 유지
 - 대상: cardconv (Review·설정·export), 신규 PC 에이전트, scripts/sap_trip_robot.py(대체 예정)
 
 ## 문제

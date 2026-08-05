@@ -1386,6 +1386,26 @@ def _render_review(user: str) -> str:
                   'title="Launch the robot Edge (Knox Portal + GTE tabs, CDP relay). '
                   'One-time setup: run install-robot-protocol.bat">🤖 Robot</a>')
                  if user == ADMIN else '')
+    # The agent strip. Everything in it is filled by polling the server, which
+    # is the whole point: the PC reports in, so the state shows up on whichever
+    # server the page came from instead of only on localhost.
+    agent_strip = ('''
+  <div class="filter-bar rv-agent" id="rvAgent">
+    <span class="rv-agent-state" id="rvAgentText">Checking the SAP agent…</span>
+    <span class="rv-agent-chips" id="rvAgentChips" hidden>
+      <span class="rv-chip" id="rvChipEdge">Robot Edge</span>
+      <span class="rv-chip" id="rvChipScreen">Entry screen</span>
+    </span>
+    <span class="rv-agent-job" id="rvAgentJob" hidden></span>
+    <span style="flex:1"></span>
+    <button class="btn btn-ghost btn-sm" id="rvAgentPair"
+            title="Issue this account's agent token and show it once — paste it into the agent on your PC">🔑 Pair a PC</button>
+  </div>''' if user == ADMIN else '')
+    # Trip rows are submitted one by one through SAP's own screen, so this is
+    # the agent's door — the xlsx download deliberately excludes them.
+    submit_sap_btn = ('<button class="btn btn-primary btn-sm" id="rvSubmitSap" '
+                      'title="Hand the selected trip rows to the SAP agent on your PC">'
+                      '📤 Submit to SAP</button>' if user == ADMIN else '')
     download_btn = (('<span class="fb-pop-wrap">'
                      '<button class="fb-more-btn" id="rvExport" aria-expanded="false">⬇ Export <span class="chev">▾</span></button>'
                      '<div class="fb-menu" id="rvExportMenu">'
@@ -1532,6 +1552,22 @@ def _render_review(user: str) -> str:
 .rv-kind-sel:hover{{border-color:var(--border);color:var(--text)}}
 .rv-kind-sel:focus{{border-color:var(--accent);outline:none}}
 .rv-kind-sel.manual{{color:var(--accent);font-weight:600}}
+/* Agent strip: a dot that means "a PC is listening", two chips only it can
+   report, and the running job's own line. */
+.rv-agent{{gap:12px;flex-wrap:wrap}}
+.rv-agent-state{{font-size:.8rem;color:var(--text-muted);display:flex;align-items:center;gap:7px}}
+.rv-agent-state::before{{content:'';width:8px;height:8px;border-radius:50%;
+  background:var(--text-muted);flex:0 0 8px}}
+.rv-agent.online .rv-agent-state{{color:var(--text)}}
+.rv-agent.online .rv-agent-state::before{{background:var(--green-500)}}
+.rv-agent-chips{{display:flex;gap:6px}}
+.rv-agent .rv-chip{{font-size:.7rem;font-weight:700;text-transform:uppercase;
+  letter-spacing:.04em;padding:3px 8px;border-radius:999px;
+  border:1px solid var(--border);color:var(--text-muted)}}
+.rv-agent .rv-chip.on{{border-color:var(--green-500);color:var(--green-500)}}
+.rv-agent-job{{font-size:.8rem;color:var(--text)}}
+.rv-agent-job.ok{{color:var(--green-500);font-weight:600}}
+.rv-agent-job.warn{{color:var(--amber-500);font-weight:600}}
 .rv-robot-note{{background:var(--surface-2);border:1px solid var(--accent);
   border-radius:var(--radius-md);padding:10px 14px;margin-bottom:12px;
   font-size:.84rem;color:var(--text)}}
@@ -1651,6 +1687,7 @@ body:has(.fb-menu.open) .wf-back,body:has(.fb-menu.open) #wfThemeBtn{{display:no
       <input type="checkbox" id="rvSelAll" style="width:15px;height:15px;accent-color:var(--accent);cursor:pointer"> Select all
     </label>
     <span class="fb-selcount" id="rvSelCount" hidden>0 selected</span>
+    {submit_sap_btn}
     <button class="btn btn-secondary btn-sm" id="rvMarkProg" title="Submitted to SAP, awaiting approval">⏳ Mark in progress</button>
     <button class="btn btn-primary btn-sm" id="rvMarkDone">✔ Mark completed</button>
     <button class="btn btn-ghost btn-sm" id="rvMarkOpen">↩ Reopen</button>
@@ -1658,6 +1695,7 @@ body:has(.fb-menu.open) .wf-back,body:has(.fb-menu.open) #wfThemeBtn{{display:no
     <span style="flex:1"></span>
     <span class="rv-hint" style="font-size:.76rem;color:var(--text-muted)">Click a card above to switch views</span>
   </div>
+  {agent_strip}
   {robot_note_html}
 
   <div class="notepad-card">
@@ -1785,6 +1823,87 @@ async function rvChangeUsage(sel){{
   sel.dataset.cur = val;
   sel.closest('.rv-item').dataset.usage = val;
   rvSyncUsageFilter();
+}}
+
+// ── SAP agent strip. The PC reports in and this reads it back, so "why is
+//    nothing happening" is answered on screen instead of in a console. Only
+//    the PC can know whether Edge and the entry screen are up.
+function rvAgentRender(d){{
+  const strip = $('rvAgent');
+  if(!strip || !d) return;
+  const a = d.agent || {{}}, job = d.job;
+  const txt = $('rvAgentText'), chips = $('rvAgentChips'), jb = $('rvAgentJob');
+  strip.classList.toggle('online', !!a.online);
+  if(!a.paired){{
+    txt.textContent = 'No PC paired yet — pair one to submit from here.';
+  }} else if(!a.online){{
+    txt.textContent = 'Agent offline' + (a.last_seen ? ' — last seen ' + a.last_seen.replace('T', ' ') : '');
+  }} else {{
+    txt.textContent = 'Agent online';
+  }}
+  chips.hidden = !a.online;
+  $('rvChipEdge').classList.toggle('on', !!a.edge);
+  $('rvChipScreen').classList.toggle('on', !!a.screen);
+  // The button may only promise work a PC is actually listening for.
+  const btn = $('rvSubmitSap');
+  const busy = job && (job.state === 'queued' || job.state === 'running');
+  if(btn){{
+    btn.disabled = !a.online || !!busy;
+    btn.title = !a.online ? 'The agent on your PC is not running'
+              : busy ? 'A submission is already in progress'
+              : 'Hand the selected trip rows to the SAP agent on your PC';
+  }}
+  if(!job){{ jb.hidden = true; return; }}
+  jb.hidden = false;
+  const p = job.progress || {{}}, res = job.results || {{}};
+  const fails = (res.failures || []).length;
+  if(job.state === 'done'){{
+    const saved = (res.saved || []).length, total = p.total || saved + fails;
+    // Anything left undone is a warning, however many landed — a partial run
+    // wearing a tick is how "nothing was saved" got read as success before.
+    jb.className = 'rv-agent-job ' + (fails ? 'warn' : (saved ? 'ok' : 'warn'));
+    jb.textContent = (fails ? '⚠ ' : '✅ ') + saved + '/' + total + " saved to SAP for '" + job.trip + "'"
+      + (fails ? ' — ' + fails + (fails > 1 ? ' still need doing: ' : ' still needs doing: ')
+                 + (res.failures[0].why || '') : '');
+  }} else {{
+    jb.className = 'rv-agent-job';
+    jb.textContent = (job.state === 'queued' ? '⏳ Waiting for the agent to pick it up — '
+                                             : '⚙ Keying in ' + (p.done || 0) + '/' + (p.total || 0) + ' — ')
+                     + "'" + job.trip + "'";
+  }}
+}}
+
+async function rvAgentPoll(){{
+  try {{
+    const r = await fetch('/cardconv/robot/state');
+    rvAgentRender(await r.json());
+  }} catch(e) {{}}
+}}
+
+async function rvSubmitSap(){{
+  const ids = Array.from(document.querySelectorAll('.rv-cb:checked')).map(cb => cb.dataset.id);
+  if(!ids.length){{ alert('Select the trip rows to submit first.'); return; }}
+  if(!confirm('Hand ' + ids.length + ' row(s) to the SAP agent? It types them into GTE one by one.')) return;
+  const r = await fetch('/cardconv/review/submit_sap', {{
+    method: 'POST', headers: {{'Content-Type': 'application/json'}},
+    body: JSON.stringify({{ids: ids}})
+  }});
+  const d = await r.json().catch(() => ({{}}));
+  if(!d.ok){{ alert('Could not submit: ' + (d.error || r.status)); return; }}
+  rvAgentPoll();
+}}
+
+if($('rvAgent')){{
+  $('rvAgentPair').addEventListener('click', async () => {{
+    if(!confirm('Issue a new agent token? Any PC using the old one stops working.')) return;
+    const r = await fetch('/cardconv/robot/pair', {{method: 'POST'}});
+    const d = await r.json().catch(() => ({{}}));
+    if(!d.token){{ alert('Pairing failed: ' + (d.error || r.status)); return; }}
+    prompt('Paste this into the agent on your PC (shown once):', d.token);
+  }});
+  if($('rvSubmitSap')) $('rvSubmitSap').addEventListener('click', rvSubmitSap);
+  rvAgentPoll();
+  setInterval(rvAgentPoll, 5000);
 }}
 
 // ── Domestic/Overseas (SAP vendor kind). Auto reads the receipt currency;

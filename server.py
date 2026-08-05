@@ -885,6 +885,22 @@ class Handler(BaseHTTPRequestHandler):
         if tok and tok.isalnum() and len(tok) <= 32:
             self.send_header("Set-Cookie", f"wf_dl={tok}; Path=/; Max-Age=60")
 
+    def dispatch_agent(self, method, path, body, ctx):
+        """Dispatch the SAP agent's own endpoints.
+
+        The agent runs on the user's PC with no browser session, so it carries a
+        purpose-scoped token in a header instead (same shape as the batch
+        endpoint's shared secret). Pairing is session-authed and lives on the
+        normal path — only these three are token-authed. Usage is not recorded:
+        a heartbeat every few seconds is not a visit."""
+        from services import cardconv as _cc
+        user = _cc.resolve_agent_token(self.headers.get("X-Agent-Token", ""))
+        if not user:
+            return self.send_json({"error": "unauthorized"}, 401)
+        if not auth.has_service_access(user, "/cardconv"):
+            return self.send_json({"error": "forbidden"}, 403)
+        return self.dispatch(_cc.handle(method, path, body, dict(ctx, user=user)))
+
     def dispatch(self, result):
         t = result[0]
         if t == "html":
@@ -969,6 +985,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_text('{"status":"ok"}', "application/json")
         if path in ("/login", "/logout", "/signup"):
             return self.dispatch(auth.handle("GET", path, query, ctx))
+        if path.startswith("/cardconv/agent/"):
+            return self.dispatch_agent("GET", path, query, ctx)
         if not ctx["user"]:
             return self.redirect("/login")
         if path == "/":
@@ -1023,6 +1041,8 @@ class Handler(BaseHTTPRequestHandler):
             _provided = self.headers.get("X-Batch-Secret", "")
             if _secret and _provided == _secret:
                 return self.dispatch(_cc.handle("POST", path, body, dict(ctx, user=_cc.ADMIN)))
+        if path.startswith("/cardconv/agent/"):
+            return self.dispatch_agent("POST", path, body, ctx)
         if not ctx["user"]:
             return self.redirect("/login")
         for svc_path, svc in SERVICES.items():
