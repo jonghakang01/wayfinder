@@ -273,7 +273,11 @@ def handle(method, path, body, ctx=None):
                     t["priority"] = _priority_of(body["priority"][0])
                 if "place_id" in body:
                     t["place_id"] = body["place_id"][0].strip()
-                if "due_date" in body:
+                if "due_today" in body:
+                    # Computed here, not baked into the button: a list left open
+                    # overnight would otherwise move things to yesterday.
+                    t["due_date"] = date.today().isoformat()
+                elif "due_date" in body:
                     # An empty date field clears the deadline; parse_qs keeps the
                     # key because the form always submits it.
                     t["due_date"] = body["due_date"][0].strip() or None
@@ -469,12 +473,14 @@ def render(todos, habits, user, readonly=False, group_by="date"):
         place = next((p for p in places if p["id"] == place_id), None)
 
         chips = ""
+        overdue = False
         if due:
             n = days_left(due)
             if n is None:
                 lbl, cls = due, "tk-due"
             elif n < 0:
                 lbl, cls = f"{abs(n)}d overdue", "tk-due tk-due--over"
+                overdue = True
             elif n == 0:
                 lbl, cls = "Today", "tk-due tk-due--today"
             elif n == 1:
@@ -482,6 +488,19 @@ def render(todos, habits, user, readonly=False, group_by="date"):
             else:
                 lbl, cls = f"in {n}d", "tk-due"
             chips += f'<span class="{cls}">{lbl}</span>'
+            # Rescheduling the day you missed is the commonest thing to do with
+            # an overdue row, and it was buried behind opening the row and
+            # picking a date (강프로 2026-08-05). Sits right after the chip it
+            # answers; the date itself is worked out when the button is pressed.
+            if overdue and not readonly and not t.get("done"):
+                chips += (
+                    f'<form method="POST" action="/todo/set_meta" class="tk-nudge-form" '
+                    f'onclick="event.stopPropagation()">'
+                    f'<input type="hidden" name="id" value="{tid}">'
+                    f'<input type="hidden" name="due_today" value="1">'
+                    f'<input type="hidden" name="next" value="{back}">'
+                    f'<button class="tk-nudge" type="submit" '
+                    f'title="Move the due date to today">→ Today</button></form>')
         if project:
             chips += f'<span class="tk-chip">{project}</span>'
         if place:
@@ -550,6 +569,16 @@ def render(todos, habits, user, readonly=False, group_by="date"):
             f'<button class="btn btn-primary" type="submit">Add</button>'
             f'</form>')
 
+    def _done_block(items, extra_rows="", extra_n=0):
+        """A project's own history, folded away under it."""
+        rows = extra_rows + "".join(_row(t) for t in sorted(
+            items, key=lambda x: x.get("done_at") or "", reverse=True)[:50])
+        if not rows:
+            return ""
+        return (f'<details class="tk-done tk-done--project"><summary>Completed '
+                f'<span class="tk-section-n">{len(items) + extra_n}</span>'
+                f'</summary>{rows}</details>')
+
     if by_project:
         # The list's spine becomes the project. Dates do not disappear — they
         # stay on each row as the due chip, which is where a date belongs once
@@ -557,20 +586,30 @@ def render(todos, habits, user, readonly=False, group_by="date"):
         by_pj = {}
         for t in active:
             by_pj.setdefault((t.get("project") or "").strip(), []).append(t)
+        # What a project has already finished belongs under that project, not in
+        # one pile at the foot of the page with every other project's work
+        # (강프로 2026-08-05). A project with nothing left open still shows up —
+        # its history is the whole reason to look at it.
+        done_pj = {}
+        for t in done_list:
+            done_pj.setdefault((t.get("project") or "").strip(), []).append(t)
         # Busiest project first; ties alphabetical. "No project" always last —
         # it is a leftover bin, not a project, and habits live there because a
         # habit belongs to no project.
-        named = sorted((pj for pj in by_pj if pj),
-                       key=lambda pj: (-len(by_pj[pj]), pj.lower()))
+        named = sorted((pj for pj in set(by_pj) | set(done_pj) if pj),
+                       key=lambda pj: (-len(by_pj.get(pj, [])), pj.lower()))
         list_html = "".join(
             f'<div class="tk-section" data-project="{_attr(pj)}">'
             f'<div class="tk-section-head tk-section-head--project"><span>{pj}</span>'
-            f'<span class="tk-section-n">{len(by_pj[pj])}</span></div>'
-            f'{"".join(_row(t) for t in sorted(by_pj[pj], key=_order))}'
-            f'{_project_add(pj)}</div>'
+            f'<span class="tk-section-n">{len(by_pj.get(pj, []))}</span></div>'
+            f'{"".join(_row(t) for t in sorted(by_pj.get(pj, []), key=_order))}'
+            f'{_project_add(pj)}'
+            f'{_done_block(done_pj.get(pj, []))}</div>'
             for pj in named)
         loose = sorted(by_pj.get("", []), key=_order)
-        if loose or habit_open:
+        loose_done = done_pj.get("", [])
+        habit_rows = "".join(_habit_row(h) for h in habit_done)
+        if loose or habit_open or loose_done or habit_rows:
             list_html += (
                 f'<div class="tk-section" data-project="">'
                 f'<div class="tk-section-head tk-section-head--project">'
@@ -578,7 +617,8 @@ def render(todos, habits, user, readonly=False, group_by="date"):
                 f'<span class="tk-section-n">{len(loose) + len(habit_open)}</span></div>'
                 f'{"".join(_habit_row(h) for h in habit_open)}'
                 f'{"".join(_row(t) for t in loose)}'
-                f'{_project_add("")}</div>')
+                f'{_project_add("")}'
+                f'{_done_block(loose_done, habit_rows, len(habit_done))}</div>')
     else:
         now_html = ("".join(_habit_row(h) for h in habit_open)
                     + "".join(_row(t) for t in buckets["now"]))
@@ -590,7 +630,7 @@ def render(todos, habits, user, readonly=False, group_by="date"):
                      + _section("week", "This week", buckets["week"])
                      + _section("later", "Later", buckets["later"]))
 
-    if done_list or habit_done:
+    if (done_list or habit_done) and not by_project:
         done_rows = ("".join(_habit_row(h) for h in habit_done)
                      + "".join(_row(t) for t in sorted(
                          done_list, key=lambda x: x.get("done_at") or "", reverse=True)[:50]))
@@ -908,6 +948,15 @@ def render(todos, habits, user, readonly=False, group_by="date"):
 .tk-chip--habit{{border-color:var(--group-3);color:var(--group-3)}}
 a.tk-row{{text-decoration:none;color:inherit}}
 .tk-due--over{{border-color:var(--danger);color:var(--danger)}}
+/* Sits with the chips, reads as an action rather than another label. */
+.tk-nudge-form{{display:inline-flex}}
+.tk-nudge{{background:transparent;border:1px dashed var(--border-bright);
+  border-radius:999px;color:var(--text-muted);font-size:.7rem;font-weight:600;
+  padding:2px 9px;cursor:pointer;line-height:1.5}}
+.tk-nudge:hover{{border-style:solid;border-color:var(--accent);color:var(--accent)}}
+@media (max-width:768px){{
+  .tk-nudge{{min-height:32px;padding:4px 11px;font-size:.74rem}}
+}}
 .tk-due--today{{border-color:var(--warn);color:var(--warn)}}
 .tk-due--soon{{border-color:var(--accent);color:var(--accent)}}
 .tk-open{{color:var(--text-dim);font-size:1.2rem;line-height:1;flex-shrink:0;align-self:center}}
