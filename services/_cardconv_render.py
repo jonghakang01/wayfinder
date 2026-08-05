@@ -1388,7 +1388,17 @@ def _render_review(user: str) -> str:
     # The agent strip. Everything in it is filled by polling the server, which
     # is the whole point: the PC reports in, so the state shows up on whichever
     # server the page came from instead of only on localhost.
-    agent_strip = ('''
+    # Trip rows are submitted one by one through SAP's own screen, so this is
+    # the agent's door — the xlsx download deliberately excludes them.
+    submit_sap_btn = ('<button class="btn btn-primary btn-sm" id="rvSubmitSap" '
+                      'title="Hand the selected trip rows to the SAP agent on your PC">'
+                      '📤 Submit to SAP</button>' if user == ADMIN else '')
+    # Watching it type before it writes anything is the safe way to meet a real
+    # SAP screen for the first time — on a PC, or on someone else's PC later.
+    dry_run_box = ('<label class="rv-dry" title="Fill every field but never press Save">'
+                   '<input type="checkbox" id="rvDryRun"> fill only</label>'
+                   if user == ADMIN else '')
+    agent_strip = (f'''
   <div class="filter-bar rv-agent" id="rvAgent">
     <span class="rv-agent-state" id="rvAgentText">Checking the SAP agent…</span>
     <button class="btn btn-ghost btn-sm" id="rvAgentCancel" hidden
@@ -1402,7 +1412,7 @@ def _render_review(user: str) -> str:
       </span>
     </details>
     <button class="btn btn-ghost btn-sm" id="rvAgentPair"
-            title="Issue this account's agent token and show it here so a PC can be paired">🔑 Pair a PC</button>
+            title="Set this PC up, and submit the selected rows">🤖 SAP agent</button>
   </div>
   <div class="rv-pair" id="rvPairBox" hidden>
     <div class="rv-pair-head">
@@ -1424,48 +1434,31 @@ def _render_review(user: str) -> str:
     <div class="rv-step" id="rvStep2">
       <span class="rv-step-n">2</span>
       <div class="rv-step-body">
-        <div class="rv-step-t">Get this account's key</div>
-        <div class="rv-step-d">One key per account. Issuing a new one stops the key any other PC is using.</div>
-        <div class="rv-pair-warn" id="rvPairWarn" hidden>A PC is already paired — you only need this again to move to another PC.</div>
-        <button class="btn btn-secondary btn-sm" id="rvPairReissue" hidden>🔄 Issue a new key</button>
+        <div class="rv-step-t">Connect this PC</div>
+        <div class="rv-step-d">One click — Windows passes the connection straight to the agent. Nothing to copy.</div>
+        <div class="rv-pair-warn" id="rvPairWarn" hidden>Another PC is already connected. Connecting here disconnects it.</div>
+        <div class="rv-pair-row">
+          <a class="btn btn-primary btn-sm" id="rvPairLink" href="#" hidden>🔗 Connect this PC</a>
+          <button class="btn btn-secondary btn-sm" id="rvPairReissue" hidden>🔗 Connect this PC instead</button>
+          <span class="rv-pair-hint" id="rvPairMsg"></span>
+        </div>
+        <details class="rv-pair-fallback">
+          <summary>The button did nothing?</summary>
+          <div class="rv-step-d">Step 1 has not run on this PC yet. Run the installer, then try again. Failing that, save this by hand as <code>~/.wayfinder-agent.json</code>:</div>
+          <pre class="rv-pair-code" id="rvPairJson" hidden></pre>
+        </details>
       </div>
     </div>
 
     <div class="rv-step" id="rvStep3">
       <span class="rv-step-n">3</span>
       <div class="rv-step-body">
-        <div class="rv-step-t">Hand the key to this PC</div>
-        <div class="rv-step-d">One click — Windows passes it straight to the agent.</div>
-        <div class="rv-pair-row">
-          <a class="btn btn-primary btn-sm" id="rvPairLink" href="#" hidden>🔗 Pair this PC</a>
-          <span class="rv-pair-hint" id="rvPairMsg"></span>
-        </div>
-        <details class="rv-pair-fallback">
-          <summary>The link did nothing?</summary>
-          <div class="rv-step-d">Step 1 has not run on this PC yet. Run the installer, then click Pair this PC again. Failing that, save this by hand as <code>~/.wayfinder-agent.json</code>:</div>
-          <pre class="rv-pair-code" id="rvPairJson" hidden></pre>
-        </details>
-      </div>
-    </div>
-
-    <div class="rv-step" id="rvStep4">
-      <span class="rv-step-n">4</span>
-      <div class="rv-step-body">
-        <div class="rv-step-t">Select rows and press 📤 Submit to SAP</div>
-        <div class="rv-step-d">The agent opens the robot Edge for you. Sign in to Knox if it asks, reach the trip's Other Expense screen, and it keys the rows in.</div>
+        <div class="rv-step-t">Select the rows, then submit</div>
+        <div class="rv-step-d">Tick the trip rows in the list below first. The agent opens the robot Edge for you — sign in to Knox if it asks, reach the trip's Other Expense screen, and it keys the rows in.</div>
+        <div class="rv-pair-row">{submit_sap_btn}{dry_run_box}</div>
       </div>
     </div>
   </div>''' if user == ADMIN else '')
-    # Trip rows are submitted one by one through SAP's own screen, so this is
-    # the agent's door — the xlsx download deliberately excludes them.
-    submit_sap_btn = ('<button class="btn btn-primary btn-sm" id="rvSubmitSap" '
-                      'title="Hand the selected trip rows to the SAP agent on your PC">'
-                      '📤 Submit to SAP</button>' if user == ADMIN else '')
-    # Watching it type before it writes anything is the safe way to meet a real
-    # SAP screen for the first time — on a PC, or on someone else's PC later.
-    dry_run_box = ('<label class="rv-dry" title="Fill every field but never press Save">'
-                   '<input type="checkbox" id="rvDryRun"> fill only</label>'
-                   if user == ADMIN else '')
     download_btn = (('<span class="fb-pop-wrap">'
                      '<button class="fb-more-btn" id="rvExport" aria-expanded="false">⬇ Export <span class="chev">▾</span></button>'
                      '<div class="fb-menu" id="rvExportMenu">'
@@ -1794,7 +1787,6 @@ body:has(.fb-menu.open) .wf-back,body:has(.fb-menu.open) #wfThemeBtn{{display:no
       <input type="checkbox" id="rvSelAll" style="width:15px;height:15px;accent-color:var(--accent);cursor:pointer"> Select all
     </label>
     <span class="fb-selcount" id="rvSelCount" hidden>0 selected</span>
-    {submit_sap_btn}{dry_run_box}
     <button class="btn btn-secondary btn-sm" id="rvMarkProg" title="Submitted to SAP, awaiting approval">⏳ Mark in progress</button>
     <button class="btn btn-primary btn-sm" id="rvMarkDone">✔ Mark completed</button>
     <button class="btn btn-ghost btn-sm" id="rvMarkOpen">↩ Reopen</button>
@@ -1943,10 +1935,10 @@ function rvAgentRender(d){{
   // Installed and paired are both only knowable from the PC checking in, so
   // one signal marks the first three steps done.
   const up = !!a.online;
-  ['rvStep1','rvStep2','rvStep3'].forEach(id => {{
+  ['rvStep1','rvStep2'].forEach(id => {{
     const el = $(id); if(el) el.classList.toggle('done', up);
   }});
-  if($('rvStep4')) $('rvStep4').classList.toggle('now', up);
+  if($('rvStep3')) $('rvStep3').classList.toggle('now', up);
   const txt = $('rvAgentText');
   strip.classList.toggle('online', !!a.online);
   $('rvChipEdge').classList.toggle('on', !!a.edge);
