@@ -177,11 +177,57 @@ def test_robot_result_moves_saved_rows_to_in_progress(tmp_path, monkeypatch):
     assert not f.exists()          # consumed, so a reload cannot re-apply it
 
 
-def test_robot_result_leaves_another_profile_alone(tmp_path, monkeypatch):
+def test_robot_result_leaves_another_user_alone(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "_load_tx_pool", lambda u: {"entries": [_tx(1)]})
+    monkeypatch.setattr(core, "_pkey", lambda u: u)
     f = _robot_file(tmp_path, monkeypatch, {"user": "someone-else", "saved": ["t1"]})
     assert core._adopt_robot_result("u") == ""
-    assert f.exists()              # still there for the profile it belongs to
+    assert f.exists()              # still there for the account it belongs to
+
+
+def test_robot_result_is_scoped_to_the_card_profile(tmp_path, monkeypatch):
+    """Every card profile shares the login while the rows live in per-profile
+    files. Matching on the login alone adopted a run under the wrong profile,
+    found no ids, deleted the file and lost the writeback for good."""
+    monkeypatch.setattr(core, "_load_tx_pool", lambda u: {"entries": [_tx(1)]})
+    monkeypatch.setattr(core, "_pkey", lambda u: "u@ceo_card")
+    f = _robot_file(tmp_path, monkeypatch,
+                    {"user": "u", "pkey": "u", "saved": ["t1"]})   # default profile's run
+    assert core._adopt_robot_result("u") == ""
+    assert f.exists()              # kept for the default profile to adopt
+    assert _tx(1)["status"] == "open"
+
+
+def test_result_without_pkey_still_works_for_the_default_profile(tmp_path, monkeypatch):
+    """Files written before the key existed must not be stranded."""
+    entries = [_tx(1)]
+    saved = {}
+    monkeypatch.setattr(core, "_load_tx_pool", lambda u: {"entries": entries})
+    monkeypatch.setattr(core, "_save_tx_pool", lambda u, p: saved.update(p))
+    monkeypatch.setattr(core, "_apply_receipt_completion", lambda *a, **k: None)
+    monkeypatch.setattr(core, "_pkey", lambda u: u)        # default profile
+    _robot_file(tmp_path, monkeypatch, {"user": "u", "saved": ["t1"]})
+    assert "1 row(s)" in core._adopt_robot_result("u")
+    assert saved["entries"][0]["status"] == "in_progress"
+
+
+def test_unrecognised_ids_keep_the_file_instead_of_eating_it(tmp_path, monkeypatch):
+    """Recognising none of the ids means this is not the pool the run was
+    about — deleting it here is exactly how a writeback vanishes."""
+    monkeypatch.setattr(core, "_load_tx_pool", lambda u: {"entries": [_tx(9)]})
+    monkeypatch.setattr(core, "_pkey", lambda u: u)
+    f = _robot_file(tmp_path, monkeypatch, {"user": "u", "saved": ["t1", "t2"]})
+    assert core._adopt_robot_result("u") == ""
+    assert f.exists()
+
+
+def test_trip_export_carries_the_profile_key(monkeypatch):
+    rc = _rcpt("r1", "USD")
+    rc["usage"] = "NY Trip"
+    _isolate(monkeypatch, [_tx(1, "NY Trip", rcpt_id="r1")], [rc])
+    monkeypatch.setattr(core, "_pkey", lambda u: "u@ceo_card")
+    _, data, _, _ = core._handle_trip_export("u", {})
+    assert json.loads(data)["pkey"] == "u@ceo_card"
 
 
 def test_robot_result_does_not_reopen_finished_rows(tmp_path, monkeypatch):

@@ -4401,17 +4401,28 @@ def _adopt_robot_result(username: str) -> str:
         res = json.loads(ROBOT_RESULT_FILE.read_text())
     except Exception:
         return ""
-    # Another card profile's run — leave the file for the profile it belongs to.
-    if str(res.get("user") or "") != username:
+    # Which card profile the run belongs to, not just which login. Every
+    # profile shares the login while the rows live in per-profile files, so
+    # comparing the login alone let a run adopted under the wrong profile find
+    # no matching ids, delete its own file, and lose the writeback for good.
+    # Older result files predate the key; for the default profile _pkey is the
+    # bare login, so they still match, and for a named profile they are left
+    # alone — the safe direction.
+    if str(res.get("pkey") or res.get("user") or "") != _pkey(username):
         return ""
     saved = {str(i) for i in (res.get("saved") or []) if i}
     pool = _load_tx_pool(username)
+    known = {e.get("id") for e in pool["entries"]} & saved
     ids = [e.get("id") for e in pool["entries"]
            if e.get("id") in saved and (e.get("status") or "open") == "open"]
-    try:
-        ROBOT_RESULT_FILE.unlink()
-    except OSError:
-        pass
+    # Consume it only once this pool is demonstrably the one the run was about.
+    # Recognising none of the ids means the file belongs somewhere else, and
+    # deleting it there is how the writeback would vanish silently.
+    if known:
+        try:
+            ROBOT_RESULT_FILE.unlink()
+        except OSError:
+            pass
     if not ids:
         return ""
     _handle_review_set_status(username, {"ids": ids, "status": "in_progress"})
@@ -4495,6 +4506,11 @@ def _handle_trip_export(username: str, query: dict):
     payload = {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "user": username,
+        # The login alone does not say which card profile these rows came from
+        # — every profile shares it, while the rows live in per-profile files.
+        # The robot echoes this back so the writeback cannot land on the wrong
+        # ledger (and quietly lose itself doing so).
+        "pkey": _pkey(username),
         "trips": trips,
     }
     data = json.dumps(payload, ensure_ascii=False, indent=2).encode()

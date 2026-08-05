@@ -211,17 +211,22 @@ def _ensure_form_open(pg):
     pg.wait_for_timeout(1200)
 
 
-def _write_result(user, trip, saved_ids, total):
+def _write_result(export, trip, saved_ids, total):
     """Leave the run's outcome where Review can adopt it.
 
     The robot has no session of its own, so it cannot mark the rows itself.
     It drops the ids it actually saved into a file and the next Review render
     moves them to In progress — without that the rows stay open and the next
-    export hands the robot the very same lines again (2026-08-04)."""
+    export hands the robot the very same lines again (2026-08-04).
+
+    Both `user` and `pkey` ride along: the login says whose ledger this is, the
+    profile key says which card's — and only the pair identifies the file the
+    rows actually live in."""
     try:
         RESULT_FILE.write_text(json.dumps({
             "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-            "user": user or "",
+            "user": export.get("user") or "",
+            "pkey": export.get("pkey") or export.get("user") or "",
             "trip": trip,
             "saved": saved_ids,
             "total": total,
@@ -290,7 +295,7 @@ def main():
                 print(f"  save failed: {e}")
                 failures.append((head, str(e)))
 
-    _write_result(export.get("user"), trip, saved_ids, len(lines))
+    _write_result(export, trip, saved_ids, len(lines))
 
     saved = len(lines) - len(failures)
     print(f"\ndone. {saved}/{len(lines)} saved.")
