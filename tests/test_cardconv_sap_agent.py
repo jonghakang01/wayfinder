@@ -149,6 +149,47 @@ def test_a_second_job_is_refused_while_one_is_live(monkeypatch, tmp_path):
     assert out[2] == 409
 
 
+def test_a_job_nobody_will_ever_finish_stops_blocking(monkeypatch, tmp_path):
+    """Only the agent's report clears a run. Switch the PC off mid-run and
+    nothing ever reports, so without this the button never comes back."""
+    _online(monkeypatch, tmp_path, [_tx(1)])
+    core._handle_agent_submit("me", {"ids": ["t1"]})
+    job = core._load_agent_job("me")
+    job["updated_at"] = "2020-01-01T00:00:00"
+    core._save_agent_job("me", job)
+    out = core._handle_agent_submit("me", {"ids": ["t1"]})
+    assert out[1]["ok"] and out[1]["job_id"] != job["id"]
+
+
+def test_a_fresh_job_still_blocks_a_second_one(monkeypatch, tmp_path):
+    _online(monkeypatch, tmp_path, [_tx(1)])
+    core._handle_agent_submit("me", {"ids": ["t1"]})
+    assert core._handle_agent_submit("me", {"ids": ["t1"]})[2] == 409
+
+
+def test_cancel_frees_the_button(monkeypatch, tmp_path):
+    _online(monkeypatch, tmp_path, [_tx(1)])
+    core._handle_agent_submit("me", {"ids": ["t1"]})
+    assert core._handle_agent_cancel("me")[1]["ok"]
+    assert core._load_agent_job("me")["state"] == "cancelled"
+    assert core._handle_agent_submit("me", {"ids": ["t1"]})[1]["ok"]
+
+
+def test_cancelling_nothing_is_refused(monkeypatch, tmp_path):
+    _online(monkeypatch, tmp_path, [_tx(1)])
+    assert core._handle_agent_cancel("me")[2] == 409
+
+
+def test_a_late_report_after_cancel_still_marks_what_landed(monkeypatch, tmp_path):
+    """Rows the agent saved are in SAP whatever the page decided."""
+    pool = _online(monkeypatch, tmp_path, [_tx(1)])
+    core._handle_agent_submit("me", {"ids": ["t1"]})
+    jid = core._load_agent_job("me")["id"]
+    core._handle_agent_cancel("me")
+    core._handle_agent_result("me", {"job_id": jid, "saved": ["t1"]})
+    assert pool["entries"][0]["status"] == "in_progress"
+
+
 def test_rows_without_a_trip_tag_are_refused(monkeypatch, tmp_path):
     _online(monkeypatch, tmp_path, [_tx(1, usage="Regular")])
     out = core._handle_agent_submit("me", {"ids": ["t1"]})

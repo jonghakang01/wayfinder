@@ -60,6 +60,8 @@ def handle(method, path, body, ctx=None):
         return _handle_robot_state(user)
     if method == "POST" and path == "/cardconv/review/submit_sap":
         return _handle_agent_submit(user, body)
+    if method == "POST" and path == "/cardconv/review/cancel_sap":
+        return _handle_agent_cancel(user)
     # Pairing must NOT live under /cardconv/agent/ — that prefix is the
     # token-authed door, and you cannot present the token you are asking for.
     if method == "POST" and path == "/cardconv/robot/pair":

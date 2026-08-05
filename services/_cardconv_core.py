@@ -4485,6 +4485,27 @@ def _agent_status(username: str) -> dict:
             "edge": bool(st.get("edge")), "screen": bool(st.get("screen"))}
 
 
+# A job only leaves queued/running when the agent reports back. If the PC is
+# switched off mid-run nothing ever reports, and the button stays disabled for
+# good — so an untouched job eventually stops counting.
+JOB_STALE_MIN = 20
+
+
+def _job_is_stale(job: dict) -> bool:
+    stamp = job.get("updated_at") or job.get("generated_at")
+    if not stamp:
+        return True
+    try:
+        age = (datetime.now() - datetime.fromisoformat(stamp)).total_seconds()
+    except ValueError:
+        return True
+    return age > JOB_STALE_MIN * 60
+
+
+def _touch_job(job: dict):
+    job["updated_at"] = datetime.now().isoformat(timespec="seconds")
+
+
 def _agent_job_file(username: str) -> Path:
     return DATA_DIR / f"agent_job_{_pkey(username)}.json"
 
@@ -4514,7 +4535,7 @@ def _handle_agent_submit(username: str, body: dict):
     if not st.get("online"):
         return ("json", {"error": "agent offline"}, 409)
     cur = _load_agent_job(username)
-    if cur.get("state") in ("queued", "running"):
+    if cur.get("state") in ("queued", "running") and not _job_is_stale(cur):
         return ("json", {"error": "a job is already in progress"}, 409)
     trips = _trip_lines(username, {"ids": [",".join(ids)]})
     if not trips:
@@ -4532,9 +4553,27 @@ def _handle_agent_submit(username: str, body: dict):
                dry_run=str(dry).lower() in ("1", "true", "yes", "on"),
                progress={"done": 0, "total": len(lines)},
                results={}, note="")
+    _touch_job(job)
     _save_agent_job(username, job)
     return ("json", {"ok": True, "job_id": job["id"], "trip": trip,
                      "total": len(lines)})
+
+
+def _handle_agent_cancel(username: str):
+    """POST /cardconv/review/cancel_sap — give up on the job in flight.
+
+    The way out when the PC went down mid-run: nothing will ever report, and
+    without this the button stays disabled until the staleness timeout. Rows
+    the agent did manage to save are still marked if its report arrives late —
+    they are in SAP whatever the page decided."""
+    job = _load_agent_job(username)
+    if job.get("state") not in ("queued", "running"):
+        return ("json", {"error": "nothing to cancel"}, 409)
+    job.update(state="cancelled",
+               finished_at=datetime.now().isoformat(timespec="seconds"))
+    _touch_job(job)
+    _save_agent_job(username, job)
+    return ("json", {"ok": True})
 
 
 def _handle_agent_job(username: str):
@@ -4569,6 +4608,7 @@ def _handle_agent_state(username: str, body: dict):
             pass
         if job.get("state") == "queued":
             job["state"] = "running"
+        _touch_job(job)
         _save_agent_job(username, job)
     return ("json", {"ok": True})
 
@@ -4602,6 +4642,7 @@ def _handle_agent_result(username: str, body: dict):
                results={"saved": saved, "failures": fails,
                         "filled": filled if isinstance(filled, int) else None},
                finished_at=datetime.now().isoformat(timespec="seconds"))
+    _touch_job(job)
     _save_agent_job(username, job)
     _agent_seen(username)
     return ("json", {"ok": True, "marked": len(open_ids)})

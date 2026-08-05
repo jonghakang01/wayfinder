@@ -1382,25 +1382,27 @@ def _render_review(user: str) -> str:
     # SAP trip robot launcher — a custom-protocol link the Windows registry
     # maps to sap-robot-edge.bat (install-robot-protocol.bat, one-time). Only
     # meaningful on the admin's own PC, so everyone else is spared the button.
-    robot_btn = (('<a class="btn btn-ghost btn-sm" href="wayfinder-robot://start" '
-                  'title="Launch the robot Edge (Knox Portal + GTE tabs, CDP relay). '
-                  'One-time setup: run install-robot-protocol.bat">🤖 Robot</a>')
-                 if user == ADMIN else '')
+    # The 🤖 launcher is gone: the agent opens the robot Edge itself when a job
+    # arrives, and two buttons for one job only raise the question of which.
+    robot_btn = ''
     # The agent strip. Everything in it is filled by polling the server, which
     # is the whole point: the PC reports in, so the state shows up on whichever
     # server the page came from instead of only on localhost.
     agent_strip = ('''
   <div class="filter-bar rv-agent" id="rvAgent">
     <span class="rv-agent-state" id="rvAgentText">Checking the SAP agent…</span>
-    <span class="rv-agent-chips" id="rvAgentChips" hidden>
-      <span class="rv-chip" id="rvChipEdge">Robot Edge</span>
-      <span class="rv-chip" id="rvChipScreen">Entry screen</span>
-    </span>
-    <span class="rv-agent-job" id="rvAgentJob" hidden></span>
-    <span class="rv-agent-need" id="rvAgentNeed" hidden></span>
+    <button class="btn btn-ghost btn-sm" id="rvAgentCancel" hidden
+            title="Stop waiting on this run — use it when the PC went down mid-run">✕ Cancel run</button>
     <span style="flex:1"></span>
+    <details class="rv-agent-detail" id="rvAgentDetail">
+      <summary>details</summary>
+      <span class="rv-agent-chips">
+        <span class="rv-chip" id="rvChipEdge">Robot Edge</span>
+        <span class="rv-chip" id="rvChipScreen">Entry screen</span>
+      </span>
+    </details>
     <button class="btn btn-ghost btn-sm" id="rvAgentPair"
-            title="Issue this account's agent token and show it here — copy it into the agent on your PC">🔑 Pair a PC</button>
+            title="Issue this account's agent token and show it here so a PC can be paired">🔑 Pair a PC</button>
   </div>
   <div class="rv-pair" id="rvPairBox" hidden>
     <div class="rv-pair-head">
@@ -1594,8 +1596,13 @@ def _render_review(user: str) -> str:
 .rv-agent-job{{font-size:.8rem;color:var(--text)}}
 .rv-agent-job.ok{{color:var(--green-500);font-weight:600}}
 .rv-agent-job.warn{{color:var(--amber-500);font-weight:600}}
-.rv-agent-need{{font-size:.8rem;color:var(--text-muted)}}
-.rv-agent-need[hidden]{{display:none}}
+.rv-agent-state.ok{{color:var(--green-500);font-weight:600}}
+.rv-agent-state.warn{{color:var(--amber-500);font-weight:600}}
+/* The three signals are debugging aids, folded away until something is off. */
+.rv-agent-detail{{font-size:.74rem;color:var(--text-muted)}}
+.rv-agent-detail summary{{cursor:pointer;list-style:none}}
+.rv-agent-detail summary::-webkit-details-marker{{display:none}}
+.rv-agent-detail[open] .rv-agent-chips{{margin-top:6px}}
 .rv-dry{{display:flex;align-items:center;gap:6px;font-size:.78rem;
   color:var(--text-muted);cursor:pointer;margin-left:-4px}}
 .rv-dry input{{width:15px;height:15px;accent-color:var(--accent);cursor:pointer}}
@@ -1885,61 +1892,60 @@ function rvAgentRender(d){{
   if(!strip || !d) return;
   const a = d.agent || {{}}, job = d.job;
   rvPaired = !!a.paired;
-  const txt = $('rvAgentText'), chips = $('rvAgentChips'), jb = $('rvAgentJob');
+  const txt = $('rvAgentText');
   strip.classList.toggle('online', !!a.online);
-  if(!a.paired){{
-    txt.textContent = 'No PC paired yet — pair one to submit from here.';
-  }} else if(!a.online){{
-    txt.textContent = 'Agent offline' + (a.last_seen ? ' — last seen ' + a.last_seen.replace('T', ' ') : '');
-  }} else {{
-    txt.textContent = 'Agent online';
-  }}
-  chips.hidden = !a.online;
   $('rvChipEdge').classList.toggle('on', !!a.edge);
   $('rvChipScreen').classList.toggle('on', !!a.screen);
-  // The agent opens Edge itself, so the only thing left to say is the part a
-  // person has to do: signing in, and reaching the entry screen.
-  const need = $('rvAgentNeed');
-  if(!a.online || a.screen){{ need.hidden = true; }}
-  else {{
-    need.hidden = false;
-    need.textContent = a.edge
-      ? 'Reach the trip’s Other Expense screen in the robot Edge (sign in to Knox if it asks).'
-      : 'The robot Edge is not up — Submit will open it, then sign in to Knox if it asks.';
+
+  const p = (job && job.progress) || {{}}, res = (job && job.results) || {{}};
+  const fails = (res.failures || []).length;
+  const busy = job && (job.state === 'queued' || job.state === 'running');
+  $('rvAgentCancel').hidden = !busy;
+
+  // One line, and it says the next thing to do rather than listing states.
+  // The three signals underneath are debugging aids; they belong in details.
+  let line = '', cls = '';
+  if(!a.paired){{
+    line = 'No PC paired yet — pair one to submit from here.';
+  }} else if(!a.online){{
+    line = 'Agent offline' + (a.last_seen ? ' since ' + a.last_seen.replace('T', ' ') : '')
+         + ' — start it on your PC, or run Install SAP Agent once.';
+  }} else if(job && job.state === 'queued'){{
+    line = "Sending '" + job.trip + "' to your PC…";
+  }} else if(job && job.state === 'running'){{
+    line = a.screen
+      ? 'Keying in ' + (p.done || 0) + '/' + (p.total || 0) + " for '" + job.trip + "'"
+      : 'Open the trip\u2019s Other Expense screen — the agent is waiting for it.';
+  }} else if(job && job.state === 'cancelled'){{
+    line = 'Run cancelled.'; cls = 'warn';
+  }} else if(job && job.state === 'done' && job.dry_run){{
+    line = 'Filled ' + (res.filled != null ? res.filled : (p.done || 0)) + '/' + (p.total || 0)
+         + " for '" + job.trip + "' — nothing saved."
+         + (fails ? ' ' + fails + ' could not be filled: ' + (res.failures[0].why || '') : '');
+  }} else if(job && job.state === 'done'){{
+    const saved = (res.saved || []).length, total = p.total || saved + fails;
+    // A partial run wearing a tick is how "nothing was saved" read as success.
+    cls = fails ? 'warn' : 'ok';
+    line = saved + '/' + total + " saved to SAP for '" + job.trip + "'"
+         + (fails ? ' — ' + fails + (fails > 1 ? ' still need doing: ' : ' still needs doing: ')
+                    + (res.failures[0].why || '') : '');
+  }} else if(!a.edge){{
+    line = 'Ready — Submit will open the robot Edge for you.';
+  }} else if(!a.screen){{
+    line = 'Open the trip\u2019s Other Expense screen, then Submit.';
+  }} else {{
+    line = 'Ready.';
   }}
+  txt.textContent = line;
+  txt.className = 'rv-agent-state' + (cls ? ' ' + cls : '');
+
   // The button may only promise work a PC is actually listening for.
   const btn = $('rvSubmitSap');
-  const busy = job && (job.state === 'queued' || job.state === 'running');
   if(btn){{
     btn.disabled = !a.online || !!busy;
     btn.title = !a.online ? 'The agent on your PC is not running'
               : busy ? 'A submission is already in progress'
               : 'Hand the selected trip rows to the SAP agent on your PC';
-  }}
-  if(!job){{ jb.hidden = true; return; }}
-  jb.hidden = false;
-  const p = job.progress || {{}}, res = job.results || {{}};
-  const fails = (res.failures || []).length;
-  if(job.state === 'done' && job.dry_run){{
-    // A fill-only run saves nothing on purpose; reading its empty list as
-    // "everything was refused" would be exactly backwards.
-    jb.className = 'rv-agent-job';
-    jb.textContent = '🧪 Filled ' + (res.filled != null ? res.filled : (p.done || 0))
-      + '/' + (p.total || 0) + " for '" + job.trip + "' — nothing saved."
-      + (fails ? ' ' + fails + ' could not be filled: ' + (res.failures[0].why || '') : '');
-  }} else if(job.state === 'done'){{
-    const saved = (res.saved || []).length, total = p.total || saved + fails;
-    // Anything left undone is a warning, however many landed — a partial run
-    // wearing a tick is how "nothing was saved" got read as success before.
-    jb.className = 'rv-agent-job ' + (fails ? 'warn' : (saved ? 'ok' : 'warn'));
-    jb.textContent = (fails ? '⚠ ' : '✅ ') + saved + '/' + total + " saved to SAP for '" + job.trip + "'"
-      + (fails ? ' — ' + fails + (fails > 1 ? ' still need doing: ' : ' still needs doing: ')
-                 + (res.failures[0].why || '') : '');
-  }} else {{
-    jb.className = 'rv-agent-job';
-    jb.textContent = (job.state === 'queued' ? '⏳ Waiting for the agent to pick it up — '
-                                             : '⚙ Keying in ' + (p.done || 0) + '/' + (p.total || 0) + ' — ')
-                     + "'" + job.trip + "'";
   }}
 }}
 
@@ -2033,6 +2039,11 @@ if($('rvAgent')){{
     }}, 2000);
   }});
   if($('rvSubmitSap')) $('rvSubmitSap').addEventListener('click', rvSubmitSap);
+  $('rvAgentCancel').addEventListener('click', async () => {{
+    if(!confirm('Stop waiting on this run? Rows already saved in SAP stay saved.')) return;
+    await fetch('/cardconv/review/cancel_sap', {{method: 'POST'}});
+    rvAgentPoll();
+  }});
   rvAgentPoll();
   setInterval(rvAgentPoll, 5000);
 }}
