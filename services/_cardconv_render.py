@@ -587,7 +587,7 @@ def _render_drm_alert(user: str, filename: str, context: str = "convert") -> str
   <a href="/cardconv" class="nav-brand">💳 Cheil AMEX Expense Assistant</a>
   <span class="nav-user">👤 {_esc(user)} &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
 </nav>
-<div class="container" style="max-width:1100px">
+<div class="container" style="max-width:1400px">
   {_tab_bar(tab, user)}
 
   <div class="notepad-card" style="margin-bottom:20px;border:1px solid var(--warning,#f59e0b)">
@@ -753,7 +753,7 @@ history.replaceState({{}}, '', '/cardconv/convert');
   <a href="/cardconv" class="nav-brand">💳 Cheil AMEX Expense Assistant</a>
   <span class="nav-user">👤 {user} &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
 </nav>
-<div class="container" style="max-width:1100px">
+<div class="container" style="max-width:1400px">
   {_tab_bar("convert", user)}
   {empty_banner}
   {mm_modal}
@@ -998,7 +998,7 @@ def _render_history(user: str) -> str:
   <a href="/cardconv" class="nav-brand">💳 Cheil AMEX Expense Assistant</a>
   <span class="nav-user">👤 {user} &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
 </nav>
-<div class="container" style="max-width:1100px">
+<div class="container" style="max-width:1400px">
   {_tab_bar("history", user)}
 
   <div class="notepad-card" style="margin-bottom:20px">
@@ -1100,7 +1100,7 @@ def _render_keywords(user: str) -> str:
   <a href="/cardconv" class="nav-brand">💳 Cheil AMEX Expense Assistant</a>
   <span class="nav-user">👤 {user} &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
 </nav>
-<div class="container" style="max-width:1100px">
+<div class="container" style="max-width:1400px">
   {_tab_bar("keywords", user)}
 
   <div class="notepad-card" id="keywords">
@@ -1772,9 +1772,9 @@ body:has(.fb-menu.open) .wf-back,body:has(.fb-menu.open) #wfThemeBtn{{display:no
   <a href="/cardconv" class="nav-brand">💳 Cheil AMEX Expense Assistant</a>
   <span class="nav-user">👤 {user} &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
 </nav>
-<!-- Same width as the Ledger (1600): the two tabs are read back to back, and
-     the jump in page width read as a glitch (강프로 2026-08-07). -->
-<div class="container" style="max-width:1600px">
+<!-- One width for every cardconv tab (1400, 강프로 2026-08-07): 1600 read too
+     wide, 1100 too narrow, and the jump between tabs read as a glitch. -->
+<div class="container" style="max-width:1400px">
   {_tab_bar("review", user)}
 
   <div style="font-size:.8rem;color:var(--text-muted);margin-bottom:12px;display:flex;align-items:center;gap:6px">
@@ -2886,7 +2886,7 @@ def _render_ocr_staging_review(user: str) -> str:
   <span class="nav-user">👤 {user} &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
 </nav>
 {_tab_bar("ocr_review", user)}
-<div style="max-width:1100px;margin:0 auto;padding:20px 16px">
+<div style="max-width:1400px;margin:0 auto;padding:20px 16px">
   <div class="stg-header">
     <div>
       <div class="stg-title">OCR Review</div>
@@ -3139,9 +3139,9 @@ __TABCSS__
 /* Desktop: a merchant name keeps to one ellipsized line instead of folding
    "MANRESA BREAD" in half — it was the one column that actually wrapped; dates
    and money have no spaces to break on, and blanket-nowrapping them only
-   inflated the Date column to 267px by chaining its chips. The container went
-   1100→1600 for the same reason as the ellipsis — a 1920 screen was spending
-   800px on margins while rows folded (강프로 2026-08-07). Span, not td: an
+   inflated the Date column to 267px by chaining its chips. The container was
+   also widened (1100→1400, one width for every tab) — a 1920 screen was
+   spending 800px on margins while rows folded (강프로 2026-08-07). Span, not td: an
    auto-layout table ignores a cell's max-width. Desktop-scoped: the ≤768 card
    transform needs its cells free to flex. */
 @media(min-width:769px){
@@ -3302,7 +3302,7 @@ body:has(.fb-selbar.show) .wf-back,body:has(.fb-selbar.show) #wfThemeBtn{display
   <a href="/cardconv" class="nav-brand">💳 Cheil AMEX Expense Assistant</a>
   <span class="nav-user">👤 __USER__ &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
 </nav>
-<div class="container" style="max-width:1600px">
+<div class="container" style="max-width:1400px">
 
   __TABS__
 
