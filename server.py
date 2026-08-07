@@ -150,16 +150,21 @@ a.dashboard-clock:hover .dash-arrow { transform:translateX(4px); }
    Hidden until the browser says it can be installed (or until we recognise iOS,
    which has no such API and needs the two taps spelled out instead). The
    [hidden] pair is not redundant: a class with display would otherwise beat the
-   attribute and the link would show on every desktop. */
-.wf-install { display:none; margin-top:16px; }
+   attribute and the link would show on every desktop.
+   It sits below the hero rather than inside it (강프로 2026-08-07), so it takes
+   the page's own colours, not the hero's permanently dark ones. */
+.wf-install { display:none; text-align:left; margin:0 0 34px; }
 @media (max-width:768px) { .wf-install { display:block; } }
 .wf-install[hidden] { display:none; }
+/* The hero's 48px gap is the space this link now occupies, so it closes up when
+   the link is there and stays put when it is not. */
+.dashboard:has(+ .wf-install:not([hidden])) { margin-bottom:16px; }
 .wf-install-btn { display:inline-flex; align-items:center; gap:8px; min-height:44px;
   padding:0 16px; border-radius:var(--radius-full); cursor:pointer;
-  background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.16);
-  color:inherit; font-family:inherit; font-size:0.82rem; font-weight:700; }
-.wf-install-btn:hover { border-color:var(--sky-400); color:var(--sky-400); }
-.wf-install-tip { margin-top:10px; color:var(--slate-400); font-size:0.82rem;
+  background:var(--surface); border:1px solid var(--border-bright);
+  color:var(--text); font-family:inherit; font-size:0.82rem; font-weight:700; }
+.wf-install-btn:hover { border-color:var(--accent); color:var(--accent); }
+.wf-install-tip { margin-top:10px; color:var(--text-muted); font-size:0.82rem;
   font-weight:500; line-height:1.5; }
 .wf-install-tip[hidden] { display:none; }
 .dashboard-stats { display: flex; gap: 14px; flex-wrap: wrap; }
@@ -824,11 +829,11 @@ def wayfinder(user):
       <div class="dash-where" id="wf-where">&nbsp;</div>
       {'<div class="dash-cta">Compare time zones <span class="dash-arrow">&rarr;</span></div>' if has_timezones else ''}
     </{'a' if has_timezones else 'div'}>
-    <div class="wf-install" id="wfInstall" hidden>
-      <button type="button" class="wf-install-btn" id="wfInstallBtn">
-        📲 Add Wayfinder to your home screen</button>
-      <p class="wf-install-tip" id="wfInstallTip" hidden></p>
-    </div>
+  </div>
+  <div class="wf-install" id="wfInstall" hidden>
+    <button type="button" class="wf-install-btn" id="wfInstallBtn">
+      📲 Add Wayfinder to your home screen</button>
+    <p class="wf-install-tip" id="wfInstallTip" hidden></p>
   </div>
   <script>
   (function(){{
