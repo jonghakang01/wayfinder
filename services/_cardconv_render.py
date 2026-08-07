@@ -461,12 +461,14 @@ def _register_section(user: str) -> str:
         <button class="btn btn-ghost btn-sm" onclick="startDriveSync(this)">🔄 Sync from Drive</button></div>'''
         receipt_upload_html = '''
       <form id="rcptForm" method="POST" action="/cardconv/receipts/upload" enctype="multipart/form-data">
-        <div class="upload-zone" id="rcptZone" onclick="document.getElementById('rcptFiles').click()">
+        <div class="upload-zone" id="rcptZone" style="position:relative">
+          <input type="file" id="rcptFiles" name="files" multiple accept=".jpg,.jpeg,.png,.pdf"
+            onchange="handleRcptFiles(this)"
+            style="position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;z-index:2">
           <div style="font-size:2rem;margin-bottom:8px">🧾</div>
           <div style="font-weight:700;color:var(--text);margin-bottom:4px">Drop receipts here</div>
           <div style="font-size:.8rem;color:var(--text-muted)">JPG · PNG · PDF &nbsp;·&nbsp; Multiple files supported &nbsp;·&nbsp; OCR runs automatically</div>
           <div style="font-size:.74rem;color:var(--text-muted);margin-top:4px">🔒 DRM-locked file? Right-click → NASCA → 일반문서로 변환 first.</div>
-          <input type="file" id="rcptFiles" name="files" multiple accept=".jpg,.jpeg,.png,.pdf" onchange="handleRcptFiles(this)">
         </div>
         <div id="rcptDrm" style="display:none;margin-top:12px;padding:12px 16px;background:var(--surface-2);border:1px solid var(--warning,#f59e0b);border-radius:var(--radius-md)">
           <div style="font-size:.86rem;font-weight:700;color:var(--text)">🔒 <span id="rcptDrmName"></span> is still DRM-protected</div>
