@@ -57,7 +57,10 @@ ZONES = [
         ("Asia/Dubai", "Dubai"),
         ("Asia/Riyadh", "Riyadh"),
         ("Asia/Karachi", "Karachi"),
+        # India is +5:30 and Nepal +5:45 — the zones that make an hour-only grid
+        # lie, and the reason cells print minutes when the offset is not whole.
         ("Asia/Kolkata", "Mumbai / Delhi"),
+        ("Asia/Kathmandu", "Kathmandu"),
         ("Asia/Dhaka", "Dhaka"),
         ("Asia/Bangkok", "Bangkok"),
         ("Asia/Jakarta", "Jakarta"),
@@ -73,6 +76,7 @@ ZONES = [
     ]),
     ("Oceania", [
         ("Australia/Perth", "Perth"),
+        ("Australia/Adelaide", "Adelaide"),
         ("Australia/Brisbane", "Brisbane"),
         ("Australia/Sydney", "Sydney"),
         ("Pacific/Auckland", "Auckland"),
@@ -145,6 +149,35 @@ def _first(body, key):
     return (v or "").strip()
 
 
+# The strip can be anchored to somebody else's day: "9am Tuesday in Seoul, what
+# is that here" is the question people actually arrive with. HOME is the browser
+# reading its own zone, and stays the default.
+HOME = "__home__"
+
+
+def read_base(body):
+    """Which zone the 24 columns belong to. Anything unrecognised falls home."""
+    b = _first(body, "base")
+    return b if b in VALID else HOME
+
+
+def read_date(body):
+    """The day being looked at, as YYYY-MM-DD, or "" for whatever today is.
+
+    Validated rather than trusted: the value is handed to the browser's date
+    arithmetic, and a malformed one would render 24 cells of "Invalid Date".
+    """
+    d = _first(body, "date")
+    if len(d) == 10 and d[4] == "-" and d[7] == "-":
+        try:
+            y, m, day = int(d[0:4]), int(d[5:7]), int(d[8:10])
+        except ValueError:
+            return ""
+        if 1 <= m <= 12 and 1 <= day <= 31 and 1900 <= y <= 2999:
+            return d
+    return ""
+
+
 # --- rendering ----------------------------------------------------------------
 
 STYLE = """
@@ -156,6 +189,15 @@ STYLE = """
 .tz-now-meta{margin-top:6px;color:var(--text-muted);font-size:var(--text-sm);
   font-weight:var(--fw-semibold)}
 .tz-add{display:flex;gap:8px;align-items:center}
+.tz-controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;
+  margin:0 0 14px}
+.tz-controls label{font-size:var(--text-xs);font-weight:var(--fw-bold);
+  color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em}
+.tz-date{min-height:40px;padding:0 12px;background:var(--surface);
+  border:1px solid var(--border-bright);border-radius:var(--radius-md);
+  color:var(--text);font-size:var(--text-sm);font-family:inherit}
+.tz-date:focus{outline:none;border-color:var(--accent);
+  box-shadow:0 0 0 3px var(--accent-glow)}
 .tz-select{min-height:40px;padding:0 12px;background:var(--surface);
   border:1px solid var(--border-bright);border-radius:var(--radius-md);
   color:var(--text);font-size:var(--text-sm);font-family:inherit;max-width:210px}
@@ -168,7 +210,9 @@ STYLE = """
 .tz-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;
   border:1px solid var(--border);border-radius:var(--radius-lg);
   background:var(--surface)}
-.tz-grid{min-width:760px}
+/* Wide enough that a half-hour zone still reads: 24 columns of "20:30" need
+   about 33px each, and anything narrower runs the numbers together. */
+.tz-grid{min-width:980px}
 .tz-row{display:flex;align-items:stretch;background:var(--surface);
   border-bottom:1px solid var(--border)}
 .tz-row:last-child{border-bottom:none}
@@ -193,8 +237,14 @@ STYLE = """
 .tz-cell--work{background:var(--accent-glow);color:var(--text)}
 .tz-cell--sleep{color:var(--text-dim);opacity:.55}
 .tz-cell--now{box-shadow:inset 0 0 0 2px var(--accent);border-radius:var(--radius-sm)}
+/* The date is written under the column where it changes, and under the first
+   column so a row never leaves you counting back to find which day you are on. */
 .tz-daymark{font-size:9px;font-weight:var(--fw-bold);color:var(--warn);
-  letter-spacing:.04em;margin-top:2px;height:11px}
+  letter-spacing:.03em;margin-top:2px;height:11px;white-space:nowrap}
+.tz-daymark--first{color:var(--text-muted)}
+/* A half-hour zone needs "14:30", not "14" — India is the whole reason this
+   grid cannot just print an hour number (강프로 2026-08-07). */
+.tz-cell--split{font-size:10px;letter-spacing:-.02em}
 
 .tz-legend{display:flex;gap:16px;flex-wrap:wrap;margin-top:12px;
   font-size:var(--text-xs);color:var(--text-muted);font-weight:var(--fw-semibold)}
@@ -208,18 +258,39 @@ STYLE = """
   .tz-head{align-items:stretch}
   .tz-add{width:100%}
   .tz-select{flex:1;max-width:none;min-height:44px}
+  .tz-date{flex:1;min-height:44px}
+  /* Label above its control, both full width, so "Anchor" never ends up on one
+     line and its dropdown on the next. */
+  .tz-controls{display:grid;grid-template-columns:auto 1fr;gap:8px 10px;
+    align-items:center}
+  .tz-controls .btn{grid-column:2}
   .tz-label{flex:0 0 132px;padding:10px}
-  .tz-grid{min-width:680px}
+  .tz-grid{min-width:940px}
 }
 """
 
 SCRIPT = """
 (function(){
-  var HOME = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-  var homeCell = document.getElementById('tzHomeName');
-  if (homeCell) homeCell.textContent = HOME.split('/').pop().replace(/_/g,' ');
-  var homeTz = document.getElementById('tzHomeZone');
-  if (homeTz) homeTz.textContent = HOME;
+  var grid = document.getElementById('tzGrid');
+  if (!grid) return;
+  var HOME = 'UTC';
+  try { HOME = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch (e) {}
+
+  var pad = function(n){ return (n < 10 ? '0' : '') + n; };
+  var cityOf = function(tz){ return tz.split('/').pop().replace(/_/g, ' '); };
+
+  // The strip belongs to this zone and this day. Both can be somebody else's:
+  // "9am Tuesday in Seoul" is the question people arrive with.
+  var BASE = grid.dataset.base === '__home__' ? HOME : grid.dataset.base;
+  var PICKED = grid.dataset.date || '';
+
+  // Fill in the parts of the page only the browser can know.
+  document.querySelectorAll('[data-home-city]').forEach(function(e){
+    e.textContent = cityOf(HOME); });
+  document.querySelectorAll('[data-home-zone]').forEach(function(e){
+    e.textContent = HOME; });
+  var homeOpt = document.getElementById('tzHomeOption');
+  if (homeOpt) homeOpt.textContent = 'Your time zone — ' + cityOf(HOME);
 
   // Wall-clock parts for an instant in a zone. Intl is the only thing in the
   // browser that knows a zone's rules, so every number on this page comes
@@ -230,66 +301,107 @@ SCRIPT = """
       hour:'2-digit', minute:'2-digit'});
     var o = {};
     f.formatToParts(date).forEach(function(p){ o[p.type] = p.value; });
-    // 'en-CA' renders midnight as 24 in some engines; normalise it to 0.
-    var h = parseInt(o.hour, 10) % 24;
-    return {ymd: o.year+'-'+o.month+'-'+o.day, hour: h, minute: o.minute};
+    var h = parseInt(o.hour, 10) % 24;   // some engines render midnight as 24
+    return {ymd: o.year+'-'+o.month+'-'+o.day, hour: h,
+            minute: parseInt(o.minute, 10),
+            y: +o.year, mo: +o.month, d: +o.day};
+  }
+
+  // How far a zone's wall clock is from UTC at a given instant, in minutes.
+  function offsetMin(date, tz){
+    var p = parts(date, tz);
+    return (Date.UTC(p.y, p.mo - 1, p.d, p.hour, p.minute) - date.getTime()) / 60000;
+  }
+
+  // The instant at which a zone's clock reads this wall time. Solved by
+  // iteration rather than arithmetic: the offset we need depends on the instant
+  // we are looking for, and near a DST change the first guess is an hour out.
+  function instantOf(y, mo, d, tz){
+    var guess = Date.UTC(y, mo - 1, d, 0, 0);
+    for (var i = 0; i < 3; i++){
+      guess = Date.UTC(y, mo - 1, d, 0, 0) - offsetMin(new Date(guess), tz) * 60000;
+    }
+    return new Date(guess);
   }
 
   function offsetLabel(date, tz){
-    var a = parts(date, HOME), b = parts(date, tz);
-    var mins = (Date.parse(b.ymd+'T00:00:00Z') - Date.parse(a.ymd+'T00:00:00Z')) / 60000
-             + (b.hour - a.hour) * 60 + (parseInt(b.minute,10) - parseInt(a.minute,10));
+    var mins = offsetMin(date, tz) - offsetMin(date, BASE);
     if (mins === 0) return 'same time';
-    var sign = mins > 0 ? '+' : '−', m = Math.abs(mins);
+    var sign = mins > 0 ? '+' : '\\u2212', m = Math.abs(mins);
     var h = Math.floor(m / 60), r = m % 60;
-    return sign + h + (r ? ':' + String(r).padStart(2,'0') : '') + 'h';
+    return sign + h + (r ? ':' + pad(r) : '') + 'h';
   }
+
+  // timeZone:'UTC' is not decoration — the date is built as a UTC midnight, and
+  // formatting it in the viewer's own zone renders the day before for anyone
+  // west of Greenwich. That is exactly the off-by-one this label exists to stop.
+  var SHORT = new Intl.DateTimeFormat('en-US',
+    {timeZone:'UTC', month:'short', day:'numeric'});
+  function shortDate(p){ return SHORT.format(new Date(Date.UTC(p.y, p.mo-1, p.d))); }
 
   function paint(){
     var now = new Date();
-    var home = parts(now, HOME);
+
+    // Column 0 is midnight of the chosen day in the base zone. With no day
+    // chosen that is simply today, which keeps the default behaviour.
+    var anchor;
+    if (PICKED){
+      anchor = instantOf(+PICKED.slice(0,4), +PICKED.slice(5,7), +PICKED.slice(8,10), BASE);
+    } else {
+      var t = parts(now, BASE);
+      anchor = instantOf(t.y, t.mo, t.d, BASE);
+    }
+    // Only a strip showing today can have a "right now" column in it.
+    var basePartsNow = parts(now, BASE);
+    var showNow = parts(anchor, BASE).ymd === basePartsNow.ymd;
+
+    var headEl = document.getElementById('tzHeadDate');
+    if (headEl){
+      headEl.textContent = new Intl.DateTimeFormat('en-US',
+        {timeZone: BASE, weekday:'long', month:'long', day:'numeric', year:'numeric'})
+        .format(anchor) + ' in ' + cityOf(BASE);
+    }
     var clock = document.getElementById('tzNow');
-    if (clock) clock.textContent = String(home.hour).padStart(2,'0') + ':' + home.minute;
-    var meta = document.getElementById('tzNowMeta');
-    if (meta) meta.textContent = new Intl.DateTimeFormat('en-US',
-      {timeZone: HOME, weekday:'long', month:'long', day:'numeric'}).format(now);
+    if (clock) clock.textContent = pad(basePartsNow.hour) + ':' + pad(basePartsNow.minute);
 
-    // Midnight of the home day, so column 0 is the start of *your* today and
-    // every other row is read against it. That is the whole point of the strip.
-    var base = new Date(now.getTime() - home.hour*3600000
-                        - parseInt(home.minute,10)*60000);
-
-    document.querySelectorAll('.tz-row').forEach(function(row){
+    grid.querySelectorAll('.tz-row').forEach(function(row){
       var tz = row.dataset.tz === '__home__' ? HOME : row.dataset.tz;
       var hours = row.querySelector('.tz-hours');
       if (!hours) return;
+
+      // A zone offset by 30 or 45 minutes cannot print a bare hour — India is
+      // the whole reason this is decided per row rather than assumed.
+      var split = offsetMin(anchor, tz) % 60 !== 0;
+
       hours.innerHTML = '';
-      var thisDay = null;
+      var prevDay = null;
       for (var i = 0; i < 24; i++){
-        var at = new Date(base.getTime() + i*3600000);
+        var at = new Date(anchor.getTime() + i * 3600000);
         var p = parts(at, tz);
         var cell = document.createElement('div');
         cell.className = 'tz-cell'
           + (p.hour >= 9 && p.hour < 18 ? ' tz-cell--work' : '')
           + (p.hour < 7 || p.hour >= 22 ? ' tz-cell--sleep' : '')
-          + (i === home.hour ? ' tz-cell--now' : '');
-        cell.textContent = String(p.hour).padStart(2,'0');
-        // A date change is the thing people actually get wrong, so it is marked
-        // on the column where it happens rather than left to be inferred.
+          + (split ? ' tz-cell--split' : '')
+          + (showNow && at <= now && now < new Date(at.getTime() + 3600000)
+              ? ' tz-cell--now' : '');
+        cell.textContent = pad(p.hour) + (split ? ':' + pad(p.minute) : '');
+
+        // The date is written under the first column and under whichever column
+        // it changes on, so no row ever leaves you counting to find the day.
         var mark = document.createElement('div');
-        mark.className = 'tz-daymark';
-        if (thisDay !== null && p.ymd !== thisDay){
-          mark.textContent = p.ymd > thisDay ? 'next' : 'prev';
-        }
-        thisDay = p.ymd;
+        mark.className = 'tz-daymark' + (i === 0 ? ' tz-daymark--first' : '');
+        if (i === 0 || p.ymd !== prevDay) mark.textContent = shortDate(p);
+        prevDay = p.ymd;
         cell.appendChild(mark);
         hours.appendChild(cell);
       }
+
       var sub = row.querySelector('.tz-sub');
       if (sub){
         var p0 = parts(now, tz);
-        sub.textContent = String(p0.hour).padStart(2,'0') + ':' + p0.minute
-          + (row.dataset.tz === '__home__' ? '' : ' · ' + offsetLabel(now, tz));
+        sub.textContent = 'now ' + pad(p0.hour) + ':' + pad(p0.minute)
+          + (row.dataset.tz === grid.dataset.base ? '' : ' · ' + offsetLabel(anchor, tz));
       }
     });
   }
@@ -300,7 +412,7 @@ SCRIPT = """
 """
 
 
-def render(user):
+def render(user, base=HOME, picked=""):
     zones = load(user)
     options = ""
     for group, entries in ZONES:
@@ -309,32 +421,62 @@ def render(user):
             for tz, label in entries)
         options += f'<optgroup label="{group}">{opts}</optgroup>'
 
-    def row(tz, label, sub_id="", home=False):
-        drop = "" if home else (
+    def row(tz, label, anchor=False):
+        # The anchor row is the day everything else is read against, so it is
+        # never removable — dropping it would leave the strip measuring nothing.
+        drop = "" if anchor else (
             f'<form method="POST" action="/timezones/remove" class="tz-drop" '
             f'style="display:inline-flex">'
             f'<input type="hidden" name="tz" value="{tz}">'
+            f'<input type="hidden" name="base" value="{base}">'
+            f'<input type="hidden" name="date" value="{picked}">'
             # Deliberately not .chip-action: accent is the invitation to act, and
             # dropping a city is neither the invitation nor what you came for.
             f'<button class="btn btn-sm btn-ghost" type="submit" '
             f'title="Remove {label}">Remove</button></form>')
-        name = ('<span id="tzHomeName">Your time zone</span>' if home
-                else label)
-        zone_note = ('<span id="tzHomeZone"></span>' if home else tz)
+        is_home = tz == HOME
+        name = ('<span data-home-city>Your time zone</span>' if is_home else label)
+        zone_note = ('<span data-home-zone></span>' if is_home else tz)
         return (
-            f'<div class="tz-row{" tz-row--home" if home else ""}" '
-            f'data-tz="{"__home__" if home else tz}">'
+            f'<div class="tz-row{" tz-row--home" if anchor else ""}" data-tz="{tz}">'
             f'<div class="tz-label">'
-            f'<div class="tz-city">{"🏠 " if home else ""}{name}</div>'
+            f'<div class="tz-city">{"⚓ " if anchor else ""}{name}</div>'
             f'<div class="tz-sub">—</div>'
             f'<div class="tz-sub" style="opacity:.7">{zone_note}</div>'
             f'{drop}</div>'
             f'<div class="tz-hours"></div></div>')
 
-    rows = row("", "", home=True) + "".join(row(z, LABELS[z]) for z in zones)
+    # The anchor leads, and never appears twice — picking a city you already
+    # compare against promotes that row rather than duplicating it.
+    rows = row(base, LABELS.get(base, ""), anchor=True) + "".join(
+        row(z, LABELS[z]) for z in zones if z != base)
+
+    base_opts = (f'<option value="{HOME}"{" selected" if base == HOME else ""} '
+                 f'id="tzHomeOption">Your time zone</option>')
+    for group, entries in ZONES:
+        opts = "".join(
+            f'<option value="{tz}"{" selected" if tz == base else ""}>{label}</option>'
+            for tz, label in entries)
+        base_opts += f'<optgroup label="{group}">{opts}</optgroup>'
+
+    controls = (
+        f'<form method="GET" action="/timezones" class="tz-controls">'
+        f'<label for="tzBase">Anchor</label>'
+        f'<select id="tzBase" name="base" class="tz-select" '
+        f'onchange="this.form.submit()">{base_opts}</select>'
+        f'<label for="tzDate">Day</label>'
+        f'<input id="tzDate" name="date" type="date" class="tz-date" '
+        f'value="{picked}" onchange="this.form.submit()">'
+        f'<button class="btn btn-sm btn-secondary" type="submit">Show</button>'
+        + (f'<a class="btn btn-sm btn-ghost" href="/timezones?base={base}">Today</a>'
+           if picked else '')
+        + f'</form>')
+
     full = len(zones) >= MAX_ZONES
     picker = (
         f'<form method="POST" action="/timezones/add" class="tz-add">'
+        f'<input type="hidden" name="base" value="{base}">'
+        f'<input type="hidden" name="date" value="{picked}">'
         f'<select name="tz" class="tz-select" aria-label="City to compare"'
         f'{" disabled" if full else ""}>{options}</select>'
         f'<button class="btn btn-primary" type="submit"'
@@ -356,11 +498,13 @@ def render(user):
   <div class="tz-head">
     <div>
       <div class="tz-now" id="tzNow">--:--</div>
-      <div class="tz-now-meta" id="tzNowMeta">&nbsp;</div>
+      <div class="tz-now-meta" id="tzHeadDate">&nbsp;</div>
     </div>
     {picker}
   </div>
-  <div class="tz-scroll"><div class="tz-grid">{rows}</div></div>
+  {controls}
+  <div class="tz-scroll"><div class="tz-grid" id="tzGrid"
+       data-base="{base}" data-date="{picked}">{rows}</div></div>
   {limit_note}
   <div class="tz-legend">
     <span class="tz-key"><span class="tz-swatch"
@@ -369,11 +513,24 @@ def render(user):
       style="background:var(--surface-2);opacity:.55"></span>22:00–07:00 local</span>
     <span class="tz-key"><span class="tz-swatch"
       style="background:transparent;box-shadow:inset 0 0 0 2px var(--accent)"></span>right now</span>
-    <span class="tz-key"><b style="color:var(--warn)">next</b> — the date changes here</span>
+    <span class="tz-key">Each column carries its own date; a half-hour zone
+      shows minutes (Mumbai reads 14:30, not 14).</span>
   </div>
 </div>
 <script>{SCRIPT}</script>
 </body></html>'''
+
+
+def _view_query(body):
+    """Carry the anchor and the day back through a redirect, so adding a city
+    does not throw you back to today."""
+    base, picked = read_base(body), read_date(body)
+    bits = []
+    if base != HOME:
+        bits.append("base=" + base)
+    if picked:
+        bits.append("date=" + picked)
+    return ("?" + "&".join(bits)) if bits else ""
 
 
 def handle(method, path, body, ctx=None):
@@ -384,6 +541,6 @@ def handle(method, path, body, ctx=None):
             add(user, _first(body, "tz"))
         elif path == "/timezones/remove":
             remove(user, _first(body, "tz"))
-        return ("redirect", "/timezones")
+        return ("redirect", "/timezones" + _view_query(body))
 
-    return ("html", render(user))
+    return ("html", render(user, read_base(body), read_date(body)))
