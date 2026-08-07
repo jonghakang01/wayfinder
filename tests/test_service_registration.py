@@ -61,28 +61,78 @@ def test_timezones_is_there():
     assert "Time Zones" in auth.APP_LABELS["timezones"]
 
 
-# ── the two admin lists must not drift apart (강프로 2026-08-07) ──────────────
-# Switching a service on globally is useless if it never appears in the per-user
-# checkboxes: the global list knew about Time Zones and the per-user one, which
-# was a second hand-written list, did not.
+# ── the two halves of the admin screen are one flow (강프로 2026-08-07) ───────
+# Global Service Control decides what is in service at all; only those apps
+# appear in each user's checkboxes to be handed out person by person. The two
+# lists drifting apart — one hand-written, one not — is the morning's bug.
 
-def test_the_per_user_list_is_the_registry():
+def _seed(monkeypatch, on, users=None):
+    monkeypatch.setattr(auth, "load_settings",
+                        lambda: {"available_services": list(on)})
+    monkeypatch.setattr(auth, "load_users", lambda: users if users is not None
+                        else {"someone@example.com":
+                              {"role": "user", "email": "someone@example.com",
+                               "services": []}})
+
+
+def test_the_per_user_list_is_the_registry_filtered_by_the_switches(monkeypatch):
     import services.admin as admin
-    assert admin._visible_services() == sorted(auth.CONTROLLED_SERVICES)
+    _seed(monkeypatch, on=["cardconv", "timezones", "not-a-real-app"])
+    assert admin._visible_services() == ["cardconv", "timezones"]
 
 
-def test_every_switchable_service_has_a_per_user_checkbox(monkeypatch):
+def test_every_switched_on_service_has_a_per_user_checkbox(monkeypatch):
     """Rendered markup, not the list behind it — the list agreeing with itself
     is exactly what the bug looked like from the inside.
 
-    The user is seeded rather than borrowed from the machine: the checkboxes
-    live in the per-user rows, so on a box with no users this rendered an empty
-    table and passed locally while failing in CI, which has none.
+    The user and the settings are both seeded rather than borrowed from the
+    machine: the checkboxes live in per-user rows, so a box with no users
+    rendered an empty table and passed locally while failing in CI.
     """
     import services.admin as admin
-    monkeypatch.setattr(auth, "load_users", lambda: {
-        "someone@example.com": {"role": "user", "email": "someone@example.com",
-                                "services": []}})
+    _seed(monkeypatch, on=sorted(auth.CONTROLLED_SERVICES))
     html = admin.render_admin("__nobody__")
     for slug in auth.CONTROLLED_SERVICES:
         assert f'name="services" value="{slug}"' in html, slug
+
+
+def test_a_switched_off_service_offers_no_checkbox(monkeypatch):
+    """Offering it would grant access to something the switch says is off."""
+    import services.admin as admin
+    _seed(monkeypatch, on=["cardconv"])
+    html = admin.render_admin("__nobody__")
+    assert 'name="services" value="cardconv"' in html
+    assert 'name="services" value="timezones"' not in html
+
+
+def test_a_grant_for_a_switched_off_service_survives_and_is_named(monkeypatch):
+    """Switching an app off hides its checkbox but revokes nobody — and the
+    grant is shown as dormant rather than silently vanishing from the screen."""
+    import services.admin as admin
+    _seed(monkeypatch, on=["cardconv"],
+          users={"someone@example.com":
+                 {"role": "user", "email": "someone@example.com",
+                  "services": ["cardconv", "timezones"]}})
+    html = admin.render_admin("__nobody__")
+    assert "💤" in html and "Time Zones" in html      # named as dormant
+    # and the save form's scope excludes it, so saving cannot revoke it
+    assert 'name="scope" value="cardconv"' in html
+
+
+def test_saving_within_scope_leaves_off_list_grants_alone(monkeypatch):
+    """The scope field is what makes the survival real, not just cosmetic:
+    set_services only rewrites grants inside the scope it was shown."""
+    import services.admin as admin
+    store = {"someone@example.com":
+             {"role": "user", "email": "someone@example.com",
+              "services": ["cardconv", "timezones"]}}
+    monkeypatch.setattr(auth, "load_users", lambda: store)
+    saved = {}
+    monkeypatch.setattr(auth, "save_users", lambda u: saved.update(u))
+    monkeypatch.setattr(auth, "is_admin", lambda u: u == "__admin__")
+    # admin unchecks cardconv on a screen whose scope is only ["cardconv"]
+    admin.handle("POST", "/admin/set_services",
+                 {"username": ["someone@example.com"], "services": [],
+                  "scope": ["cardconv"]}, {"user": "__admin__"})
+    assert "timezones" in saved["someone@example.com"]["services"]
+    assert "cardconv" not in saved["someone@example.com"]["services"]

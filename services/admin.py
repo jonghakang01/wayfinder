@@ -192,17 +192,24 @@ def _forbidden():
 
 
 def _visible_services():
-    """Services shown in the per-user permission UI.
+    """Services shown in the per-user permission UI: the registry, filtered by
+    the global switches.
 
-    Read from the registry rather than typed here. This used to be a second
-    hand-written list, so switching Time Zones on globally left no way to give
-    it to anybody — the global list knew about the app and this one did not
-    (강프로 2026-08-07). One source, and a new app appears in both at once.
+    The two halves of this screen are one flow now (강프로 2026-08-07): Global
+    Service Control decides what is in service at all, and only those appear in
+    each user's checkboxes to be handed out person by person. An app that is
+    globally off is not offered — offering it would grant access to something
+    the switch says is not running.
 
-    Grants outside whatever this returns still survive untouched, via the scope
-    field, so the list changing never revokes anything.
+    Two guarantees hold across any change to this list:
+      - Grants outside it survive untouched, via the scope field — switching an
+        app off globally hides its checkbox but revokes nobody; switch it back
+        on and the same people still have it.
+      - It reads the registry, never a hand-typed list. The per-user side being
+        a second hand-written list is exactly what broke on 2026-08-07.
     """
-    return sorted(auth.CONTROLLED_SERVICES)
+    avail = set(auth.load_settings().get("available_services", []))
+    return [s for s in sorted(auth.CONTROLLED_SERVICES) if s in avail]
 
 
 def _drive_token_exists(username):
@@ -219,6 +226,8 @@ def render_admin(current_user, notify_result="", reset_result=None,
     total = len(users)
     admin_count = sum(1 for v in users.values() if v.get("role") == "admin")
     svc_labels = auth.APP_LABELS
+    # Once, not per row — it reads the settings file.
+    visible_services = _visible_services()
 
     rows = ""
     for username in sorted(users):
@@ -294,15 +303,24 @@ def render_admin(current_user, notify_result="", reset_result=None,
               </form>
             </div>'''
             user_svcs = set(info.get("services", []))
-            visible = _visible_services()
             checks = "".join(
                 f'<label class="svc-check"><input type="checkbox" name="services" value="{s}"'
                 f'{" checked" if s in user_svcs else ""}> {svc_labels.get(s, s)}</label>'
-                for s in visible
-            )
+                for s in visible_services
+            ) or ('<span class="svc-none">Apps switched on in Service Control '
+                  'appear here.</span>')
+            # A grant for a globally-off app is real but has no checkbox here.
+            # Named, so the admin is not left wondering where a grant went.
+            dormant = sorted(user_svcs
+                             & (auth.CONTROLLED_SERVICES - set(visible_services)))
+            if dormant:
+                checks += ('<span class="svc-none" title="Granted, but the app is '
+                           'switched off globally — comes back with the switch">💤 '
+                           + ", ".join(svc_labels.get(s, s) for s in dormant)
+                           + '</span>')
             svc_col = f'''<form method="POST" action="/admin/set_services" class="svc-form">
               <input type="hidden" name="username" value="{username}">
-              <input type="hidden" name="scope" value="{",".join(visible)}">
+              <input type="hidden" name="scope" value="{",".join(visible_services)}">
               {checks}
               <button type="submit" class="svc-save-btn">Save</button>
             </form>'''
@@ -512,6 +530,7 @@ tr.row-blocked td{{opacity:.65}}
 .svc-form{{display:flex;align-items:center;gap:8px;flex-wrap:wrap}}
 .svc-check{{display:flex;align-items:center;gap:4px;font-size:.78rem;color:var(--text-muted);
   cursor:pointer;white-space:nowrap;min-height:32px}}
+.svc-none{{font-size:.74rem;color:var(--text-dim);white-space:nowrap}}
 .svc-save-btn{{padding:6px 12px;background:var(--accent);color:var(--bg-deep);border:none;
   border-radius:var(--radius-sm);font-size:.78rem;font-weight:700;cursor:pointer;white-space:nowrap}}
 .seg-wrap{{display:inline-flex;background:var(--surface-2);border-radius:var(--radius-md);padding:2px}}
