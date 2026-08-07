@@ -51,6 +51,7 @@ check "Matter Tracker (auth required)"    "$BASE/matters"   "302"
 check "Notebot (auth required)"    "$BASE/notebot"    "302"
 check "Deal Desk (auth required)"    "$BASE/sow"    "302"
 check "Toast Companion (auth required)"    "$BASE/toast"    "302"
+check "Time Zones (auth required)"    "$BASE/timezones"    "302"
 echo ""
 echo "Result: $PASS passed, $FAIL failed"
 if [ $FAIL -gt 0 ]; then
