@@ -864,35 +864,42 @@ def wayfinder(user):
     }}
     tick(); setInterval(tick, 1000);
 
-    // Add to home screen. Chrome hands us an event we can fire on demand; iOS
-    // Safari has no such API at all, so there the same link spells out the two
-    // taps instead of pretending it can do it for you. Either way it is never
-    // offered to someone already running the installed app.
+    // Add to home screen. The offer is shown to every phone that is not already
+    // running the installed app — gating it on beforeinstallprompt hid it from
+    // every browser that does not fire that event, and Samsung Internet is one
+    // of them (강프로 2026-08-07: visible in Chrome, missing in Samsung).
+    // Chrome hands us the event and we fire the real prompt; everyone else gets
+    // the taps for their own browser spelled out.
     var box = document.getElementById('wfInstall');
     var btn = document.getElementById('wfInstallBtn');
     var tip = document.getElementById('wfInstallTip');
     var deferred = null;
+    var ua = navigator.userAgent;
     var installed = (window.matchMedia &&
                      window.matchMedia('(display-mode: standalone)').matches) ||
                     window.navigator.standalone === true;
-    var iOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    var iOS = /iPad|iPhone|iPod/.test(ua) ||
               (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    var samsung = /SamsungBrowser/.test(ua);
+    var firefox = /Firefox|FxiOS/.test(ua);
+
+    function howTo(){{
+      if (iOS) return 'Tap the Share button, then choose "Add to Home Screen".';
+      if (samsung) return 'Tap the menu at the bottom, then "Add page to" \\u2192 "Home screen".';
+      if (firefox) return 'Open the browser menu, then choose "Install" or "Add to Home screen".';
+      return 'Open your browser menu, then choose "Add to Home screen".';
+    }}
 
     window.addEventListener('beforeinstallprompt', function(e){{
       e.preventDefault();
       deferred = e;
       if (box && !installed) box.hidden = false;
     }});
-    if (box && iOS && !installed) box.hidden = false;
+    if (box && !installed) box.hidden = false;
 
     if (btn) btn.addEventListener('click', function(){{
       if (deferred) {{ deferred.prompt(); deferred = null; if (box) box.hidden = true; return; }}
-      if (tip) {{
-        tip.textContent = iOS
-          ? 'Tap the Share button below, then choose "Add to Home Screen".'
-          : 'Open your browser menu, then choose "Add to Home screen".';
-        tip.hidden = false;
-      }}
+      if (tip) {{ tip.textContent = howTo(); tip.hidden = false; }}
     }});
     window.addEventListener('appinstalled', function(){{ if (box) box.hidden = true; }});
   }})();
