@@ -176,7 +176,11 @@ _CC_TAB_CSS = (
     ".cc-tabs::-webkit-scrollbar{display:none}"
     ".cc-tab{flex:0 0 auto;padding:10px 16px}"
     ".cc-info{width:20px;height:20px;font-size:.68rem}"
-    ".cc-wf-close{padding:8px 12px}"
+    # 44px touch floor for the banner's × — the glyph stays small, the box grows.
+    ".cc-wf-close{padding:14px 16px;min-height:44px}"
+    # The floating Wayfinder/theme pills sit over the last controls on a phone
+    # otherwise — Review's Sort select was under one (강프로 2026-08-07).
+    ".container{padding-bottom:96px}"
     # Anchored tooltips clip off-screen on narrow viewports — surface them as a
     # fixed bottom card instead (same click-to-toggle behavior).
     ".cc-tip{position:fixed;left:12px;right:12px;top:auto;bottom:calc(12px + env(safe-area-inset-bottom));max-width:none;width:auto;z-index:250;box-shadow:0 -8px 30px rgba(0,0,0,.5)}"
@@ -674,10 +678,14 @@ history.replaceState({{}}, '', '/cardconv/convert');
     uploads = _load_uploads(user)
     up_rows = ""
     for u in uploads:
+        # flex-wrap + word-break, or a long filename pushes the Re-run/✕ pair
+        # clean off a 425px screen (measured to 536px, 강프로 2026-08-07).
         up_rows += (
-            '<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)">'
-            f'<span style="font-size:.8rem;color:var(--text-muted);min-width:130px">{_esc(u.get("uploaded_at"))}</span>'
-            f'<span style="flex:1;font-size:.85rem;color:var(--text);font-weight:600">{_esc(u.get("filename"))}</span>'
+            '<div style="display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;'
+            'padding:10px 0;border-bottom:1px solid var(--border)">'
+            f'<span style="font-size:.8rem;color:var(--text-muted)">{_esc(u.get("uploaded_at"))}</span>'
+            f'<span style="flex:1;min-width:140px;font-size:.85rem;color:var(--text);'
+            f'font-weight:600;word-break:break-all">{_esc(u.get("filename"))}</span>'
             f'<span style="font-size:.78rem;color:var(--success)">{u.get("rows", 0)} rows</span>'
             f'<form method="POST" action="/cardconv/upload/rerun" style="display:inline">'
             f'<input type="hidden" name="id" value="{_esc(u.get("id"))}">'
@@ -734,7 +742,7 @@ history.replaceState({{}}, '', '/cardconv/convert');
     <div class="notepad-body" style="padding:12px 16px">
       <p style="font-size:.78rem;color:var(--text-muted);margin-bottom:12px">Only transactions whose CSV 'Card Member Name' matches a name below are converted.</p>
       <form method="POST" action="/cardconv/cardnames/add" style="display:flex;gap:8px;margin-bottom:14px">
-        <input name="name" placeholder="e.g. {_esc(EXAMPLE_CARD_NAME)}" required style="flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);color:var(--text);font-size:.82rem">
+        <input name="name" placeholder="e.g. {_esc(EXAMPLE_CARD_NAME)}" required style="flex:1;min-width:0;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);color:var(--text);font-size:.82rem">
         <button type="submit" class="btn btn-primary btn-sm">+ Add</button>
       </form>
       <div id="cardNamesWrap" style="display:flex;flex-wrap:wrap;gap:8px">{name_chips}</div>
@@ -939,15 +947,18 @@ def _render_history(user: str) -> str:
             detail = (f'<span style="font-size:.8rem;color:var(--text);font-weight:600">{fn}</span>'
                       f'<span style="font-size:.74rem;color:var(--text-muted)">Filter: {filt} · {count} receipts</span>')
 
+        # The row wraps and long filenames break: five shrink-proof spans plus an
+        # unbreakable "Statement_1006_Jun_2026.xlsx" measured this page at 622px
+        # on a 425px phone, with the counts clipped mid-word (강프로 2026-08-07).
         rows_html += (
-            f'<div class="hist-row" data-id="{hid}" style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--border)">'
-            f'<input type="checkbox" class="hist-cb" data-id="{hid}" style="width:14px;height:14px;accent-color:var(--accent);cursor:pointer;flex-shrink:0">'
+            f'<div class="hist-row" data-id="{hid}" style="display:flex;align-items:center;flex-wrap:wrap;gap:6px 10px;padding:9px 0;border-bottom:1px solid var(--border)">'
+            f'<input type="checkbox" class="hist-cb" data-id="{hid}" style="width:20px;height:20px;accent-color:var(--accent);cursor:pointer;flex-shrink:0">'
             f'<span style="font-size:1rem;flex-shrink:0">{icon}</span>'
             f'<span style="font-size:.72rem;font-weight:600;padding:1px 7px;border-radius:8px;background:var(--surface-3);{type_color};flex-shrink:0">{type_label}</span>'
             + (f'<span style="font-size:.7rem;font-weight:600;padding:1px 7px;border-radius:8px;background:var(--surface-3);color:var(--text-muted);flex-shrink:0">💳 {_esc(h.get("profile"))}</span>'
                if h.get("profile") else '')
-            + f'<span style="font-size:.78rem;color:var(--text-muted);min-width:120px;flex-shrink:0">{hdate}</span>'
-            f'<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;flex:1;min-width:0">{detail}</div>'
+            + f'<span style="font-size:.78rem;color:var(--text-muted);flex-shrink:0">{hdate}</span>'
+            f'<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;flex:1;min-width:180px;word-break:break-all">{detail}</div>'
             f'{dl}'
             f'</div>')
 
@@ -969,9 +980,9 @@ def _render_history(user: str) -> str:
   {_tab_bar("history", user)}
 
   <div class="notepad-card" style="margin-bottom:20px">
-    <div class="notepad-header" style="display:flex;align-items:center;justify-content:space-between">
+    <div class="notepad-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
       <span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--accent)">Upload &amp; Download History</span>
-      <div style="display:flex;gap:8px">
+      <div style="display:flex;gap:8px;align-items:center">
         <button onclick="delSelected()" class="btn btn-ghost btn-sm" style="font-size:.74rem" id="delSelBtn" disabled>🗑 Delete Selected</button>
         <button onclick="clearAll()" class="btn btn-danger btn-sm" style="font-size:.74rem">✕ Clear All</button>
       </div>
@@ -1712,7 +1723,7 @@ body:has(.rv-bulkbar.has-sel) .wf-back,body:has(.rv-bulkbar.has-sel) #wfThemeBtn
 #rvReset{{width:100%}}
 body:has(.fb-menu.open) .wf-back,body:has(.fb-menu.open) #wfThemeBtn{{display:none}}
 .fb-pop-wrap{{width:100%}}
-.fb-more-btn{{width:100%;justify-content:center;padding:9px 11px}}
+.fb-more-btn{{width:100%;justify-content:center;padding:9px 11px;min-height:44px}}
 .fb-menu{{position:fixed;left:10px;right:10px;top:auto;bottom:calc(10px + env(safe-area-inset-bottom));min-width:0;z-index:160;box-shadow:0 -12px 34px rgba(0,0,0,.6)}}
 }}
 .rv-foot{{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 4px;flex-wrap:wrap}}
@@ -3209,7 +3220,7 @@ select.sb-act{padding:5px 8px}
    date / merchant / final amount / receipt / status / action — the OCR amounts
    and Card/Usage editors stay reachable in the detail panel, which owns deep
    edits on mobile. Bulk selbar docks to the bottom thumb zone while active. */
-@media(max-width:768px){.detail-panel{width:100vw}.stat-grid{grid-template-columns:1fr 1fr}.filter-bar{gap:8px;padding:9px 12px}.filter-bar .fb-field{flex-wrap:wrap}.preset-btn{padding:7px 12px}.row-check,.del-check input{width:20px;height:20px}.usage-sel,.card-sel{padding:6px 8px;max-width:none}.ledger-table,.ledger-table tbody,.ledger-table tr,.ledger-table td{display:block;width:100%}.ledger-table thead{display:none}.ledger-table tr{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md);margin-bottom:10px;padding:10px 12px;position:relative}.ledger-table tr:hover td{background:transparent}.ledger-table td{border-bottom:none!important;padding:5px 0;display:flex;justify-content:space-between;align-items:center;gap:10px;text-align:right}.ledger-table td::before{content:attr(data-label);font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);text-align:left}.ledger-table td[data-label=Select]{position:absolute;top:8px;right:10px;left:auto;width:auto;padding:6px}.ledger-table td[data-label=Select]::before{display:none}.ledger-table td[data-label=Date]{font-weight:700;font-size:.95rem;padding-right:34px}
+@media(max-width:768px){.detail-panel{width:100vw}.stat-grid{grid-template-columns:1fr 1fr}.filter-bar{gap:8px;padding:9px 12px}.filter-bar .fb-field{flex-wrap:wrap}.preset-btn{padding:7px 12px;min-height:44px}.fb-more-btn{min-height:44px}.row-check,.del-check input{width:20px;height:20px}.usage-sel,.card-sel{padding:6px 8px;max-width:none}.ledger-table,.ledger-table tbody,.ledger-table tr,.ledger-table td{display:block;width:100%}.ledger-table thead{display:none}.ledger-table tr{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md);margin-bottom:10px;padding:10px 12px;position:relative}.ledger-table tr:hover td{background:transparent}.ledger-table td{border-bottom:none!important;padding:5px 0;display:flex;justify-content:space-between;align-items:center;gap:10px;text-align:right}.ledger-table td::before{content:attr(data-label);font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);text-align:left}.ledger-table td[data-label=Select]{position:absolute;top:8px;right:10px;left:auto;width:auto;padding:6px}.ledger-table td[data-label=Select]::before{display:none}.ledger-table td[data-label=Date]{font-weight:700;font-size:.95rem;padding-right:34px}
 .ledger-table td[data-label=Printed],.ledger-table td[data-label=Handwritten],.ledger-table td[data-label=Card],.ledger-table td[data-label=Usage]{display:none}
 .filter-bar{display:grid;grid-template-columns:1fr 1fr;gap:10px 8px;align-items:end}
 .filter-bar .fb-field{display:flex;flex-direction:column;align-items:stretch;gap:4px;white-space:normal}
