@@ -71,8 +71,18 @@ def test_the_per_user_list_is_the_registry():
     assert admin._visible_services() == sorted(auth.CONTROLLED_SERVICES)
 
 
-def test_every_switchable_service_has_a_per_user_checkbox():
+def test_every_switchable_service_has_a_per_user_checkbox(monkeypatch):
+    """Rendered markup, not the list behind it — the list agreeing with itself
+    is exactly what the bug looked like from the inside.
+
+    The user is seeded rather than borrowed from the machine: the checkboxes
+    live in the per-user rows, so on a box with no users this rendered an empty
+    table and passed locally while failing in CI, which has none.
+    """
     import services.admin as admin
+    monkeypatch.setattr(auth, "load_users", lambda: {
+        "someone@example.com": {"role": "user", "email": "someone@example.com",
+                                "services": []}})
     html = admin.render_admin("__nobody__")
     for slug in auth.CONTROLLED_SERVICES:
         assert f'name="services" value="{slug}"' in html, slug
