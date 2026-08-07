@@ -189,8 +189,17 @@ STYLE = """
 .tz-now-meta{margin-top:6px;color:var(--text-muted);font-size:var(--text-sm);
   font-weight:var(--fw-semibold)}
 .tz-add{display:flex;gap:8px;align-items:center}
+.tz-more{margin:0 0 14px}
+.tz-more-head{cursor:pointer;list-style:none;display:inline-flex;align-items:center;
+  gap:8px;min-height:40px;padding:0 14px;border-radius:var(--radius-full);
+  background:var(--surface);border:1px solid var(--border-bright);
+  color:var(--text-muted);font-size:var(--text-xs);font-weight:var(--fw-bold)}
+.tz-more-head::-webkit-details-marker{display:none}
+.tz-more-head::after{content:"⌄";font-size:1rem;line-height:1;margin-top:-3px}
+.tz-more[open] .tz-more-head::after{content:"⌃";margin-top:3px}
+.tz-more-head:hover{border-color:var(--accent);color:var(--accent)}
 .tz-controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;
-  margin:0 0 14px}
+  margin:10px 0 0}
 .tz-controls label{font-size:var(--text-xs);font-weight:var(--fw-bold);
   color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em}
 .tz-date{min-height:40px;padding:0 12px;background:var(--surface);
@@ -242,6 +251,12 @@ STYLE = """
 .tz-daymark{font-size:9px;font-weight:var(--fw-bold);color:var(--warn);
   letter-spacing:.03em;margin-top:2px;height:11px;white-space:nowrap}
 .tz-daymark--first{color:var(--text-muted)}
+/* The hour you are in carries its date too — it is the column the eye lands on
+   first, and it should not send you hunting left for the day. */
+.tz-daymark--now{color:var(--accent)}
+/* Where the clocks actually move. Twice a year this column is the difference
+   between a call at 9 and a call at 8. */
+.tz-cell--shift{box-shadow:inset 1px 0 0 var(--warn)}
 /* A half-hour zone needs "14:30", not "14" — India is the whole reason this
    grid cannot just print an hour number (강프로 2026-08-07). */
 .tz-cell--split{font-size:10px;letter-spacing:-.02em}
@@ -364,38 +379,61 @@ SCRIPT = """
     var clock = document.getElementById('tzNow');
     if (clock) clock.textContent = pad(basePartsNow.hour) + ':' + pad(basePartsNow.minute);
 
+    var nowCol = -1;
+
     grid.querySelectorAll('.tz-row').forEach(function(row){
       var tz = row.dataset.tz === '__home__' ? HOME : row.dataset.tz;
       var hours = row.querySelector('.tz-hours');
       if (!hours) return;
 
-      // A zone offset by 30 or 45 minutes cannot print a bare hour — India is
-      // the whole reason this is decided per row rather than assumed.
-      var split = offsetMin(anchor, tz) % 60 !== 0;
-
-      hours.innerHTML = '';
-      var prevDay = null;
+      // Read the whole row first, then decide how to print it. A clock shift
+      // lands inside these 24 hours twice a year, so the offset is not one
+      // number for the row — on 1 Nov 2026 Chicago is UTC-5 for part of this
+      // strip and UTC-6 for the rest, and anything decided from the anchor
+      // alone is wrong after the change (강프로 2026-08-07).
+      var col = [];
       for (var i = 0; i < 24; i++){
         var at = new Date(anchor.getTime() + i * 3600000);
-        var p = parts(at, tz);
+        col.push({at: at, p: parts(at, tz), off: offsetMin(at, tz)});
+      }
+      // Minutes are printed when any hour in the row needs them, so the row
+      // keeps one shape instead of changing width halfway along.
+      var split = col.some(function(c){ return c.p.minute !== 0; });
+
+      hours.innerHTML = '';
+      var prevDay = null, prevOff = null;
+      col.forEach(function(c, i){
+        var p = c.p;
+        var isNow = showNow && c.at <= now && now < new Date(c.at.getTime() + 3600000);
+        if (isNow) nowCol = i;
         var cell = document.createElement('div');
         cell.className = 'tz-cell'
           + (p.hour >= 9 && p.hour < 18 ? ' tz-cell--work' : '')
           + (p.hour < 7 || p.hour >= 22 ? ' tz-cell--sleep' : '')
           + (split ? ' tz-cell--split' : '')
-          + (showNow && at <= now && now < new Date(at.getTime() + 3600000)
-              ? ' tz-cell--now' : '');
+          + (isNow ? ' tz-cell--now' : '');
         cell.textContent = pad(p.hour) + (split ? ':' + pad(p.minute) : '');
 
-        // The date is written under the first column and under whichever column
-        // it changes on, so no row ever leaves you counting to find the day.
+        // The date is written under the first column, under whichever column it
+        // changes on, and under the hour you are in — the one column you look
+        // at first should never make you hunt for its day.
         var mark = document.createElement('div');
-        mark.className = 'tz-daymark' + (i === 0 ? ' tz-daymark--first' : '');
-        if (i === 0 || p.ymd !== prevDay) mark.textContent = shortDate(p);
+        mark.className = 'tz-daymark'
+          + (i === 0 ? ' tz-daymark--first' : '')
+          + (isNow ? ' tz-daymark--now' : '');
+        if (i === 0 || p.ymd !== prevDay || isNow) mark.textContent = shortDate(p);
+
+        // And where the clocks actually move, the column says so.
+        if (prevOff !== null && c.off !== prevOff){
+          cell.classList.add('tz-cell--shift');
+          cell.title = (c.off > prevOff ? 'Clocks go forward here' : 'Clocks go back here');
+          mark.textContent = shortDate(p) + ' ⤴';
+        }
         prevDay = p.ymd;
+        prevOff = c.off;
         cell.appendChild(mark);
         hours.appendChild(cell);
-      }
+      });
 
       var sub = row.querySelector('.tz-sub');
       if (sub){
@@ -404,6 +442,30 @@ SCRIPT = """
           + (row.dataset.tz === grid.dataset.base ? '' : ' · ' + offsetLabel(anchor, tz));
       }
     });
+
+    // Bring the current hour into view rather than leaving it off the right
+    // edge of a phone: it lands third from the left, so the hours just gone are
+    // still readable beside it (강프로 2026-08-07).
+    var sc = document.getElementById('tzScroll');
+    if (sc && nowCol > -1 && !sc.dataset.userScrolled){
+      var cell0 = grid.querySelector('.tz-cell');
+      if (cell0){
+        var w = cell0.getBoundingClientRect().width;
+        sc.dataset.painting = '1';          // our own scroll is not the user's
+        sc.scrollLeft = Math.max(0, (nowCol - 2) * w);
+        setTimeout(function(){ delete sc.dataset.painting; }, 60);
+      }
+    }
+  }
+
+  // Once you have scrolled the strip yourself, the half-minute repaint stops
+  // dragging you back to the current hour.
+  var scroller = document.getElementById('tzScroll');
+  if (scroller){
+    scroller.addEventListener('scroll', function(){
+      if (scroller.dataset.painting) return;
+      scroller.dataset.userScrolled = '1';
+    }, {passive: true});
   }
 
   paint();
@@ -459,7 +521,17 @@ def render(user, base=HOME, picked=""):
             for tz, label in entries)
         base_opts += f'<optgroup label="{group}">{opts}</optgroup>'
 
+    # Folded away by default: the strip is what you came for, and two selects
+    # standing permanently above it are furniture (강프로 2026-08-07). It opens
+    # itself whenever the view is not the plain "my zone, today", because then
+    # the controls are the explanation for what you are looking at.
+    custom = base != HOME or bool(picked)
+    summary = ("Anchored to " + LABELS.get(base, "your time zone")
+               + (" · " + picked if picked else " · today")) if custom else \
+              "Compare another city's day"
     controls = (
+        f'<details class="tz-more"{" open" if custom else ""}>'
+        f'<summary class="tz-more-head">🗓 {summary}</summary>'
         f'<form method="GET" action="/timezones" class="tz-controls">'
         f'<label for="tzBase">Anchor</label>'
         f'<select id="tzBase" name="base" class="tz-select" '
@@ -470,7 +542,7 @@ def render(user, base=HOME, picked=""):
         f'<button class="btn btn-sm btn-secondary" type="submit">Show</button>'
         + (f'<a class="btn btn-sm btn-ghost" href="/timezones?base={base}">Today</a>'
            if picked else '')
-        + f'</form>')
+        + f'</form></details>')
 
     full = len(zones) >= MAX_ZONES
     picker = (
@@ -503,7 +575,7 @@ def render(user, base=HOME, picked=""):
     {picker}
   </div>
   {controls}
-  <div class="tz-scroll"><div class="tz-grid" id="tzGrid"
+  <div class="tz-scroll" id="tzScroll"><div class="tz-grid" id="tzGrid"
        data-base="{base}" data-date="{picked}">{rows}</div></div>
   {limit_note}
   <div class="tz-legend">
