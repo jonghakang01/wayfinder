@@ -115,8 +115,15 @@ _CC_TAB_CSS = (
     ".cc-tabbar{position:sticky;top:52px;z-index:90;background:var(--bg-deep);padding:12px 0 10px;margin:-12px 0 10px}"
     # Collapsible section (Register Receipts etc.) — mobile-first, closed by default
     ".cc-collapse{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md);margin-bottom:16px;overflow:hidden}"
+    # One line, always: the folded state is a heading, and a heading that wraps
+    # — icon above, word below, note on its own line — reads as a broken card
+    # (강프로 2026-08-07, 46-receipt Discarded on the phone). The count leads
+    # the note, so the ellipsis only ever eats the explanation's tail.
     ".cc-collapse>summary{padding:12px 16px;font-size:.82rem;font-weight:700;color:var(--text);cursor:pointer;"
-    "user-select:none;list-style:none;display:flex;align-items:center;gap:8px}"
+    "user-select:none;list-style:none;display:flex;align-items:center;gap:8px;"
+    "white-space:nowrap}"
+    ".cc-sum-note{color:var(--text-muted);font-weight:500;flex:1;min-width:0;"
+    "overflow:hidden;text-overflow:ellipsis}"
     ".cc-collapse>summary::-webkit-details-marker{display:none}"
     ".cc-collapse>summary::before{content:'▸';font-size:.7rem;color:var(--text-muted);transition:transform .15s}"
     ".cc-collapse[open]>summary::before{transform:rotate(90deg)}"
@@ -419,7 +426,7 @@ def _discarded_section(user: str) -> str:
             '</div>')
     return f'''
 <details class="cc-collapse">
-  <summary>🪦 Discarded <span style="color:var(--text-muted);font-weight:500">— {len(items)} rejected receipt(s), never re-queued</span></summary>
+  <summary>🪦 Discarded <span class="cc-sum-note">— {len(items)} rejected receipt(s), never re-queued</span></summary>
   <div class="cc-collapse-body">
     <div style="font-size:.74rem;color:var(--text-muted);margin-bottom:6px">
       Rejected at the OCR stage or deleted from the Ledger. The Drive photo is untouched —
@@ -498,7 +505,7 @@ def _register_section(user: str) -> str:
     <button class="btn btn-primary btn-sm" style="margin-left:auto;flex-shrink:0" onclick="startDriveSync(this)">🔄 Sync now</button>
   </div>
   <details class="cc-collapse"{open_attr}>
-    <summary>📥 Register Receipts <span style="font-weight:500;color:var(--text-dim)">— Google Drive · Upload</span></summary>
+    <summary>📥 Register Receipts <span class="cc-sum-note">— Google Drive · Upload</span></summary>
     <div class="cc-collapse-body">
       <div class="notepad-card" style="margin-bottom:16px">
         <div class="notepad-header">
