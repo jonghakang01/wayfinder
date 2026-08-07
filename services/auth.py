@@ -19,6 +19,8 @@ ADMIN_EMAIL       = "jongha.kang01@gmail.com"
 # accounts still holding the old grant keep working through _ACCESS_ALIASES —
 # listing both would show one app twice.
 CONTROLLED_SERVICES = {"momentum", "cardconv", "sow", "aeo", "llm-check", "toast"}
+# Hand-written names where the app's own META name is not what an admin handing
+# out access wants to read. Anything absent falls back to "icon name" from META.
 APP_LABELS = {
     "momentum":  "⚡ Momentum — Tasks & Habits",
     "cardconv":  "💳 Cheil AMEX Expense Assistant",
@@ -27,6 +29,35 @@ APP_LABELS = {
     "llm-check": "🤖 AEO Page Diagnostic",
     "toast":     "🥂 건배사전 — Toast Playbook",
 }
+
+# The console itself is never handed out per user: granting it would grant the
+# power to grant. Everything else an app registers is switchable.
+UNCONTROLLABLE = {"admin"}
+
+
+def register_services(metas):
+    """Make every installed app switchable from Service Control.
+
+    The list used to be typed by hand, so a new app was invisible to the admin
+    screen until somebody remembered to add it — and 강프로 could neither give it
+    to anyone nor turn it off for themselves (2026-08-07). The server calls this
+    once its service modules are loaded; auth cannot import them itself, since
+    the server imports auth.
+
+    Additive on purpose: a slug already listed keeps its curated label, and
+    nothing is ever removed, so an app that disappears from a build cannot
+    silently revoke the grants people already hold.
+    """
+    for m in metas or []:
+        slug = (m.get("path") or "").lstrip("/")
+        # Hidden apps are the routes another app absorbed — /todo and /habit
+        # live inside Momentum now. They are off the home grid, so offering them
+        # here would be offering a door that is already part of another room.
+        if not slug or "/" in slug or slug in UNCONTROLLABLE or m.get("hidden"):
+            continue
+        CONTROLLED_SERVICES.add(slug)
+        label = f"{m.get('icon', '')} {m.get('name', slug)}".strip()
+        APP_LABELS.setdefault(slug, label)
 
 
 def _notify_admin_signup(email: str, services_list: list,

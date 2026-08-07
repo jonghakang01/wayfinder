@@ -1,0 +1,61 @@
+"""Every app that ships is switchable from Service Control (강프로 2026-08-07).
+
+The list used to be typed by hand in auth.py, so a new app stayed invisible to
+the admin screen until someone remembered it — it could be neither granted to
+anyone nor switched off. These tests are the thing that remembers.
+"""
+import services.auth as auth
+import server
+
+
+def test_every_visible_app_is_switchable():
+    for path, mod in server.SERVICES.items():
+        meta = mod.META
+        slug = path.lstrip("/")
+        if meta.get("hidden") or slug in auth.UNCONTROLLABLE:
+            continue
+        assert slug in auth.CONTROLLED_SERVICES, f"{path} is not switchable"
+        assert auth.APP_LABELS.get(slug), f"{path} has no label to show an admin"
+
+
+def test_the_admin_console_is_never_handed_out():
+    """Granting it would grant the power to grant."""
+    assert "admin" not in auth.CONTROLLED_SERVICES
+
+
+def test_absorbed_routes_stay_out():
+    """/todo and /habit live inside Momentum; offering them separately offers a
+    door that is already part of another room."""
+    for slug in ("todo", "habit", "dashboard"):
+        assert slug not in auth.CONTROLLED_SERVICES
+
+
+def test_a_brand_new_app_needs_no_edit_here():
+    before = set(auth.CONTROLLED_SERVICES)
+    try:
+        auth.register_services([{"path": "/whatsit", "name": "Whatsit", "icon": "🫧"}])
+        assert "whatsit" in auth.CONTROLLED_SERVICES
+        assert auth.APP_LABELS["whatsit"] == "🫧 Whatsit"
+    finally:
+        auth.CONTROLLED_SERVICES.clear()
+        auth.CONTROLLED_SERVICES.update(before)
+        auth.APP_LABELS.pop("whatsit", None)
+
+
+def test_registration_never_overwrites_a_curated_label():
+    kept = auth.APP_LABELS["cardconv"]
+    auth.register_services([{"path": "/cardconv", "name": "Something Else", "icon": "❓"}])
+    assert auth.APP_LABELS["cardconv"] == kept
+
+
+def test_registration_survives_junk():
+    """A malformed META must not take the whole registry down with it."""
+    before = set(auth.CONTROLLED_SERVICES)
+    auth.register_services([{}, {"path": ""}, {"path": "/a/b"}])
+    auth.register_services(None)
+    assert auth.CONTROLLED_SERVICES == before
+
+
+def test_timezones_is_there():
+    assert "timezones" in auth.CONTROLLED_SERVICES
+    assert "Time Zones" in auth.APP_LABELS["timezones"]

@@ -39,6 +39,9 @@ def load_services():
     return services
 
 SERVICES = load_services()
+# Every app that ships is something the admin can switch on or off, without
+# anyone having to remember to list it. See auth.register_services.
+auth.register_services([m.META for m in SERVICES.values()])
 
 STYLE = """
 @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css');
@@ -142,6 +145,7 @@ a.dashboard-clock:hover { background:rgba(255,255,255,0.06); }
   text-transform:uppercase; letter-spacing:0.07em; }
 .dash-arrow { transition:transform .2s; }
 a.dashboard-clock:hover .dash-arrow { transform:translateX(4px); }
+
 .dashboard-stats { display: flex; gap: 14px; flex-wrap: wrap; }
 .stat-card { background: rgba(255,255,255,0.04); backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.08); border-radius: var(--radius-lg); padding: 16px 24px; text-align: center; min-width: 100px; transition: 0.2s; }
 .stat-card:hover { transform: translateY(-3px); background: rgba(255,255,255,0.07); }
@@ -833,6 +837,7 @@ def wayfinder(user):
         + (city ? ' · ' + city : '') + (abbr ? ' (' + abbr + ')' : '');
     }}
     tick(); setInterval(tick, 1000);
+
   }})();
   </script>
 
