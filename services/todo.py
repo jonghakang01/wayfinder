@@ -316,6 +316,21 @@ def handle(method, path, body, ctx=None):
                     _slip(t, body["due_date"][0].strip() or None)
                 if "title" in body and body["title"][0].strip():
                     t["title"] = body["title"][0].strip()
+                if "touch" in body:
+                    # "I put time into this today." Not completion — the task
+                    # stays open with its own deadline; only today's question is
+                    # answered, and tomorrow it is asked again.
+                    t["last_touch"] = date.today().isoformat()
+                if "daily_flag" in body:
+                    on = body["daily_flag"][0].strip() == "1"
+                    t["daily"] = on
+                    if on:
+                        # Something to count from, so "untouched" has an answer
+                        # on day one instead of staying silent until first use.
+                        t.setdefault("daily_since", date.today().isoformat())
+                    else:
+                        t.pop("daily_since", None)
+                        t.pop("last_touch", None)
                 if "has_note" in body:
                     # parse_qs drops empty values, so an emptied textarea would
                     # never reach here. The hidden flag says "the note field was
@@ -385,9 +400,41 @@ def _attr(v):
     """Quote-safe value for a data-* attribute."""
     return str(v or "").replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;")
 
+def is_daily(t):
+    """Work that has to be chipped at every day, whatever its deadline says."""
+    return bool(t.get("daily")) and not t.get("done")
+
+
+def touched_today(t, today_str):
+    return (t.get("last_touch") or "") == today_str
+
+
+def untouched_days(t, today):
+    """Days since this was last worked on, or None while it is current.
+
+    A task nobody has opened for three days is the thing the deadline was
+    hiding, so the count starts from the day it was marked daily when there is
+    no touch yet — "never" is a worse answer than a number.
+    """
+    if not t.get("daily") or t.get("done"):
+        return None
+    since = t.get("last_touch") or t.get("daily_since")
+    if not since:
+        return None
+    try:
+        n = (today - date.fromisoformat(since)).days
+    except ValueError:
+        return None
+    return n if n > 0 else None
+
+
 def _bucket_of(t, today_str, week_str):
     """Which section a task belongs to. Dateless work is 'later' — it is not
     urgent by omission, and putting it up top drowns the things that are."""
+    # Except work marked daily, which is in Today by definition: its whole point
+    # is that a far deadline stops being a reason to skip it (강프로 2026-08-07).
+    if is_daily(t):
+        return "now"
     d = t.get("due_date")
     if not d:
         return "later"
@@ -424,7 +471,10 @@ def render(todos, habits, user, readonly=False, group_by="date"):
     # Highest priority first, then soonest deadline. This is the whole answer to
     # "what do I do now", and the old due-date-only sort could not give it.
     def _order(t):
-        return (_priority_of(t.get("priority")), t.get("due_date") or "9999-99-99",
+        # A daily task already done today sinks: it has had its turn, and
+        # leaving it at the top is how a list stops being read.
+        return (1 if touched_today(t, today_str) and is_daily(t) else 0,
+                _priority_of(t.get("priority")), t.get("due_date") or "9999-99-99",
                 -(t.get("id") or 0))
 
     buckets = {"now": [], "week": [], "later": []}
@@ -542,6 +592,32 @@ def render(todos, habits, user, readonly=False, group_by="date"):
                 chips += (f'<span class="tk-chip tk-chip--slip" '
                           f'title="Originally due {t["first_due"]}">'
                           f'{slip}d past first due</span>')
+
+        # Daily work: the deadline is not the question, today is. The chip says
+        # what kind of task this is, the counter says how long it has been left,
+        # and the action is the smallest thing that can honestly be called
+        # progress — none of which a due date on its own ever said.
+        if is_daily(t):
+            did = touched_today(t, today_str)
+            chips += ('<span class="tk-chip tk-chip--daily">Daily</span>')
+            if did:
+                chips += '<span class="tk-chip tk-chip--didit">✓ Did some today</span>'
+            else:
+                stale = untouched_days(t, today)
+                if stale:
+                    chips += (f'<span class="tk-chip tk-chip--stale" '
+                              f'title="Last worked on {t.get("last_touch") or "never"}">'
+                              f'{stale}d untouched</span>')
+                if not readonly:
+                    chips += (
+                        f'<form method="POST" action="/todo/set_meta" '
+                        f'class="tk-nudge-form" onclick="event.stopPropagation()">'
+                        f'<input type="hidden" name="id" value="{tid}">'
+                        f'<input type="hidden" name="touch" value="1">'
+                        f'<input type="hidden" name="next" value="{back}">'
+                        f'<button class="chip-action" type="submit" '
+                        f'title="Log a bit of work on this today">'
+                        f'Did some</button></form>')
         # The project rides to the left of the title, not down in the meta strip:
         # it is what you sort the row by in your head before you read the words
         # (강프로 2026-08-07). Under "By project" the section heading already
@@ -569,8 +645,11 @@ def render(todos, habits, user, readonly=False, group_by="date"):
             f'{"✓" if done else ""}</button></form>')
         opener = "" if readonly else f'onclick="tkOpen(this)"'
         return (
-            f'<div class="tk-row{" tk-row--done" if done else ""}" {opener} '
+            f'<div class="tk-row{" tk-row--done" if done else ""}'
+            f'{" tk-row--settled" if is_daily(t) and touched_today(t, today_str) else ""}" '
+            f'{opener} '
             f'data-id="{tid}" data-title="{_attr(t.get("title",""))}" '
+            f'data-daily="{"1" if t.get("daily") else ""}" '
             f'data-project="{_attr(project)}" data-prio="{prio}" '
             f'data-due="{due}" data-place="{_attr(place_id)}" '
             f'data-group="{_attr(t.get("group") or "")}" '
@@ -826,6 +905,17 @@ def render(todos, habits, user, readonly=False, group_by="date"):
       <input type="hidden" name="has_note" value="1">
       <textarea class="wf-input tk-note-input" name="note" id="tkSnote" rows="3"
                 placeholder="Anything to remember about this task…"></textarea></div>
+    <!-- The hidden field carries the "off" answer: an unchecked box submits
+         nothing, so without it the switch could be turned on and never off. -->
+    <input type="hidden" name="daily_flag" id="tkSdailyFlag" value="0">
+    <label class="tk-daily-opt">
+      <input type="checkbox" id="tkSdaily"
+             onchange="document.getElementById('tkSdailyFlag').value = this.checked ? '1' : '0'">
+      <span><b>Chip away at this daily</b>
+        <em>Keeps it in Today whatever the deadline says, and asks whether you
+        put time in — so a distant due date stops reading as permission to skip
+        it.</em></span>
+    </label>
     <div class="tk-sheet-actions">
       <button class="btn btn-primary btn-lg" type="submit">Save</button>
       <button class="btn btn-ghost btn-lg" type="button" id="tkCancel" onclick="tkClose()">Cancel</button>
@@ -997,6 +1087,22 @@ def render(todos, habits, user, readonly=False, group_by="date"):
 .tk-chip--high{{border-color:var(--group-4);color:var(--group-4)}}
 /* Dashed, because it is the only chip describing a date that is no longer set. */
 .tk-chip--slip{{border-style:dashed;border-color:var(--warn);color:var(--warn)}}
+/* Daily work. The label is calm — it is a kind of task, not an alarm — while
+   the untouched counter borrows the overdue colour, because that is exactly
+   what it is: a deadline you are quietly missing one day at a time. */
+.tk-chip--daily{{border-color:var(--info);color:var(--info)}}
+.tk-chip--stale{{border-color:var(--danger);color:var(--danger)}}
+.tk-chip--didit{{border-color:var(--success);color:var(--success)}}
+.tk-row--settled{{opacity:.72}}
+.tk-daily-opt{{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;
+  margin-top:4px;border:1px solid var(--border-bright);border-radius:var(--radius-md);
+  background:var(--surface-2);cursor:pointer}}
+.tk-daily-opt input{{width:20px;height:20px;margin:1px 0 0;flex-shrink:0;
+  accent-color:var(--accent);cursor:pointer}}
+.tk-daily-opt b{{display:block;font-size:var(--text-sm);color:var(--text);
+  font-weight:var(--fw-bold)}}
+.tk-daily-opt em{{display:block;margin-top:3px;font-style:normal;
+  font-size:var(--text-xs);color:var(--text-muted);line-height:1.5}}
 .tk-chip--habit{{border-color:var(--group-3);color:var(--group-3)}}
 a.tk-row{{text-decoration:none;color:inherit}}
 .tk-due--over{{border-color:var(--danger);color:var(--danger)}}
@@ -1159,6 +1265,11 @@ function tkOpen(row, isNew) {{
   if (note) note.value = row.dataset.note || '';
   var place = $('tkSplace');
   if (place) place.value = row.dataset.place || '';
+  var dly = $('tkSdaily'), dlyFlag = $('tkSdailyFlag');
+  if (dly && dlyFlag) {{
+    dly.checked = row.dataset.daily === '1';
+    dlyFlag.value = dly.checked ? '1' : '0';
+  }}
   var np = $('tkNewPlaceForm');
   if (np) {{ np.hidden = true; $('tkNpLabel').value = ''; $('tkNpMsg').textContent = ''; }}
   $('tkBackdrop').classList.add('is-on');
