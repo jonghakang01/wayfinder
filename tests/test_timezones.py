@@ -77,3 +77,67 @@ def test_post_add_redirects(tz):
 def test_labels_cover_every_offered_zone(tz):
     assert set(tz.LABELS) == tz.VALID
     assert all(z in tz.VALID for z in tz.DEFAULT_ZONES)
+
+
+# ── the list is yours to order (강프로 2026-08-07) ───────────────────────────
+
+def test_move_up_swaps_with_the_row_above(tz):
+    tz.save(USER, ["Asia/Tokyo", "Europe/London", "Asia/Seoul"])
+    tz.move(USER, "Europe/London", "up")
+    assert tz.load(USER) == ["Europe/London", "Asia/Tokyo", "Asia/Seoul"]
+
+
+def test_move_down_swaps_with_the_row_below(tz):
+    tz.save(USER, ["Asia/Tokyo", "Europe/London", "Asia/Seoul"])
+    tz.move(USER, "Europe/London", "down")
+    assert tz.load(USER) == ["Asia/Tokyo", "Asia/Seoul", "Europe/London"]
+
+
+def test_the_ends_clamp(tz):
+    """Top row up and bottom row down are no-ops, not wrap-arounds."""
+    tz.save(USER, ["Asia/Tokyo", "Asia/Seoul"])
+    tz.move(USER, "Asia/Tokyo", "up")
+    tz.move(USER, "Asia/Seoul", "down")
+    assert tz.load(USER) == ["Asia/Tokyo", "Asia/Seoul"]
+
+
+def test_moving_a_city_not_on_the_list_changes_nothing(tz):
+    before = tz.load(USER)
+    tz.move(USER, "Asia/Dubai", "up")
+    assert tz.load(USER) == before
+
+
+def test_the_move_route_is_wired_and_junk_directions_are_not(tz):
+    tz.save(USER, ["Asia/Tokyo", "Asia/Seoul"])
+    kind, target = tz.handle("POST", "/timezones/move",
+                             {"tz": ["Asia/Seoul"], "dir": ["up"]}, {"user": USER})
+    assert kind == "redirect"
+    assert tz.load(USER) == ["Asia/Seoul", "Asia/Tokyo"]
+    tz.handle("POST", "/timezones/move",
+              {"tz": ["Asia/Seoul"], "dir": ["sideways"]}, {"user": USER})
+    assert tz.load(USER) == ["Asia/Seoul", "Asia/Tokyo"]
+
+
+# ── the zone's everyday name rides beside the city (강프로 2026-08-07) ────────
+
+def test_every_zone_has_a_calling_name(tz):
+    assert set(tz.ABBRS) == tz.VALID
+    assert tz.ABBRS["Asia/Seoul"] == "KST"
+    assert tz.ABBRS["Asia/Kolkata"] == "IST"
+
+
+def test_the_requested_cities_are_the_ones_offered(tz):
+    assert tz.LABELS["America/Los_Angeles"] == "Mountain View"
+    assert tz.LABELS["America/Chicago"] == "Dallas"
+    assert tz.LABELS["America/New_York"] == "New York"
+    assert tz.LABELS["Asia/Kolkata"] == "Chennai / Hyderabad"
+
+
+def test_rows_and_picker_carry_the_name(tz):
+    tz.save(USER, ["Asia/Seoul"])
+    _, html = tz.handle("GET", "/timezones", {}, {"user": USER})
+    assert '<span class="tz-abbr">KST</span>' in html
+    assert "Seoul (KST)" in html
+    # arrows render, and the single row's both arrows are dead ends
+    assert 'name="dir" value="up"' in html
+    assert html.count("disabled") >= 2

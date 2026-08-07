@@ -22,73 +22,82 @@ META = {
 
 # A picker of 400 IANA names is a worse tool than a short list of the places
 # people actually schedule against. Grouped the way the eye scans a world map.
+# The third field is what people call the zone — PST, KST, IST — because "what
+# do they call it there" is part of the question (강프로 2026-08-07). Curated,
+# not computed: Intl gives Seoul "GMT+9", and nobody calls it that. The common
+# name is used even where DST technically renames it half the year.
 ZONES = [
     ("Americas", [
-        ("America/Los_Angeles", "Los Angeles"),
-        ("America/Denver", "Denver"),
-        ("America/Chicago", "Chicago"),
-        ("America/New_York", "New York"),
-        ("America/Toronto", "Toronto"),
-        ("America/Mexico_City", "Mexico City"),
-        ("America/Bogota", "Bogotá"),
-        ("America/Sao_Paulo", "São Paulo"),
-        ("America/Argentina/Buenos_Aires", "Buenos Aires"),
+        # The US cities are the ones actually scheduled against (강프로
+        # 2026-08-07): Mountain View for Pacific, Dallas for Central, New York
+        # for Eastern. Same IANA zones as the cities they replaced.
+        ("America/Los_Angeles", "Mountain View", "PST"),
+        ("America/Chicago", "Dallas", "CST"),
+        ("America/New_York", "New York", "EST"),
+        ("America/Toronto", "Toronto", "EST"),
+        ("America/Mexico_City", "Mexico City", "CST"),
+        ("America/Bogota", "Bogotá", "COT"),
+        ("America/Sao_Paulo", "São Paulo", "BRT"),
+        ("America/Argentina/Buenos_Aires", "Buenos Aires", "ART"),
     ]),
     ("Europe & Africa", [
-        ("Europe/London", "London"),
-        ("Europe/Dublin", "Dublin"),
-        ("Europe/Lisbon", "Lisbon"),
-        ("Europe/Madrid", "Madrid"),
-        ("Europe/Paris", "Paris"),
-        ("Europe/Berlin", "Berlin"),
-        ("Europe/Amsterdam", "Amsterdam"),
-        ("Europe/Zurich", "Zurich"),
-        ("Europe/Stockholm", "Stockholm"),
-        ("Europe/Warsaw", "Warsaw"),
-        ("Europe/Athens", "Athens"),
-        ("Europe/Istanbul", "Istanbul"),
-        ("Europe/Moscow", "Moscow"),
-        ("Africa/Lagos", "Lagos"),
-        ("Africa/Cairo", "Cairo"),
-        ("Africa/Nairobi", "Nairobi"),
-        ("Africa/Johannesburg", "Johannesburg"),
+        ("Europe/London", "London", "GMT"),
+        ("Europe/Dublin", "Dublin", "GMT"),
+        ("Europe/Lisbon", "Lisbon", "WET"),
+        ("Europe/Madrid", "Madrid", "CET"),
+        ("Europe/Paris", "Paris", "CET"),
+        ("Europe/Berlin", "Berlin", "CET"),
+        ("Europe/Amsterdam", "Amsterdam", "CET"),
+        ("Europe/Zurich", "Zurich", "CET"),
+        ("Europe/Stockholm", "Stockholm", "CET"),
+        ("Europe/Warsaw", "Warsaw", "CET"),
+        ("Europe/Athens", "Athens", "EET"),
+        ("Europe/Istanbul", "Istanbul", "TRT"),
+        ("Europe/Moscow", "Moscow", "MSK"),
+        ("Africa/Lagos", "Lagos", "WAT"),
+        ("Africa/Cairo", "Cairo", "EET"),
+        ("Africa/Nairobi", "Nairobi", "EAT"),
+        ("Africa/Johannesburg", "Johannesburg", "SAST"),
     ]),
     ("Middle East & Asia", [
-        ("Asia/Dubai", "Dubai"),
-        ("Asia/Riyadh", "Riyadh"),
-        ("Asia/Karachi", "Karachi"),
+        ("Asia/Dubai", "Dubai", "GST"),
+        ("Asia/Riyadh", "Riyadh", "AST"),
+        ("Asia/Karachi", "Karachi", "PKT"),
         # India is +5:30 and Nepal +5:45 — the zones that make an hour-only grid
         # lie, and the reason cells print minutes when the offset is not whole.
-        ("Asia/Kolkata", "Mumbai / Delhi"),
-        ("Asia/Kathmandu", "Kathmandu"),
-        ("Asia/Dhaka", "Dhaka"),
-        ("Asia/Bangkok", "Bangkok"),
-        ("Asia/Jakarta", "Jakarta"),
-        ("Asia/Singapore", "Singapore"),
-        ("Asia/Kuala_Lumpur", "Kuala Lumpur"),
-        ("Asia/Manila", "Manila"),
-        ("Asia/Ho_Chi_Minh", "Ho Chi Minh City"),
-        ("Asia/Hong_Kong", "Hong Kong"),
-        ("Asia/Shanghai", "Shanghai"),
-        ("Asia/Taipei", "Taipei"),
-        ("Asia/Seoul", "Seoul"),
-        ("Asia/Tokyo", "Tokyo"),
+        # Chennai and Hyderabad share IST, so they share the row (강프로
+        # 2026-08-07) — two rows of the same zone would just repeat each other.
+        ("Asia/Kolkata", "Chennai / Hyderabad", "IST"),
+        ("Asia/Kathmandu", "Kathmandu", "NPT"),
+        ("Asia/Dhaka", "Dhaka", "BST"),
+        ("Asia/Bangkok", "Bangkok", "ICT"),
+        ("Asia/Jakarta", "Jakarta", "WIB"),
+        ("Asia/Singapore", "Singapore", "SGT"),
+        ("Asia/Kuala_Lumpur", "Kuala Lumpur", "MYT"),
+        ("Asia/Manila", "Manila", "PHT"),
+        ("Asia/Ho_Chi_Minh", "Ho Chi Minh City", "ICT"),
+        ("Asia/Hong_Kong", "Hong Kong", "HKT"),
+        ("Asia/Shanghai", "Shanghai", "CST"),
+        ("Asia/Taipei", "Taipei", "CST"),
+        ("Asia/Seoul", "Seoul", "KST"),
+        ("Asia/Tokyo", "Tokyo", "JST"),
     ]),
     ("Oceania", [
-        ("Australia/Perth", "Perth"),
-        ("Australia/Adelaide", "Adelaide"),
-        ("Australia/Brisbane", "Brisbane"),
-        ("Australia/Sydney", "Sydney"),
-        ("Pacific/Auckland", "Auckland"),
-        ("Pacific/Honolulu", "Honolulu"),
+        ("Australia/Perth", "Perth", "AWST"),
+        ("Australia/Adelaide", "Adelaide", "ACST"),
+        ("Australia/Brisbane", "Brisbane", "AEST"),
+        ("Australia/Sydney", "Sydney", "AEST"),
+        ("Pacific/Auckland", "Auckland", "NZST"),
+        ("Pacific/Honolulu", "Honolulu", "HST"),
     ]),
     ("Reference", [
-        ("UTC", "UTC"),
+        ("UTC", "UTC", "UTC"),
     ]),
 ]
 
-VALID = {tz for _, group in ZONES for tz, _ in group}
-LABELS = {tz: label for _, group in ZONES for tz, label in group}
+VALID = {tz for _, group in ZONES for tz, _, _ in group}
+LABELS = {tz: label for _, group in ZONES for tz, label, _ in group}
+ABBRS = {tz: abbr for _, group in ZONES for tz, _, abbr in group}
 
 # Enough to be useful on the first visit, few enough to still read as a choice.
 DEFAULT_ZONES = ["America/New_York", "Europe/London", "Asia/Seoul"]
@@ -139,6 +148,24 @@ def add(user, tz):
 def remove(user, tz):
     zones = [z for z in load(user) if z != tz]
     save(user, zones)
+    return zones
+
+
+def move(user, tz, direction):
+    """Swap a city one step up or down the list (강프로 2026-08-07).
+
+    The order is the whole point of a comparison strip — the rows you read
+    together belong next to each other. Ends clamp: moving the top row up is
+    a no-op, not an error and not a wrap-around.
+    """
+    zones = load(user)
+    if tz not in zones:
+        return zones
+    i = zones.index(tz)
+    j = i - 1 if direction == "up" else i + 1
+    if 0 <= j < len(zones):
+        zones[i], zones[j] = zones[j], zones[i]
+        save(user, zones)
     return zones
 
 
@@ -236,7 +263,12 @@ STYLE = """
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tz-sub{margin-top:3px;font-size:var(--text-xs);color:var(--text-muted);
   font-weight:var(--fw-semibold);font-variant-numeric:tabular-nums}
-.tz-drop{margin-left:6px}
+.tz-drop{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}
+.tz-mv{padding:0 9px;min-width:34px}
+.tz-mv[disabled]{opacity:.35;cursor:default}
+/* The zone's everyday name — KST, PST — beside the city that carries it. */
+.tz-abbr{margin-left:6px;font-size:var(--text-xs);font-weight:var(--fw-bold);
+  color:var(--accent);letter-spacing:.03em}
 
 .tz-hours{display:flex;flex:1}
 .tz-cell{flex:1 0 24px;display:flex;flex-direction:column;align-items:center;
@@ -304,6 +336,16 @@ SCRIPT = """
     e.textContent = cityOf(HOME); });
   document.querySelectorAll('[data-home-zone]').forEach(function(e){
     e.textContent = HOME; });
+  // The home zone's everyday name is the browser's to know. Intl's short form
+  // is a real abbreviation where one exists (PDT, GMT) and a plain offset
+  // (GMT+9) where the world never coined one — both are honest.
+  try {
+    var homeAbbr = new Intl.DateTimeFormat('en-US', {timeZone: HOME, timeZoneName: 'short'})
+      .formatToParts(new Date()).filter(function(p){ return p.type === 'timeZoneName'; })
+      .map(function(p){ return p.value; })[0] || '';
+    document.querySelectorAll('[data-home-abbr]').forEach(function(e){
+      e.textContent = homeAbbr; });
+  } catch (e) {}
   var homeOpt = document.getElementById('tzHomeOption');
   if (homeOpt) homeOpt.textContent = 'Your time zone — ' + cityOf(HOME);
 
@@ -479,46 +521,66 @@ def render(user, base=HOME, picked=""):
     options = ""
     for group, entries in ZONES:
         opts = "".join(
-            f'<option value="{tz}"{" disabled" if tz in zones else ""}>{label}</option>'
-            for tz, label in entries)
+            f'<option value="{tz}"{" disabled" if tz in zones else ""}>{label} ({abbr})</option>'
+            for tz, label, abbr in entries)
         options += f'<optgroup label="{group}">{opts}</optgroup>'
 
-    def row(tz, label, anchor=False):
+    def row(tz, label, anchor=False, idx=None, count=0):
         # The anchor row is the day everything else is read against, so it is
         # never removable — dropping it would leave the strip measuring nothing.
-        drop = "" if anchor else (
-            f'<form method="POST" action="/timezones/remove" class="tz-drop" '
-            f'style="display:inline-flex">'
-            f'<input type="hidden" name="tz" value="{tz}">'
-            f'<input type="hidden" name="base" value="{base}">'
-            f'<input type="hidden" name="date" value="{picked}">'
-            # Deliberately not .chip-action: accent is the invitation to act, and
-            # dropping a city is neither the invitation nor what you came for.
-            f'<button class="btn btn-sm btn-ghost" type="submit" '
-            f'title="Remove {label}">Remove</button></form>')
+        acts = ""
+        if not anchor:
+            def _mv(direction, glyph, dead):
+                # A dead arrow still renders, disabled — buttons that appear and
+                # vanish as rows move make the column jitter under the thumb.
+                return (
+                    f'<form method="POST" action="/timezones/move" style="display:inline-flex">'
+                    f'<input type="hidden" name="tz" value="{tz}">'
+                    f'<input type="hidden" name="dir" value="{direction}">'
+                    f'<input type="hidden" name="base" value="{base}">'
+                    f'<input type="hidden" name="date" value="{picked}">'
+                    f'<button class="btn btn-sm btn-ghost tz-mv" type="submit" '
+                    f'{"disabled " if dead else ""}title="Move {label} {direction}">'
+                    f'{glyph}</button></form>')
+            acts = (
+                f'<div class="tz-drop">'
+                + _mv("up", "▲", idx == 0) + _mv("down", "▼", idx == count - 1)
+                + f'<form method="POST" action="/timezones/remove" style="display:inline-flex">'
+                f'<input type="hidden" name="tz" value="{tz}">'
+                f'<input type="hidden" name="base" value="{base}">'
+                f'<input type="hidden" name="date" value="{picked}">'
+                # Deliberately not .chip-action: accent is the invitation to act,
+                # and dropping a city is neither the invitation nor the point.
+                f'<button class="btn btn-sm btn-ghost" type="submit" '
+                f'title="Remove {label}">Remove</button></form></div>')
         is_home = tz == HOME
         name = ('<span data-home-city>Your time zone</span>' if is_home else label)
+        # What the zone is called rides beside the city — the home row's is the
+        # browser's to fill, like everything else about the home zone.
+        abbr = ('<span class="tz-abbr" data-home-abbr></span>' if is_home
+                else f'<span class="tz-abbr">{ABBRS.get(tz, "")}</span>')
         zone_note = ('<span data-home-zone></span>' if is_home else tz)
         return (
             f'<div class="tz-row{" tz-row--home" if anchor else ""}" data-tz="{tz}">'
             f'<div class="tz-label">'
-            f'<div class="tz-city">{"⚓ " if anchor else ""}{name}</div>'
+            f'<div class="tz-city">{"⚓ " if anchor else ""}{name}{abbr}</div>'
             f'<div class="tz-sub">—</div>'
             f'<div class="tz-sub" style="opacity:.7">{zone_note}</div>'
-            f'{drop}</div>'
+            f'{acts}</div>'
             f'<div class="tz-hours"></div></div>')
 
     # The anchor leads, and never appears twice — picking a city you already
     # compare against promotes that row rather than duplicating it.
+    listed = [z for z in zones if z != base]
     rows = row(base, LABELS.get(base, ""), anchor=True) + "".join(
-        row(z, LABELS[z]) for z in zones if z != base)
+        row(z, LABELS[z], idx=i, count=len(listed)) for i, z in enumerate(listed))
 
     base_opts = (f'<option value="{HOME}"{" selected" if base == HOME else ""} '
                  f'id="tzHomeOption">Your time zone</option>')
     for group, entries in ZONES:
         opts = "".join(
-            f'<option value="{tz}"{" selected" if tz == base else ""}>{label}</option>'
-            for tz, label in entries)
+            f'<option value="{tz}"{" selected" if tz == base else ""}>{label} ({abbr})</option>'
+            for tz, label, abbr in entries)
         base_opts += f'<optgroup label="{group}">{opts}</optgroup>'
 
     # Folded away by default: the strip is what you came for, and two selects
@@ -613,6 +675,10 @@ def handle(method, path, body, ctx=None):
             add(user, _first(body, "tz"))
         elif path == "/timezones/remove":
             remove(user, _first(body, "tz"))
+        elif path == "/timezones/move":
+            direction = _first(body, "dir")
+            if direction in ("up", "down"):
+                move(user, _first(body, "tz"), direction)
         return ("redirect", "/timezones" + _view_query(body))
 
     return ("html", render(user, read_base(body), read_date(body)))
