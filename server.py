@@ -124,26 +124,30 @@ h1 { font-size: 1.75rem; color: var(--text); margin-bottom: 6px; font-weight: 80
 
 /* Dashboard widget */
 .dashboard { background: var(--slate-900); background-image: radial-gradient(at 0% 0%, rgba(56,189,248,0.15) 0, transparent 50%), radial-gradient(at 100% 100%, rgba(59,130,246,0.15) 0, transparent 50%); border-radius: var(--radius-xl); padding: 36px 40px; margin-bottom: 48px; color: white; display: flex; justify-content: space-between; align-items: center; gap: 24px; flex-wrap: wrap; box-shadow: var(--shadow-lg); border: 1px solid rgba(255,255,255,0.05); }
-.dashboard-greeting h2 { font-size: 1.6rem; font-weight: 800; margin-bottom: 6px; letter-spacing: -0.03em; }
-.dashboard-greeting p { color: var(--slate-400); font-size: 0.95rem; font-weight: 500; }
+/* The hero is a clock: the greeting told you nothing you did not know, and the
+   time where you actually are is the one fact a landing page can offer that is
+   different every time you look (강프로 2026-08-07). It doubles as the door to
+   Time Zones, so it carries a real affordance rather than being a secretly
+   clickable block. Colours are literal to the hero, which is dark in both
+   themes by design — theme tokens would fight its gradient. */
+.dashboard-clock { display:block; text-decoration:none; color:inherit;
+  margin:-10px -14px; padding:10px 14px; border-radius:var(--radius-lg);
+  transition:background .2s; }
+a.dashboard-clock:hover { background:rgba(255,255,255,0.06); }
+.dash-time { font-size:2.9rem; font-weight:800; line-height:1; letter-spacing:-0.03em;
+  font-variant-numeric:tabular-nums; }
+.dash-where { margin-top:9px; color:var(--slate-400); font-size:0.95rem; font-weight:500; }
+.dash-cta { margin-top:12px; display:inline-flex; align-items:center; gap:6px;
+  font-size:0.72rem; font-weight:700; color:var(--sky-400);
+  text-transform:uppercase; letter-spacing:0.07em; }
+.dash-arrow { transition:transform .2s; }
+a.dashboard-clock:hover .dash-arrow { transform:translateX(4px); }
 .dashboard-stats { display: flex; gap: 14px; flex-wrap: wrap; }
 .stat-card { background: rgba(255,255,255,0.04); backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.08); border-radius: var(--radius-lg); padding: 16px 24px; text-align: center; min-width: 100px; transition: 0.2s; }
 .stat-card:hover { transform: translateY(-3px); background: rgba(255,255,255,0.07); }
 .stat-card .stat-num { font-size: 2rem; font-weight: 800; line-height: 1; margin-bottom: 6px; }
 .stat-card .stat-label { font-size: 0.7rem; color: var(--slate-400); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
 .stat-card.highlight .stat-num { color: var(--sky-400); text-shadow: 0 0 20px rgba(56,189,248,0.3); }
-
-/* App entry card */
-.app-entry-card { display:flex; align-items:center; gap:20px; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-xl); padding:24px 28px; text-decoration:none; color:var(--text); transition:all .25s; margin-bottom:32px; position:relative; overflow:hidden; }
-.app-entry-card::before { content:""; position:absolute; top:0; left:0; right:0; height:3px; background:linear-gradient(90deg,var(--accent),var(--info)); }
-.app-entry-card:hover { box-shadow:var(--shadow-lg); transform:translateY(-3px); border-color:var(--accent); }
-.app-entry-icon { font-size:2.5rem; filter:drop-shadow(0 2px 6px rgba(0,0,0,0.1)); }
-.app-entry-text { flex:1; }
-.app-entry-name { font-size:1.1rem; font-weight:800; color:var(--text); margin-bottom:4px; letter-spacing:-.02em; }
-.app-entry-tabs { font-size:0.8rem; color:var(--slate-400); font-weight:500; }
-.app-entry-arrow { font-size:1.4rem; color:var(--slate-400); transition:.2s; }
-.app-entry-card:hover .app-entry-arrow { color:var(--accent); transform:translateX(4px); }
-@media(max-width:600px) { .app-entry-card { padding:18px 20px; gap:14px; } .app-entry-icon { font-size:2rem; } }
 
 /* Category */
 .category-section { margin-bottom: 40px; }
@@ -313,7 +317,8 @@ a, button, select, label, input[type=checkbox], input[type=radio] { touch-action
   .nav-user { gap: 6px; }
   .nav-user a { padding: 8px 12px; min-height: 44px; display: inline-flex; align-items: center; }
   .dashboard { padding: 24px 20px; flex-direction: column; gap: 16px; }
-  .dashboard-greeting h2 { font-size: 1.25rem; }
+  .dashboard-clock { align-self:flex-start; }
+  .dash-time { font-size: 2.3rem; }
   .service-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
   .service-card { padding: 16px; }
   .service-icon { font-size: 1.5rem; margin-bottom: 8px; }
@@ -675,37 +680,20 @@ THEME_TOGGLE = (
 )
 
 CATEGORIES = {
-    "💼 업무":    ["/momentum", "/toast", "/cardconv", "/sow", "/matters", "/aeo", "/llm-check"],
+    "💼 업무":    ["/momentum", "/toast", "/cardconv", "/sow", "/matters", "/aeo",
+                  "/llm-check", "/timezones"],
     "🏠 개인":    [],
     "🛠 팀 도구": ["/design"],
     "⚙️ 관리":    ["/admin"],
 }
 
 def wayfinder(user):
-    from datetime import datetime
-    import services.todo as todo_svc
-
     user_is_admin = auth.is_admin(user)
 
-    # 대시보드 통계 (todo 접근 권한 있을 때만)
-    has_todo = user_is_admin or auth.has_service_access(user, "/todo")
-    todo_total = todo_done_today = 0
-    if has_todo:
-        todos = todo_svc.load(user)
-        todo_total = len([t for t in todos if not t.get("done")])
-        todo_done_today = len([t for t in todos if t.get("done") and t.get("done_at", "").startswith(datetime.now().strftime("%Y-%m-%d"))])
-
-    hour = datetime.now().hour
-    if hour < 6:
-        greeting, greeting_icon = "Good night", "🌙"
-    elif hour < 12:
-        greeting, greeting_icon = "Good morning", "☀️"
-    elif hour < 18:
-        greeting, greeting_icon = "Hello", "🌤️"
-    else:
-        greeting, greeting_icon = "Good evening", "🌙"
-
-    today_str = datetime.now().strftime("%B %d, %Y")
+    # The hero is a clock now, and the clock is the door to Time Zones — but
+    # only for someone who can walk through it. Sending a user without access to
+    # a login redirect is worse than not offering the link.
+    has_timezones = user_is_admin or auth.has_service_access(user, "/timezones")
 
     # 서비스 path → META 매핑 (일반 유저는 권한 있는 서비스만)
     svc_map = {}
@@ -811,34 +799,42 @@ def wayfinder(user):
 </nav>
 <div class="container">
   <div class="dashboard">
-    <div class="dashboard-greeting">
-      <h2 id="wf-greeting">{greeting_icon} {greeting}, {user}</h2>
-      <p id="wf-clock">{today_str}</p>
-    </div>
-    {'<div class="dashboard-stats"><div class="stat-card highlight"><div class="stat-num">' + str(todo_total) + '</div><div class="stat-label">Tasks Left</div></div><div class="stat-card"><div class="stat-num">' + str(todo_done_today) + '</div><div class="stat-label">Done Today</div></div></div>' if has_todo else ''}
+    <{'a href="/timezones"' if has_timezones else 'div'} class="dashboard-clock">
+      <div class="dash-time" id="wf-time">--:--:--</div>
+      <div class="dash-where" id="wf-where">&nbsp;</div>
+      {'<div class="dash-cta">Compare time zones <span class="dash-arrow">&rarr;</span></div>' if has_timezones else ''}
+    </{'a' if has_timezones else 'div'}>
   </div>
   <script>
   (function(){{
-    var name = {json.dumps(user)};
+    // Where you are is the browser's answer, never the server's: this box is
+    // served from a machine in another country, and a laptop that travels
+    // changes the answer without telling anybody.
+    var zone = '';
+    try {{ zone = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; }} catch (e) {{}}
+    var city = zone ? zone.split('/').pop().replace(/_/g, ' ') : '';
+    var abbr = '';
+    try {{
+      abbr = new Intl.DateTimeFormat(undefined, {{timeZoneName: 'short'}})
+        .formatToParts(new Date())
+        .filter(function(p){{ return p.type === 'timeZoneName'; }})
+        .map(function(p){{ return p.value; }})[0] || '';
+    }} catch (e) {{}}
+
     function pad(n){{ return (n < 10 ? '0' : '') + n; }}
     function tick(){{
-      var d = new Date(), h = d.getHours(), g, ic;
-      if (h < 6)       {{ g = 'Good night';   ic = '🌙'; }}
-      else if (h < 12) {{ g = 'Good morning'; ic = '☀️'; }}
-      else if (h < 18) {{ g = 'Hello';        ic = '🌤️'; }}
-      else             {{ g = 'Good evening'; ic = '🌙'; }}
-      var ge = document.getElementById('wf-greeting');
-      var ce = document.getElementById('wf-clock');
-      if (ge) ge.textContent = ic + ' ' + g + ', ' + name;
-      if (ce) ce.textContent =
-        d.toLocaleDateString(undefined, {{weekday:'long', year:'numeric', month:'long', day:'numeric'}})
-        + ' · ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+      var d = new Date();
+      var te = document.getElementById('wf-time');
+      var we = document.getElementById('wf-where');
+      if (te) te.textContent =
+        pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+      if (we) we.textContent =
+        d.toLocaleDateString(undefined, {{weekday:'long', month:'long', day:'numeric'}})
+        + (city ? ' · ' + city : '') + (abbr ? ' (' + abbr + ')' : '');
     }}
     tick(); setInterval(tick, 1000);
   }})();
   </script>
-
-  {'<a href="/todo" class="app-entry-card"><div class="app-entry-icon">🧭</div><div class="app-entry-text"><div class="app-entry-name">My Productivity App</div><div class="app-entry-tabs">✅ Tasks &nbsp;·&nbsp; 🏃 Habits &nbsp;·&nbsp; 📊 Overview</div></div><div class="app-entry-arrow">→</div></a>' if has_todo else ''}
 
   {sections_html}
   {projects_html}
