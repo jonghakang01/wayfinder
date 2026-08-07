@@ -832,7 +832,7 @@ def wayfinder(user):
   </div>
   <div class="wf-install" id="wfInstall" hidden>
     <button type="button" class="wf-install-btn" id="wfInstallBtn">
-      📲 Add Wayfinder to your home screen</button>
+      🏠 Add a shortcut to your home screen</button>
     <p class="wf-install-tip" id="wfInstallTip" hidden></p>
   </div>
   <script>
