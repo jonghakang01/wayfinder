@@ -1772,7 +1772,9 @@ body:has(.fb-menu.open) .wf-back,body:has(.fb-menu.open) #wfThemeBtn{{display:no
   <a href="/cardconv" class="nav-brand">💳 Cheil AMEX Expense Assistant</a>
   <span class="nav-user">👤 {user} &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
 </nav>
-<div class="container" style="max-width:1100px">
+<!-- Same width as the Ledger (1600): the two tabs are read back to back, and
+     the jump in page width read as a glitch (강프로 2026-08-07). -->
+<div class="container" style="max-width:1600px">
   {_tab_bar("review", user)}
 
   <div style="font-size:.8rem;color:var(--text-muted);margin-bottom:12px;display:flex;align-items:center;gap:6px">
