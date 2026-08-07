@@ -121,6 +121,11 @@ _CC_TAB_CSS = (
     ".cc-collapse>summary::before{content:'▸';font-size:.7rem;color:var(--text-muted);transition:transform .15s}"
     ".cc-collapse[open]>summary::before{transform:rotate(90deg)}"
     ".cc-collapse-body{padding:4px 16px 14px}"
+    # The Drive box inside the collapsible: state on one line, actions on the
+    # next, instead of five inline items wrapping wherever they land.
+    ".drive-row{display:flex;flex-direction:column;gap:10px}"
+    ".drive-state{display:flex;align-items:center;gap:10px;flex-wrap:wrap}"
+    ".drive-acts{display:flex;align-items:center;gap:8px;flex-wrap:wrap}"
     ".cc-tabrow{display:flex;align-items:center;gap:10px;justify-content:space-between;flex-wrap:wrap}"
     ".cc-profile-sel{padding:7px 10px;background:var(--surface-2);border:1px solid var(--border);"
     "border-radius:var(--radius-md);color:var(--text);font-size:.8rem;font-weight:600;cursor:pointer;"
@@ -181,6 +186,11 @@ _CC_TAB_CSS = (
     # The floating Wayfinder/theme pills sit over the last controls on a phone
     # otherwise — Review's Sort select was under one (강프로 2026-08-07).
     ".container{padding-bottom:96px}"
+    # Opened sections follow the same rules as everything else: full-width
+    # 44px actions in a clean column, not desktop leftovers shrunk to fit.
+    ".drive-acts{flex-direction:column;align-items:stretch}"
+    ".drive-acts .btn{width:100%;justify-content:center;min-height:44px}"
+    ".cc-collapse>summary{min-height:44px}"
     # Anchored tooltips clip off-screen on narrow viewports — surface them as a
     # fixed bottom card instead (same click-to-toggle behavior).
     ".cc-tip{position:fixed;left:12px;right:12px;top:auto;bottom:calc(12px + env(safe-area-inset-bottom));max-width:none;width:auto;z-index:250;box-shadow:0 -8px 30px rgba(0,0,0,.5)}"
@@ -441,11 +451,14 @@ def _register_section(user: str) -> str:
                            f'target="_blank" class="btn btn-ghost btn-sm">📂 Open in Drive →</a>')
         sync_tip = _info_icon(
             'Fetches new receipts from Drive and uses AI (Gemini/Claude) to automatically extract date, amount, and merchant.')
+        # State on one line, actions on the next — five inline items of mixed
+        # weights wrapped arbitrarily on a phone and the opened section read as
+        # a jumble (강프로 2026-08-07). Structure instead of margins.
         drive_status_html = f'''
-      <span style="font-size:.88rem;font-weight:600;color:var(--success)">✅ Connected</span>
-      {folder_link}
-      <button class="btn btn-ghost btn-sm" onclick="startDriveSync(this)" style="margin-left:4px">🔄 Sync from Drive</button>{sync_tip}
-      <span id="lastSynced" data-ts="{last_synced}" style="font-size:.78rem;color:var(--text-muted);margin-left:4px"></span>'''
+      <div class="drive-state"><span style="font-size:.88rem;font-weight:600;color:var(--success)">✅ Connected</span>{sync_tip}
+        <span id="lastSynced" data-ts="{last_synced}" style="font-size:.78rem;color:var(--text-muted)"></span></div>
+      <div class="drive-acts">{folder_link}
+        <button class="btn btn-ghost btn-sm" onclick="startDriveSync(this)">🔄 Sync from Drive</button></div>'''
         receipt_upload_html = '''
       <form id="rcptForm" method="POST" action="/cardconv/receipts/upload" enctype="multipart/form-data">
         <div class="upload-zone" id="rcptZone" onclick="document.getElementById('rcptFiles').click()">
@@ -466,8 +479,8 @@ def _register_section(user: str) -> str:
       </form>'''
     else:
         drive_status_html = (
-            '<span style="font-size:.88rem;font-weight:600;color:var(--danger)">❌ Not connected</span>'
-            '<a href="/cardconv/drive/connect" class="btn btn-primary btn-sm">Connect Google Drive</a>'
+            '<div class="drive-state"><span style="font-size:.88rem;font-weight:600;color:var(--danger)">❌ Not connected</span></div>'
+            '<div class="drive-acts"><a href="/cardconv/drive/connect" class="btn btn-primary btn-sm">Connect Google Drive</a></div>'
         )
         receipt_upload_html = ('<p style="color:var(--text-muted);font-size:.85rem">'
                                'Connect Google Drive above to enable receipt upload.</p>')
@@ -477,9 +490,9 @@ def _register_section(user: str) -> str:
     # Collapsed by default (mobile-first) — auto-open until Drive is connected.
     open_attr = "" if connected else " open"
     return f'''
-  <div id="driveNewBanner" style="display:none;align-items:center;gap:10px;padding:10px 14px;margin-bottom:14px;border:1px solid rgba(245,158,11,.35);background:rgba(245,158,11,.08);border-radius:var(--radius-md)">
+  <div id="driveNewBanner" style="display:none;align-items:center;gap:10px;padding:10px 14px;margin-bottom:14px;border:1px solid rgba(245,158,11,.35);background:rgba(245,158,11,.08);border-radius:var(--radius-md);flex-wrap:wrap">
     <span style="font-size:1.1rem">🧾</span>
-    <span style="font-size:.85rem;color:var(--text)">New receipts in Drive: <b id="driveNewCount" style="color:#f59e0b">0</b> file(s) waiting to be synced</span>
+    <span style="font-size:.85rem;color:var(--text);flex:1;min-width:180px">New receipts in Drive: <b id="driveNewCount" style="color:#f59e0b">0</b> file(s) waiting to be synced</span>
     <button class="btn btn-primary btn-sm" style="margin-left:auto;flex-shrink:0" onclick="startDriveSync(this)">🔄 Sync now</button>
   </div>
   <details class="cc-collapse"{open_attr}>
@@ -489,7 +502,7 @@ def _register_section(user: str) -> str:
         <div class="notepad-header">
           <span style="font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--accent)">Google Drive</span>{drive_tip}
         </div>
-        <div class="notepad-body" style="padding:14px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+        <div class="notepad-body drive-row" style="padding:14px 20px">
           {drive_status_html}
         </div>
       </div>
@@ -1037,11 +1050,11 @@ def _render_keywords(user: str) -> str:
     kw_rows = ""
     for k in kws:
         kw_rows += f'''<tr>
-      <td style="font-weight:600;color:var(--accent)">{k["kw"]}</td>
-      <td style="color:var(--text-muted)">{k["gl"]}</td>
-      <td style="color:var(--text-muted)">{k["ser"]}</td>
-      <td style="flex:1;color:var(--text)">{k["purpose"]}</td>
-      <td><form method="POST" action="/cardconv/keyword/delete" style="display:inline">
+      <td data-label="Keyword" style="font-weight:600;color:var(--accent)">{k["kw"]}</td>
+      <td data-label="G/L" style="color:var(--text-muted)">{k["gl"]}</td>
+      <td data-label="Ser." style="color:var(--text-muted)">{k["ser"]}</td>
+      <td data-label="Purpose" style="color:var(--text)">{k["purpose"]}</td>
+      <td data-label=""><form method="POST" action="/cardconv/keyword/delete" style="display:inline">
         <input type="hidden" name="kw" value="{k["kw"]}">
         <button class="btn btn-danger btn-sm">✕</button>
       </form></td>
@@ -1056,6 +1069,22 @@ def _render_keywords(user: str) -> str:
 .kw-table{{width:100%;border-collapse:collapse;font-size:.82rem}}
 .kw-table td{{padding:8px 10px;border-bottom:1px solid var(--border)}}
 .kw-table tr:last-child td{{border-bottom:none}}
+/* Mobile card transform — same shape as the ledger table (guideline §5): five
+   columns never fit 425px, and this page was the one tab the last sweep never
+   measured (강프로 2026-08-07). */
+@media(max-width:768px){{
+  .kw-table,.kw-table tbody,.kw-table tr,.kw-table td{{display:block;width:100%}}
+  .kw-table thead{{display:none}}
+  .kw-table tr{{background:var(--surface-2);border:1px solid var(--border);
+    border-radius:var(--radius-md);margin-bottom:10px;padding:8px 12px;position:relative}}
+  .kw-table td{{border-bottom:none;padding:4px 0;display:flex;
+    justify-content:space-between;align-items:center;gap:10px;text-align:right}}
+  .kw-table td::before{{content:attr(data-label);font-size:.68rem;font-weight:700;
+    text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);text-align:left}}
+  .kw-table td[data-label=""]{{position:absolute;top:6px;right:8px;width:auto;padding:0}}
+  .kw-table td[data-label=""]::before{{content:none}}
+  .kw-table td[data-label="Keyword"]{{font-size:.92rem;padding-right:44px}}
+}}
 </style>
 </head><body>
 <nav>
@@ -1638,7 +1667,8 @@ def _render_review(user: str) -> str:
 .rv-agent-state.warn{{color:var(--amber-500);font-weight:600}}
 /* The three signals are debugging aids, folded away until something is off. */
 .rv-agent-detail{{font-size:.74rem;color:var(--text-muted)}}
-.rv-agent-detail summary{{cursor:pointer;list-style:none}}
+.rv-agent-detail summary{{cursor:pointer;list-style:none;display:inline-flex;
+  align-items:center;min-height:44px;padding:0 6px}}
 .rv-agent-detail summary::-webkit-details-marker{{display:none}}
 .rv-agent-detail[open] .rv-agent-chips{{margin-top:6px}}
 .rv-dry{{display:flex;align-items:center;gap:6px;font-size:.78rem;
