@@ -297,6 +297,10 @@ a, button, select, label, input[type=checkbox], input[type=radio] { touch-action
 .wf-spinner { width:14px; height:14px; flex-shrink:0; border-radius:50%;
   border:2px solid var(--border-bright); border-top-color:var(--accent);
   animation:wf-spin .7s linear infinite; }
+/* The saved toast wears the progress note's pill with a success edge — one
+   family of transient messages, two moods. */
+.wf-saved-note { border-color:var(--success); }
+.wf-saved-check { color:var(--success); font-weight:800; }
 @keyframes wf-spin { to { transform:rotate(360deg); } }
 /* A button that kicked off long work says so and stops taking second clicks. */
 .btn.is-busy { pointer-events:none; opacity:.72; }
@@ -721,6 +725,34 @@ PROGRESS_INJECT = (
     "</script>"
 )
 
+# One "Saved ✓" for the whole product (강프로 2026-08-07). Two ways in:
+#   window.wfSaved(msg)  — for fetch-based saves, called after the 200.
+#   automatically        — a document-level submit listener watches every
+#     full-page POST; when the button that fired it reads like a save, a flag
+#     rides sessionStorage across the redirect and the next page load toasts.
+# The flag expires in 15s so a form that died on an error page cannot claim
+# success half an hour later from the same tab.
+SAVED_TOAST_INJECT = (
+    '<div class="wf-progress-note wf-saved-note" id="wfSavedNote">'
+    '<span class="wf-saved-check">✓</span><span id="wfSavedText"></span></div>'
+    "<script>"
+    "window.wfSaved=function(msg){var n=document.getElementById('wfSavedNote'),"
+    "t=document.getElementById('wfSavedText');if(!n)return;"
+    "t.textContent=msg||'Saved';n.classList.add('is-on');"
+    "clearTimeout(window.__wfSavedT);"
+    "window.__wfSavedT=setTimeout(function(){n.classList.remove('is-on')},2200);};"
+    "document.addEventListener('submit',function(ev){"
+    "var f=ev.target;if(!f||String(f.method).toLowerCase()!=='post')return;"
+    "var b=ev.submitter||document.activeElement;"
+    "var label=((b&&(b.textContent||b.value))||'').trim();"
+    "if(/\\bsave\\b/i.test(label)){try{sessionStorage.setItem('wfSavedAt',Date.now())}catch(e){}}"
+    "},true);"
+    "try{var _sa=+sessionStorage.getItem('wfSavedAt');"
+    "if(_sa){sessionStorage.removeItem('wfSavedAt');"
+    "if(Date.now()-_sa<15000)wfSaved();}}catch(e){}"
+    "</script>"
+)
+
 THEME_TOGGLE = (
     '<button id="wfThemeBtn" class="wf-theme-btn" title="Toggle light/dark" '
     'onclick="wfToggleTheme()"></button>'
@@ -959,6 +991,8 @@ class Handler(BaseHTTPRequestHandler):
         html = html.replace('</head>', PWA_INJECT + '</head>', 1)
         if '</body>' in html:
             html = html.replace('</body>', PROGRESS_INJECT + '</body>', 1)
+        if '</body>' in html:
+            html = html.replace('</body>', SAVED_TOAST_INJECT + '</body>', 1)
         if '</body>' in html:
             html = html.replace('</body>', THEME_TOGGLE + '</body>', 1)
         if '<!--wf-root-->' not in html and '</body>' in html:
