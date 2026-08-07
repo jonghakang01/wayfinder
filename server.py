@@ -146,6 +146,22 @@ a.dashboard-clock:hover { background:rgba(255,255,255,0.06); }
 .dash-arrow { transition:transform .2s; }
 a.dashboard-clock:hover .dash-arrow { transform:translateX(4px); }
 
+/* "Add to Home Screen" — a phone-only offer, because on a desktop it is noise.
+   Hidden until the browser says it can be installed (or until we recognise iOS,
+   which has no such API and needs the two taps spelled out instead). The
+   [hidden] pair is not redundant: a class with display would otherwise beat the
+   attribute and the link would show on every desktop. */
+.wf-install { display:none; margin-top:16px; }
+@media (max-width:768px) { .wf-install { display:block; } }
+.wf-install[hidden] { display:none; }
+.wf-install-btn { display:inline-flex; align-items:center; gap:8px; min-height:44px;
+  padding:0 16px; border-radius:var(--radius-full); cursor:pointer;
+  background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.16);
+  color:inherit; font-family:inherit; font-size:0.82rem; font-weight:700; }
+.wf-install-btn:hover { border-color:var(--sky-400); color:var(--sky-400); }
+.wf-install-tip { margin-top:10px; color:var(--slate-400); font-size:0.82rem;
+  font-weight:500; line-height:1.5; }
+.wf-install-tip[hidden] { display:none; }
 .dashboard-stats { display: flex; gap: 14px; flex-wrap: wrap; }
 .stat-card { background: rgba(255,255,255,0.04); backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.08); border-radius: var(--radius-lg); padding: 16px 24px; text-align: center; min-width: 100px; transition: 0.2s; }
 .stat-card:hover { transform: translateY(-3px); background: rgba(255,255,255,0.07); }
@@ -808,6 +824,11 @@ def wayfinder(user):
       <div class="dash-where" id="wf-where">&nbsp;</div>
       {'<div class="dash-cta">Compare time zones <span class="dash-arrow">&rarr;</span></div>' if has_timezones else ''}
     </{'a' if has_timezones else 'div'}>
+    <div class="wf-install" id="wfInstall" hidden>
+      <button type="button" class="wf-install-btn" id="wfInstallBtn">
+        📲 Add Wayfinder to your home screen</button>
+      <p class="wf-install-tip" id="wfInstallTip" hidden></p>
+    </div>
   </div>
   <script>
   (function(){{
@@ -838,6 +859,37 @@ def wayfinder(user):
     }}
     tick(); setInterval(tick, 1000);
 
+    // Add to home screen. Chrome hands us an event we can fire on demand; iOS
+    // Safari has no such API at all, so there the same link spells out the two
+    // taps instead of pretending it can do it for you. Either way it is never
+    // offered to someone already running the installed app.
+    var box = document.getElementById('wfInstall');
+    var btn = document.getElementById('wfInstallBtn');
+    var tip = document.getElementById('wfInstallTip');
+    var deferred = null;
+    var installed = (window.matchMedia &&
+                     window.matchMedia('(display-mode: standalone)').matches) ||
+                    window.navigator.standalone === true;
+    var iOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+              (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+    window.addEventListener('beforeinstallprompt', function(e){{
+      e.preventDefault();
+      deferred = e;
+      if (box && !installed) box.hidden = false;
+    }});
+    if (box && iOS && !installed) box.hidden = false;
+
+    if (btn) btn.addEventListener('click', function(){{
+      if (deferred) {{ deferred.prompt(); deferred = null; if (box) box.hidden = true; return; }}
+      if (tip) {{
+        tip.textContent = iOS
+          ? 'Tap the Share button below, then choose "Add to Home Screen".'
+          : 'Open your browser menu, then choose "Add to Home screen".';
+        tip.hidden = false;
+      }}
+    }});
+    window.addEventListener('appinstalled', function(){{ if (box) box.hidden = true; }});
   }})();
   </script>
 
