@@ -73,6 +73,79 @@ def test_the_ordinary_date_field_still_works(monkeypatch):
     assert saved["t"][0]["due_date"] is None
 
 
+# ── how far it has really slipped (강프로 2026-08-07) ────────────────────────
+
+def _push_today(monkeypatch, store):
+    monkeypatch.setattr(todo, "load", lambda u: store)
+    saved = {}
+    monkeypatch.setattr(todo, "save", lambda t, u: saved.update({"t": t}))
+    todo.handle("POST", "/todo/set_meta",
+                {"id": ["1"], "due_today": ["1"]}, {"user": "someone"})
+    return saved["t"][0]
+
+
+def test_pushing_to_today_remembers_the_first_deadline(monkeypatch):
+    past = (date.today() - timedelta(days=5)).isoformat()
+    t = _push_today(monkeypatch, [_t(1, due_date=past)])
+    assert t["first_due"] == past
+    assert t["due_date"] == date.today().isoformat()
+
+
+def test_pushing_again_keeps_the_original_not_the_last(monkeypatch):
+    """Otherwise a task pushed daily would read as one day late, for ever."""
+    first = (date.today() - timedelta(days=9)).isoformat()
+    store = [_t(1, due_date=first)]
+    _push_today(monkeypatch, store)
+    store[0]["due_date"] = (date.today() - timedelta(days=1)).isoformat()
+    t = _push_today(monkeypatch, store)
+    assert t["first_due"] == first
+
+
+def test_a_task_that_never_had_a_deadline_gains_no_history(monkeypatch):
+    store = [_t(1, due_date=None)]
+    monkeypatch.setattr(todo, "load", lambda u: store)
+    saved = {}
+    monkeypatch.setattr(todo, "save", lambda t, u: saved.update({"t": t}))
+    todo.handle("POST", "/todo/set_meta",
+                {"id": ["1"], "due_date": ["2026-09-09"]}, {"user": "someone"})
+    assert "first_due" not in saved["t"][0]
+
+
+def test_clearing_the_deadline_clears_the_history(monkeypatch):
+    """Nothing with no deadline can be late for one."""
+    store = [_t(1, due_date="2026-01-01", first_due="2025-12-01")]
+    monkeypatch.setattr(todo, "load", lambda u: store)
+    saved = {}
+    monkeypatch.setattr(todo, "save", lambda t, u: saved.update({"t": t}))
+    todo.handle("POST", "/todo/set_meta",
+                {"id": ["1"], "due_date": [""]}, {"user": "someone"})
+    assert "first_due" not in saved["t"][0]
+
+
+def test_the_row_says_how_far_past_the_first_deadline_it_is(monkeypatch):
+    first = (date.today() - timedelta(days=6)).isoformat()
+    html = _render([_t(1, due_date=date.today().isoformat(), first_due=first)],
+                   monkeypatch=monkeypatch)
+    assert "6d past first due" in html
+    assert f"Originally due {first}" in html
+
+
+def test_pulling_a_task_earlier_than_its_first_date_drops_the_chip(monkeypatch):
+    """Ahead of the original plan is not slipping."""
+    ahead = (date.today() + timedelta(days=3)).isoformat()
+    assert todo.slipped_days(_t(1, first_due=ahead)) is None
+    html = _render([_t(1, due_date=ahead, first_due=ahead)], monkeypatch=monkeypatch)
+    assert "past first due" not in html
+
+
+def test_a_finished_task_stops_nagging(monkeypatch):
+    first = (date.today() - timedelta(days=4)).isoformat()
+    html = _render([_t(1, due_date=date.today().isoformat(), first_due=first,
+                       done=True, done_at="2026-08-07T09:00:00")],
+                   monkeypatch=monkeypatch)
+    assert "past first due" not in html
+
+
 # ── a project's own history ─────────────────────────────────────────────────
 
 def test_project_view_keeps_finished_work_under_its_project(monkeypatch):

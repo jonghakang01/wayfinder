@@ -129,6 +129,39 @@ def days_left(due_date_str):
     return (date.fromisoformat(due_date_str) - date.today()).days
 
 
+def _slip(t, new_due):
+    """Move a task's deadline, remembering the first one it ever had.
+
+    Pushing an overdue row to today makes the row look punctual, which loses the
+    thing you most wanted to know — how far it has actually slipped (강프로
+    2026-08-07). `first_due` is written once and then left alone, so it survives
+    any number of later pushes. Clearing the date drops it: a task with no
+    deadline cannot be late for one.
+    """
+    old = t.get("due_date")
+    if new_due is None:
+        t.pop("first_due", None)
+    elif old and old != new_due and not t.get("first_due"):
+        t["first_due"] = old
+    t["due_date"] = new_due
+
+
+def slipped_days(t):
+    """Days between the deadline this task first had and today, or None.
+
+    None once it is back on or ahead of its original date — a task pulled
+    earlier is not slipping, and the chip should simply go away.
+    """
+    first = t.get("first_due")
+    if not first:
+        return None
+    try:
+        n = (date.today() - date.fromisoformat(first)).days
+    except ValueError:
+        return None
+    return n if n > 0 else None
+
+
 def due_badge(due_date_str, done):
     if done or not due_date_str:
         return ""
@@ -276,11 +309,11 @@ def handle(method, path, body, ctx=None):
                 if "due_today" in body:
                     # Computed here, not baked into the button: a list left open
                     # overnight would otherwise move things to yesterday.
-                    t["due_date"] = date.today().isoformat()
+                    _slip(t, date.today().isoformat())
                 elif "due_date" in body:
                     # An empty date field clears the deadline; parse_qs keeps the
                     # key because the form always submits it.
-                    t["due_date"] = body["due_date"][0].strip() or None
+                    _slip(t, body["due_date"][0].strip() or None)
                 if "title" in body and body["title"][0].strip():
                     t["title"] = body["title"][0].strip()
                 if "has_note" in body:
@@ -499,10 +532,22 @@ def render(todos, habits, user, readonly=False, group_by="date"):
                     f'<input type="hidden" name="id" value="{tid}">'
                     f'<input type="hidden" name="due_today" value="1">'
                     f'<input type="hidden" name="next" value="{back}">'
-                    f'<button class="tk-nudge" type="submit" '
+                    f'<button class="chip-action tk-nudge" type="submit" '
                     f'title="Move the due date to today">→ Today</button></form>')
-        if project:
-            chips += f'<span class="tk-chip">{project}</span>'
+            # Pushing the date forward is not the same as being on time, so the
+            # original deadline keeps speaking. Muted on purpose: it is history,
+            # not the deadline you are working to.
+            slip = slipped_days(t)
+            if slip and not t.get("done"):
+                chips += (f'<span class="tk-chip tk-chip--slip" '
+                          f'title="Originally due {t["first_due"]}">'
+                          f'{slip}d past first due</span>')
+        # The project rides to the left of the title, not down in the meta strip:
+        # it is what you sort the row by in your head before you read the words
+        # (강프로 2026-08-07). Under "By project" the section heading already
+        # says it, so repeating it on every row is noise.
+        title_chip = (f'<span class="tk-chip tk-chip--project">{project}</span>'
+                      if project and not by_project else "")
         if place:
             chips += f'<span class="tk-chip">📍 {place["label"]}</span>'
         if prio == 1:
@@ -534,7 +579,7 @@ def render(todos, habits, user, readonly=False, group_by="date"):
             f'data-memo="{"1" if is_memo else ""}">'
             f'{check}'
             f'<div class="tk-main">'
-            f'<div class="tk-title">{t.get("title","")}</div>'
+            f'<div class="tk-title">{title_chip}{t.get("title","")}</div>'
             f'{f"<div class=\'tk-meta\'>{chips}</div>" if chips else ""}'
             f'</div>'
             f'{"" if readonly else "<span class=\'tk-open\'>›</span>"}'
@@ -935,6 +980,11 @@ def render(todos, habits, user, readonly=False, group_by="date"):
 .tk-check--on{{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}}
 .tk-main{{flex:1;min-width:0}}
 .tk-title{{font-size:var(--text-base);color:var(--text);line-height:1.4;word-break:break-word}}
+/* Inline-flex, so the chip sits on the first line and the title's own words
+   wrap around it the way they would around any other word. */
+.tk-title .tk-chip--project{{margin-right:7px;vertical-align:1px;
+  max-width:min(45%,180px);overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;display:inline-flex}}
 .tk-meta{{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}}
 /* Chips carry no fill: a tinted background pushed every one of these under AA
    in the light theme (4.13-4.49). On the card surface the same colors clear it
@@ -945,18 +995,19 @@ def render(todos, habits, user, readonly=False, group_by="date"):
   font-size:var(--text-xs);font-weight:var(--fw-semibold)}}
 .tk-due{{font-weight:var(--fw-bold)}}
 .tk-chip--high{{border-color:var(--group-4);color:var(--group-4)}}
+/* Dashed, because it is the only chip describing a date that is no longer set. */
+.tk-chip--slip{{border-style:dashed;border-color:var(--warn);color:var(--warn)}}
 .tk-chip--habit{{border-color:var(--group-3);color:var(--group-3)}}
 a.tk-row{{text-decoration:none;color:inherit}}
 .tk-due--over{{border-color:var(--danger);color:var(--danger)}}
-/* Sits with the chips, reads as an action rather than another label. */
+/* Sits with the chips and reads as an action rather than another label — see
+   .chip-action in the global sheet, which is the whole of its styling. It used
+   to be a dashed outline in the same muted grey as the project and place chips,
+   which made it the one thing here you can press wearing the clothes of the
+   things you cannot, and it grew to 32px on a phone while the chips stayed at
+   20 — so the strip's biggest element was its least important one
+   (강프로 2026-08-07). */
 .tk-nudge-form{{display:inline-flex}}
-.tk-nudge{{background:transparent;border:1px dashed var(--border-bright);
-  border-radius:999px;color:var(--text-muted);font-size:.7rem;font-weight:600;
-  padding:2px 9px;cursor:pointer;line-height:1.5}}
-.tk-nudge:hover{{border-style:solid;border-color:var(--accent);color:var(--accent)}}
-@media (max-width:768px){{
-  .tk-nudge{{min-height:32px;padding:4px 11px;font-size:.74rem}}
-}}
 .tk-due--today{{border-color:var(--warn);color:var(--warn)}}
 .tk-due--soon{{border-color:var(--accent);color:var(--accent)}}
 .tk-open{{color:var(--text-dim);font-size:1.2rem;line-height:1;flex-shrink:0;align-self:center}}
