@@ -344,6 +344,38 @@ def render(user):
     theme (measured 4.13–4.49). On the card surface the same colors clear it in both themes, and
     an outline still reads as a chip.</p>
 
+    <h3>Actions inside a chip strip</h3>
+    <p>A strip of chips is a place to <i>read</i>. When something you can <i>press</i> joins it, it has
+    to say so without shouting — Momentum's <code>&rarr; Today</code> shortcut on an overdue row was
+    a dashed outline in the same muted grey as the project and place chips, and it grew to 32px on a
+    phone while the chips stayed at 20. The one pressable thing wore the clothes of the things that
+    are not, and it was the biggest element in the strip while being the least important one.</p>
+    <p>Three rules, and they are the whole pattern (<code>.chip-action</code>):</p>
+    <ol>
+      <li><b>Fill is the signal.</b> Labels are outlines — that is already settled above — so the one
+      filled pill is the only thing you can press. Nothing else in the strip has to change to say it.</li>
+      <li><b>Accent means pressable.</b> Status colors describe: danger is "you missed this". An action
+      tinted danger melts back into the chip it answers, so accent stays reserved for the invitation.</li>
+      <li><b>Size is constant.</b> Exactly the chips' 20px in every viewport, so the strip stays one
+      line. Touch comfort comes from an invisible hit box, never from a bigger pill — and that box grows
+      <i>down</i>, not up, or it overhangs the title above and steals its taps.</li>
+    </ol>
+    <div class="ds-demo" style="flex-direction:column;align-items:stretch;gap:10px">
+      <div style="display:flex;align-items:flex-start;gap:12px;padding:12px 14px;background:var(--surface);
+                  border:1px solid var(--border);border-radius:var(--radius-md)">
+        <span style="width:24px;height:24px;border-radius:50%;border:2px solid var(--border-bright);flex-shrink:0"></span>
+        <span style="flex:1">
+          <span style="display:block;color:var(--text)">Client feedback pass</span>
+          <span style="display:flex;gap:6px;margin-top:6px;align-items:center">
+            <span class="ds-chip" style="border:1px solid var(--danger);color:var(--danger);background:transparent">1d overdue</span>
+            <button class="chip-action" type="button">&rarr; Today</button>
+            <span class="ds-chip" style="border:1px solid var(--border-bright);color:var(--text-muted);background:transparent">Samsung AEO</span>
+          </span>
+        </span>
+        <span style="color:var(--text-dim)">&rsaquo;</span>
+      </div>
+    </div>
+
     <h3>Adaptive disclosure — and its trap</h3>
     <p>Controls appear when there is something to control. An empty Tasks screen used to show
     six blocks of management furniture — stats, a group button, two filters, a reset — before it

@@ -212,6 +212,36 @@ details.bucket-section[open] .service-grid { margin-top:14px; }
   .btn-sm { height:36px; padding:0 10px; }
   .btn-lg { height:48px; }
 }
+/* An action that lives inside a strip of label chips — "→ Today" on an overdue
+   task, and anything else that answers a chip instead of describing one.
+   Three rules make it work, and they are the whole pattern:
+     1. Fill is the signal. Every label chip in these strips is an outline
+        (a tinted label loses AA in the light theme), so the one filled pill is
+        the only thing you can press, and nothing else has to change to say so.
+     2. Accent means pressable. Status colors describe — danger is "you missed
+        this" — so an action tinted danger would melt back into the chip it
+        answers. Accent is reserved for the invitation.
+     3. Size is constant. It is exactly the chips' 20px in every viewport, so
+        the strip stays one line; touch comfort comes from the invisible hit
+        box below, never from a bigger pill. */
+.chip-action {
+  display:inline-flex; align-items:center; gap:4px; position:relative;
+  height:20px; padding:0 9px; border:none; border-radius:var(--radius-full);
+  background:var(--accent-glow); color:var(--accent); font-family:inherit;
+  font-size:var(--text-xs); font-weight:var(--fw-bold); line-height:1;
+  cursor:pointer; white-space:nowrap; transition:background .15s,color .15s;
+}
+/* Grows down and sideways, not up: a hit box centred on a 20px pill would
+   overhang the task title above it and steal its taps. Below the strip is the
+   row's own bottom padding, which is dead space. 42px tall — under the 44px
+   floor by 2, which is the floor for primary controls; this is a shortcut for
+   something the detail sheet still does in full. */
+.chip-action::after {
+  content:""; position:absolute; left:-8px; right:-8px; top:-8px; bottom:-14px;
+}
+.chip-action:hover { background:var(--accent); color:var(--on-accent); }
+.chip-action:active { transform:scale(0.96); }
+
 .empty { text-align: center; color: var(--text-muted); padding: 48px 0; }
 
 /* Tap ergonomics (all viewports — harmless on desktop) */
