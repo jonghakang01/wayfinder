@@ -472,12 +472,30 @@ a, button, select, label, input[type=checkbox], input[type=radio] { touch-action
 
 CSS_VER = hashlib.md5(STYLE.encode()).hexdigest()[:8]
 
+# The home-screen icon. The old one was a hairline ring and a thin needle on
+# near-black — it read as an instrument panel, and at the 40px a launcher
+# actually draws it the ring closed up and the needle vanished (강프로
+# 2026-08-07: "올드한 느낌, 너무 Techy"). This one has no strokes at all: a
+# filled needle on a lit gradient, which survives being shrunk and does not
+# disappear against a dark wallpaper.
+# The mark stays inside the middle 60%, so a launcher that masks the icon to a
+# circle crops only background.
 ICON_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192">
-  <rect width="192" height="192" rx="40" fill="#0f172a"/>
-  <circle cx="96" cy="96" r="56" fill="none" stroke="#38bdf8" stroke-width="4"/>
-  <polygon points="96,44 104,96 96,90 88,96" fill="#38bdf8"/>
-  <polygon points="96,148 88,96 96,102 104,96" fill="#64748b"/>
-  <circle cx="96" cy="96" r="8" fill="white"/>
+  <defs>
+    <linearGradient id="wf-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6366f1"/>
+      <stop offset="0.55" stop-color="#3b82f6"/>
+      <stop offset="1" stop-color="#0ea5e9"/>
+    </linearGradient>
+    <linearGradient id="wf-sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.22"/>
+      <stop offset="0.6" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect width="192" height="192" rx="44" fill="url(#wf-bg)"/>
+  <rect width="192" height="192" rx="44" fill="url(#wf-sheen)"/>
+  <path d="M96 34 L124 132 L96 112 Z" fill="#ffffff"/>
+  <path d="M96 158 L68 60 L96 80 Z" fill="#ffffff" fill-opacity="0.45"/>
 </svg>"""
 
 MANIFEST = json.dumps({
@@ -489,7 +507,16 @@ MANIFEST = json.dumps({
     "background_color": "#f8fafc",
     "theme_color": "#0f172a",
     "orientation": "portrait-primary",
+    # PNG first and deliberately. An SVG-only manifest is accepted by Chrome but
+    # not reliably by everything that puts a page on a home screen, and the one
+    # that matters here is Samsung Internet — an icon nobody can render is how a
+    # shortcut ends up as a grey letter tile. "maskable" lets a launcher crop to
+    # its own shape without eating the needle, which sits inside the middle 60%.
     "icons": [
+        {"src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png",
+         "purpose": "any maskable"},
+        {"src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png",
+         "purpose": "any maskable"},
         {"src": "/icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"}
     ],
     "shortcuts": [
@@ -500,7 +527,8 @@ MANIFEST = json.dumps({
 
 SW_JS = f"""
 const CACHE = 'wayfinder-{CSS_VER}';
-const STATIC = ['/static/style.css?v={CSS_VER}', '/manifest.json', '/icons/icon.svg'];
+const STATIC = ['/static/style.css?v={CSS_VER}', '/manifest.json',
+                '/icons/icon.svg', '/icons/icon-192.png', '/icons/icon-512.png'];
 
 self.addEventListener('install', e => {{
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(STATIC)));
@@ -640,7 +668,7 @@ PWA_INJECT = (
     '<meta name="apple-mobile-web-app-capable" content="yes">'
     '<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">'
     '<meta name="apple-mobile-web-app-title" content="Wayfinder">'
-    '<link rel="apple-touch-icon" href="/icons/icon.svg">'
+    '<link rel="apple-touch-icon" href="/icons/icon-192.png">'
     "<script>if('serviceWorker'in navigator)navigator.serviceWorker.register('/sw.js');</script>"
     "<script>try{var _t=localStorage.getItem('wf-theme');if(_t)document.documentElement.dataset.theme=_t;}catch(e){}</script>"
 )
@@ -832,7 +860,7 @@ def wayfinder(user):
   </div>
   <div class="wf-install" id="wfInstall" hidden>
     <button type="button" class="wf-install-btn" id="wfInstallBtn">
-      🏠 Add a shortcut to your home screen</button>
+      🏠 Add a Wayfinder shortcut to your home screen</button>
     <p class="wf-install-tip" id="wfInstallTip" hidden></p>
   </div>
   <script>
@@ -967,6 +995,25 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b)
 
+    def send_icon_png(self, name):
+        """The rendered icon, cached hard — it changes about never, and a
+        launcher that re-fetches it on every glance is a launcher that shows a
+        blank tile when the network is slow."""
+        path = os.path.join(os.path.dirname(__file__), "static", "icons", name)
+        try:
+            with open(path, "rb") as f:
+                b = f.read()
+        except OSError:
+            self.send_response(404)
+            self.end_headers()
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "image/png")
+        self.send_header("Content-Length", len(b))
+        self.send_header("Cache-Control", "public, max-age=604800")
+        self.end_headers()
+        self.wfile.write(b)
+
     def redirect(self, url):
         self.send_response(302)
         self.send_header("Location", url)
@@ -1076,6 +1123,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_text(SW_JS, "application/javascript")
         if path == "/icons/icon.svg":
             return self.send_text(ICON_SVG, "image/svg+xml")
+        if path in ("/icons/icon-192.png", "/icons/icon-512.png"):
+            return self.send_icon_png(os.path.basename(path))
         if path == "/health":
             return self.send_text('{"status":"ok"}', "application/json")
         if path in ("/login", "/logout", "/signup"):
