@@ -3134,6 +3134,22 @@ __TABCSS__
   letter-spacing:.07em;color:var(--text-muted);border-bottom:1px solid var(--border)}
 .ledger-table td{padding:10px 7px;border-bottom:1px solid var(--border);vertical-align:middle}
 .ledger-scroll{overflow-x:auto}
+/* Desktop: a merchant name keeps to one ellipsized line instead of folding
+   "MANRESA BREAD" in half — it was the one column that actually wrapped; dates
+   and money have no spaces to break on, and blanket-nowrapping them only
+   inflated the Date column to 267px by chaining its chips. The container went
+   1100→1600 for the same reason as the ellipsis — a 1920 screen was spending
+   800px on margins while rows folded (강프로 2026-08-07). Span, not td: an
+   auto-layout table ignores a cell's max-width. Desktop-scoped: the ≤768 card
+   transform needs its cells free to flex. */
+@media(min-width:769px){
+  .m-name{display:inline-block;max-width:340px;white-space:nowrap;
+    overflow:hidden;text-overflow:ellipsis;vertical-align:bottom}
+}
+@media(min-width:769px) and (max-width:1520px){
+  .m-name{max-width:200px}
+}
+.row-tags{margin-top:3px}
 /* Wide screens: the table fits, so trade the (unused) x-scroll for sticky column headers. */
 @media(min-width:900px){
   .ledger-scroll{overflow:visible}
@@ -3284,7 +3300,7 @@ body:has(.fb-selbar.show) .wf-back,body:has(.fb-selbar.show) #wfThemeBtn{display
   <a href="/cardconv" class="nav-brand">💳 Cheil AMEX Expense Assistant</a>
   <span class="nav-user">👤 __USER__ &nbsp;·&nbsp; <a href="/logout">Logout</a></span>
 </nav>
-<div class="container" style="max-width:1100px">
+<div class="container" style="max-width:1600px">
 
   __TABS__
 
@@ -3870,14 +3886,18 @@ function rowHtml(e, i, opts){
   const compTag = e.completed ? '<span class="comp-tag">✓ Done</span>' : '';
   return '<tr data-i="' + i + '"' + (cls?(' class="'+cls.trim()+'"'):'') + '>' +
     checkCell.replace('<td>','<td data-label="Select">') +
+    // Chips live on their own line under the date, always. Chained inline they
+    // set the column's max-content to ~350px and the layout algorithm handed
+    // Date 267px while squeezing Merchant into folding (2026-08-07).
     '<td data-label="Date">' + (e.ocr_date||'–') +
       (e.ocr_time ? ' <span style="color:var(--text-muted);font-size:.72rem">' + e.ocr_time + '</span>' : '') +
-      dupTag + compTag + '</td>' +
+      ((dupTag || compTag) ? '<div class="row-tags">' + dupTag + compTag + '</div>' : '') + '</td>' +
     '<td data-label="Printed" style="color:var(--text-muted)">' +
       ((e.ocr_printed_amount===null||e.ocr_printed_amount===undefined) ? '–' : fmtCur(e.ocr_printed_amount)) + '</td>' +
     handCell.replace('<td','<td data-label="Handwritten"') +
     '<td data-label="Final" style="font-weight:700">' + fmtAmtFx(e, e.ocr_amount) + '</td>' +
-    '<td data-label="Merchant">' + (e.ocr_merchant||'–') +
+    '<td data-label="Merchant"><span class="m-name" title="' + esc1(e.ocr_merchant||'') + '">' +
+      (e.ocr_merchant||'–') + '</span>' +
       (e.ocr_companions ? '<span class="with-tag" title="Companion note — appended to the SAP purpose">w/ ' + e.ocr_companions + '</span>' : '') + '</td>' +
     '<td data-label="Card">' + cardCell(e) + '</td>' +
     '<td data-label="Usage">' + usageCell(e) + '</td>' +
