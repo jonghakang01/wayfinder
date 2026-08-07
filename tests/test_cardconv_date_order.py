@@ -11,6 +11,7 @@ from datetime import datetime
 core = importlib.import_module("services._cardconv_core")
 
 TODAY = datetime(2026, 7, 28)
+TODAY_AUG = datetime(2026, 8, 7)
 
 
 def r(s):
@@ -69,3 +70,45 @@ def test_relative_dates_still_use_the_upload_date(monkeypatch):
     out = core._ocr_entry_fields({"date": "today", "amount": 10.0},
                                  upload_date="2026-07-28")
     assert out["ocr_date"] == "2026-07-28"
+
+
+# ── the order is decided by evidence, not assumed US (강프로 2026-08-07) ──────
+# An Argentine receipt printed "06/08" kept reading as June 8th when it was
+# August 6th. The currency names the country, the country names the convention,
+# and the upload day anchors the tie when the currency is unknown.
+
+def test_a_foreign_currency_receipt_reads_day_first():
+    got = core._resolve_ambiguous_date("06/08/26", today=TODAY_AUG, currency="ARS")
+    assert got == "2026-08-06"
+
+
+def test_a_usd_receipt_still_reads_month_first():
+    got = core._resolve_ambiguous_date("06/08/26", today=TODAY_AUG, currency="USD")
+    assert got == "2026-06-08"
+
+
+def test_unknown_currency_leans_on_the_upload_day():
+    """Receipts are photographed within days of the purchase, not months."""
+    got = core._resolve_ambiguous_date("06/08/26", today=TODAY_AUG,
+                                       ref_date="2026-08-07")
+    assert got == "2026-08-06"
+
+
+def test_no_currency_and_no_anchor_keeps_the_old_us_reading():
+    assert core._resolve_ambiguous_date("12-05-25", today=TODAY) == "2025-12-05"
+
+
+def test_a_reading_in_the_future_loses_to_one_in_the_past():
+    """A receipt is for a purchase that already happened."""
+    # 09/10 on Sep 12: month-first Sep 10 (past) vs day-first Oct 9 (future).
+    got = core._resolve_ambiguous_date("09/10/26", today=datetime(2026, 9, 12),
+                                       currency="ARS")
+    assert got == "2026-09-10"     # the past one, even against the ARS day-first lean
+
+
+def test_the_ocr_pipeline_hands_the_context_down(monkeypatch):
+    monkeypatch.setattr(core, "_fx_usd_estimate", lambda *a, **k: (None, None))
+    out = core._ocr_entry_fields({"date": "06/08/26", "amount": 10.0,
+                                  "currency": "ARS"},
+                                 upload_date="2026-08-07")
+    assert out["ocr_date"] == "2026-08-06"

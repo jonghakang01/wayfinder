@@ -1,6 +1,6 @@
 import csv, io, json, os, re, sys, base64, uuid, zipfile
 from collections import Counter
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import openpyxl
@@ -2257,15 +2257,26 @@ _TODAY_TOKEN_RE = re.compile(r'today|오늘', re.IGNORECASE)
 _NUM_DATE_RE = re.compile(r'^\s*(\d{1,4})[-/.](\d{1,2})[-/.](\d{1,4})\s*$')
 
 
-def _resolve_ambiguous_date(raw, today=None):
+def _resolve_ambiguous_date(raw, today=None, currency=None, ref_date=None):
     """Read a three-part numeric date whose field order is unknown.
 
     A receipt printed "24-02-26" is three numbers and no convention. The rule
     (강프로 2026-07-28): whichever part reads as a plausible year is the year,
     and **when two of them could be** — 24 and 26 both can — the more recent
     one wins, because the receipt in your hand is the recent one. Of the two
-    that remain, anything past 12 has to be the day; when both could go either
-    way it is US order, month first, since the statement is a US AMEX one.
+    that remain, anything past 12 has to be the day.
+
+    When both remaining parts fit either slot, the order is decided by evidence
+    rather than assumed US (강프로 2026-08-07 — an Argentine "06/08" kept
+    reading as June 8th when it was August 6th):
+
+      1. A receipt is for a purchase that already happened. If one reading is
+         in the future and the other is not, the past one wins.
+      2. The currency names the country, and the country names the convention:
+         a foreign-currency receipt is day-first, a USD one month-first.
+      3. Currency unknown: `ref_date` (the upload day) is the closest anchor —
+         receipts are photographed within days of the purchase, not months.
+         The reading nearer to it wins; with no anchor either, month first.
 
     Returns YYYY-MM-DD, or None when nothing sane comes out (a bad guess costs
     a statement match, so silence is better).
@@ -2304,8 +2315,41 @@ def _resolve_ambiguous_date(raw, today=None):
         month, day = b, a
     elif b > 12:
         month, day = a, b
+    elif a == b:
+        month, day = a, b                # 05/05 — the readings agree
     else:
-        month, day = a, b                # both fit either slot — US order, month first
+        def mk(mo, d):
+            try:
+                return datetime(year, mo, d)
+            except ValueError:
+                return None
+        month_first, day_first = mk(a, b), mk(b, a)
+        if not month_first or not day_first:
+            picked = month_first or day_first
+            if not picked:
+                return None
+            month, day = picked.month, picked.day
+        else:
+            anchor = None
+            if isinstance(ref_date, str):
+                try:
+                    anchor = datetime.strptime(ref_date[:10], "%Y-%m-%d")
+                except ValueError:
+                    pass
+            horizon = (anchor or today) + timedelta(days=1)  # "tomorrow" is noise
+            mf_future, df_future = month_first > horizon, day_first > horizon
+            if mf_future != df_future:
+                picked = day_first if mf_future else month_first
+            elif currency and currency != "USD":
+                picked = day_first
+            elif currency == "USD":
+                picked = month_first
+            elif anchor and abs(month_first - anchor) != abs(day_first - anchor):
+                picked = min((month_first, day_first),
+                             key=lambda d: abs(d - anchor))
+            else:
+                picked = month_first
+            month, day = picked.month, picked.day
     try:
         return datetime(year, month, day).strftime("%Y-%m-%d")
     except ValueError:
@@ -2327,8 +2371,11 @@ def _ocr_entry_fields(ocr: dict, upload_date: str = None) -> dict:
             ocr_date = upload_date
         else:
             # A printed "24-02-26" used to be dropped on the floor; resolve the
-            # field order ourselves rather than lose the date entirely.
-            ocr_date = _resolve_ambiguous_date(ocr_date)
+            # field order ourselves rather than lose the date entirely. The
+            # currency and the upload day are the context that keeps an
+            # Argentine "06/08" from reading as June (강프로 2026-08-07).
+            ocr_date = _resolve_ambiguous_date(
+                ocr_date, currency=ocr.get("currency"), ref_date=upload_date)
     has_ocr = ocr.get("amount") is not None
     currency = ocr.get("currency")
     usd_est, fx_rate = _fx_usd_estimate(ocr.get("amount"), currency, ocr_date)
@@ -4033,12 +4080,23 @@ def _handle_ledger_update(username: str, entry_id: str, body: dict):
         hw = e.get("ocr_handwritten_amount")
         pr = e.get("ocr_printed_amount")
         e["ocr_amount"] = hw if hw is not None else pr
+        # A foreign receipt's USD figure is derived, so it follows the numbers
+        # it derives from: correct the ARS amount (or the date, which picks the
+        # rate) and the estimate was silently stale (강프로 2026-08-07).
+        cur = e.get("ocr_currency")
+        if cur and cur != "USD":
+            usd_est, fx = _fx_usd_estimate(e["ocr_amount"], cur, e.get("ocr_date"))
+            if usd_est is not None:
+                e["usd_estimate"], e["fx_rate"] = usd_est, fx
         updated = True
+        entry = e
         break
     if not updated:
         return ("json", {"error": "not found"}, 404)
     _save_ledger(username, ledger)
-    return ("json", {"ok": True, "cash_blocked": cash_blocked})
+    # The saved entry rides back so the panel can show what was saved rather
+    # than closing on a promise (강프로 2026-08-07).
+    return ("json", {"ok": True, "cash_blocked": cash_blocked, "entry": entry})
 
 
 def _handle_ledger_bulk(username: str, body: dict):

@@ -4179,9 +4179,17 @@ async function savePanelEdit(){
   if(!d.ok){ alert('Save failed: '+(d.error||r.status)); return; }
   if(d.cash_blocked)
     toast('Card type kept AMEX — matched receipts are AMEX by definition (unmatch first to mark as Cash). Other edits saved.', true);
+  // The panel stays open showing what was actually saved — closing on a
+  // promise made every save an act of faith (강프로 2026-08-07). The server's
+  // copy of the entry repaints the view (fresh USD estimate included), the
+  // list refreshes behind it, and the global toast says it landed.
   exitPanelEdit();
-  load();
-  closePanel();
+  var saved = CUR_ID;
+  await load();
+  var fresh = (d.entry && d.entry.id === saved) ? d.entry
+            : ENTRIES.find(function(x){ return x.id === saved; });
+  if (fresh) openPanel(fresh);
+  if (window.wfSaved) wfSaved();
 }
 
 async function togglePanelComplete(){
