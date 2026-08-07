@@ -191,10 +191,18 @@ def _forbidden():
     )
 
 
-# Services shown in the per-user permission UI. Anything a person can be given
-# individually belongs here; grants outside this list survive untouched
-# (see the scope field) so trimming it never revokes anything.
-_VISIBLE_SERVICES = ["momentum", "cardconv", "sow", "aeo", "llm-check", "toast"]
+def _visible_services():
+    """Services shown in the per-user permission UI.
+
+    Read from the registry rather than typed here. This used to be a second
+    hand-written list, so switching Time Zones on globally left no way to give
+    it to anybody — the global list knew about the app and this one did not
+    (강프로 2026-08-07). One source, and a new app appears in both at once.
+
+    Grants outside whatever this returns still survive untouched, via the scope
+    field, so the list changing never revokes anything.
+    """
+    return sorted(auth.CONTROLLED_SERVICES)
 
 
 def _drive_token_exists(username):
@@ -286,16 +294,15 @@ def render_admin(current_user, notify_result="", reset_result=None,
               </form>
             </div>'''
             user_svcs = set(info.get("services", []))
-            # decluttered to AMEX only (강프로 2026-07-24) — other grants are
-            # preserved via the scope field, just not shown here
+            visible = _visible_services()
             checks = "".join(
                 f'<label class="svc-check"><input type="checkbox" name="services" value="{s}"'
                 f'{" checked" if s in user_svcs else ""}> {svc_labels.get(s, s)}</label>'
-                for s in _VISIBLE_SERVICES
+                for s in visible
             )
             svc_col = f'''<form method="POST" action="/admin/set_services" class="svc-form">
               <input type="hidden" name="username" value="{username}">
-              <input type="hidden" name="scope" value="{",".join(_VISIBLE_SERVICES)}">
+              <input type="hidden" name="scope" value="{",".join(visible)}">
               {checks}
               <button type="submit" class="svc-save-btn">Save</button>
             </form>'''

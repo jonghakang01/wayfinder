@@ -59,3 +59,20 @@ def test_registration_survives_junk():
 def test_timezones_is_there():
     assert "timezones" in auth.CONTROLLED_SERVICES
     assert "Time Zones" in auth.APP_LABELS["timezones"]
+
+
+# ── the two admin lists must not drift apart (강프로 2026-08-07) ──────────────
+# Switching a service on globally is useless if it never appears in the per-user
+# checkboxes: the global list knew about Time Zones and the per-user one, which
+# was a second hand-written list, did not.
+
+def test_the_per_user_list_is_the_registry():
+    import services.admin as admin
+    assert admin._visible_services() == sorted(auth.CONTROLLED_SERVICES)
+
+
+def test_every_switchable_service_has_a_per_user_checkbox():
+    import services.admin as admin
+    html = admin.render_admin("__nobody__")
+    for slug in auth.CONTROLLED_SERVICES:
+        assert f'name="services" value="{slug}"' in html, slug
