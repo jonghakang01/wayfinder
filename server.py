@@ -766,7 +766,7 @@ THEME_TOGGLE = (
 
 CATEGORIES = {
     "💼 업무":    ["/momentum", "/toast", "/cardconv", "/sow", "/matters", "/aeo",
-                  "/llm-check", "/timezones"],
+                  "/llm-check", "/timezones", "/indiacomp"],
     "🏠 개인":    [],
     "🛠 팀 도구": ["/design"],
     "⚙️ 관리":    ["/admin"],
