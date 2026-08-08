@@ -428,7 +428,7 @@ def untouched_days(t, today):
     return n if n > 0 else None
 
 
-def _bucket_of(t, today_str, week_str):
+def _bucket_of(t, today_str, week_str, soon_str=None):
     """Which section a task belongs to. Dateless work is 'later' — it is not
     urgent by omission, and putting it up top drowns the things that are."""
     # Except work marked daily, which is in Today by definition: its whole point
@@ -440,6 +440,10 @@ def _bucket_of(t, today_str, week_str):
         return "later"
     if d <= today_str:
         return "now"
+    # Work due within a few days rides along in Today as "Upcoming": a deadline
+    # you only meet by starting before it arrives (강프로 2026-08-08).
+    if soon_str and d <= soon_str:
+        return "upcoming"
     if d <= week_str:
         return "week"
     return "later"
@@ -477,9 +481,10 @@ def render(todos, habits, user, readonly=False, group_by="date"):
                 _priority_of(t.get("priority")), t.get("due_date") or "9999-99-99",
                 -(t.get("id") or 0))
 
-    buckets = {"now": [], "week": [], "later": []}
+    soon_str = (today + timedelta(days=3)).isoformat()
+    buckets = {"now": [], "upcoming": [], "week": [], "later": []}
     for t in active:
-        buckets[_bucket_of(t, today_str, week_str)].append(t)
+        buckets[_bucket_of(t, today_str, week_str, soon_str)].append(t)
     for k in buckets:
         buckets[k].sort(key=_order)
 
@@ -746,7 +751,12 @@ def render(todos, habits, user, readonly=False, group_by="date"):
     else:
         now_html = ("".join(_habit_row(h) for h in habit_open)
                     + "".join(_row(t) for t in buckets["now"]))
-        now_n = len(habit_open) + len(buckets["now"])
+        # Due in the next few days, inside Today under its own quiet divider —
+        # visible while there is still time to act, apart from what is due now.
+        if buckets["upcoming"]:
+            now_html += ('<div class="tk-upcoming-head">Upcoming</div>'
+                         + "".join(_row(t) for t in buckets["upcoming"]))
+        now_n = len(habit_open) + len(buckets["now"]) + len(buckets["upcoming"])
         list_html = ((f'<div class="tk-section" data-bucket="now">'
                       f'<div class="tk-section-head"><span>Today</span>'
                       f'<span class="tk-section-n">{now_n}</span></div>{now_html}</div>'
@@ -1052,6 +1062,11 @@ def render(todos, habits, user, readonly=False, group_by="date"):
   font-size:var(--text-sm);color:var(--text)}}
 .tk-section-n{{background:var(--surface-2);color:var(--text-muted);border-radius:var(--radius-full);
   padding:1px 8px;font-size:var(--text-xs);font-weight:var(--fw-bold)}}
+.tk-upcoming-head{{display:flex;align-items:center;gap:10px;margin:14px 2px 8px;
+  font-size:var(--text-xs);font-weight:var(--fw-bold);letter-spacing:.06em;
+  text-transform:uppercase;color:var(--text-muted)}}
+.tk-upcoming-head::before,.tk-upcoming-head::after{{content:"";height:1px;
+  background:var(--border);flex:1}}
 
 .tk-row{{display:flex;align-items:flex-start;gap:12px;padding:12px 14px;cursor:pointer;
   background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-md);
