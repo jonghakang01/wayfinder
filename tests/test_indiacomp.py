@@ -258,3 +258,105 @@ def test_a_corrupt_file_falls_back_to_defaults(ic):
     settings, cands = ic.load(USER)
     assert settings["tp_pct"] == ic.DEFAULTS["tp_pct"]
     assert cands == []
+
+
+# --- hike and room (강프로 2026-08-08 저녁: 현재연봉 비교 + 버짓/Room) ---------
+
+def test_hike_is_offer_over_current(ic):
+    assert ic.hike_of({"lpa": 24, "current_lpa": 18}) == pytest.approx(100 * 6 / 18)
+
+
+def test_no_current_salary_means_no_hike_not_zero(ic):
+    assert ic.hike_of({"lpa": 24}) is None
+    assert ic.hike_of({"lpa": 24, "current_lpa": None}) is None
+
+
+def test_room_from_an_lpa_budget(ic):
+    """Budget 28 LPA against a 24 LPA offer: 4 LPA of room, and the USD room is
+    the same 4 LPA carried through burden, TP and FX."""
+    s = dict(ic.DEFAULTS)
+    room = ic.room_of({"lpa": 24, "budget_amount": 28, "budget_unit": "lpa"}, s)
+    assert room["room_lpa"] == pytest.approx(4.0)
+    # 4 LPA * 100000 * 1.1 * 1.18 / 88 = 5900
+    assert room["room_usd"] == pytest.approx(5900.0)
+
+
+def test_room_from_a_usd_budget(ic):
+    """Budget $40,000 at the US-charge level: room is budget minus the $35,400
+    this offer costs, and both axes agree."""
+    s = dict(ic.DEFAULTS)
+    c = {"lpa": 24, "budget_amount": 40_000, "budget_unit": "usd"}
+    room = ic.room_of(c, s)
+    assert room["room_usd"] == pytest.approx(40_000 - 35_400)
+    assert room["room_lpa"] == pytest.approx(
+        room["room_usd"] * 88 / (1.1 * 1.18) / ic.LAKH)
+
+
+def test_no_budget_means_no_room_row(ic):
+    assert ic.room_of({"lpa": 24}, dict(ic.DEFAULTS)) is None
+
+
+def test_over_budget_room_goes_negative(ic):
+    s = dict(ic.DEFAULTS)
+    room = ic.room_of({"lpa": 24, "budget_amount": 20, "budget_unit": "lpa"}, s)
+    assert room["room_lpa"] == pytest.approx(-4.0)
+    assert room["room_usd"] < 0
+
+
+def test_blank_optional_fields_survive_add_as_none(ic):
+    cid = ic.add(USER, {"name": "A", "lpa": "24", "current_lpa": "",
+                        "budget_amount": "", "budget_unit": ""})
+    _, cands = ic.load(USER)
+    c = next(x for x in cands if x["id"] == cid)
+    assert c["current_lpa"] is None
+    assert c["budget_amount"] is None
+    assert c["budget_unit"] == "lpa"
+
+
+def test_the_page_carries_glossary_hike_and_room(ic):
+    ic.add(USER, {"name": "Asha", "lpa": "24", "current_lpa": "18",
+                  "budget_amount": "28", "budget_unit": "lpa"})
+    _, html = ic.handle("GET", "/indiacomp", {}, {"user": USER})
+    assert "What the terms mean" in html          # glossary fold
+    assert 'class="ic-info' in html               # ⓘ marks exist
+    assert "+33% hike" in html                    # 24 over 18
+    assert "room $5,900" in html                  # budget line under the ladder
+
+
+def test_a_page_with_no_budget_shows_a_dash_not_a_room(ic):
+    ic.add(USER, {"name": "B", "lpa": "24"})
+    _, html = ic.handle("GET", "/indiacomp", {}, {"user": USER})
+    assert 'data-label="Room"' in html
+    # The element, not the class name — the stylesheet always carries the class.
+    assert '<div class="ic-budget">' not in html
+
+
+# --- market FX reference (강프로 2026-08-08: 최근 환율을 옆에 표시) ------------
+
+def _plant_market(ic, rate):
+    import json as _json, time as _time
+    with open(ic._market_file(), "w") as f:
+        _json.dump({"rate": rate, "at": _time.time(), "as_of": "08 Aug 2026"}, f)
+
+
+def test_market_rate_shows_beside_the_field_with_the_gap(ic):
+    _plant_market(ic, 87.0)
+    _, html = ic.handle("GET", "/indiacomp", {}, {"user": USER})
+    assert "Market now ₹87" in html
+    assert "+1.1% vs market" in html          # 88 entered vs 87 market
+
+
+def test_use_market_button_writes_the_market_rate(ic):
+    _plant_market(ic, 87.0)
+    ic.handle("POST", "/indiacomp/settings",
+              {"tp_pct": ["18"], "burden_pct": ["10"], "fx_rate": ["88"],
+               "use_market": ["87.00"]}, {"user": USER})
+    settings, _ = ic.load(USER)
+    assert settings["fx_rate"] == pytest.approx(87.0)
+    assert settings["fx_updated"]             # a rate change stamps the date
+
+
+def test_no_market_data_keeps_the_plain_hint(ic):
+    _, html = ic.handle("GET", "/indiacomp", {}, {"user": USER})
+    assert "Entered by hand" in html
+    assert "use_market" not in html

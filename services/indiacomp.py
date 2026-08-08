@@ -15,6 +15,8 @@ if the rate moves" a single edit rather than a spreadsheet full of them.
 """
 import json
 import os
+import time
+import urllib.request
 from datetime import date
 
 from services._paths import DATA_ROOT
@@ -49,7 +51,10 @@ LIMITS = {          # (low, high) — a typo should not render an absurd page
     "burden_pct": (0.0, 200.0),
     "tp_pct": (0.0, 500.0),
     "fx_rate": (1.0, 10_000.0),
+    "budget_usd": (0.0, 10_000_000.0),
 }
+
+BUDGET_UNITS = ("lpa", "usd")   # LPA caps the offer; USD caps what the US pays
 
 
 # --- data ---------------------------------------------------------------------
@@ -129,6 +134,11 @@ def add(user, fields):
         "role": (fields.get("role") or "").strip(),
         "location": (fields.get("location") or "").strip() or DEFAULT_LOCATION,
         "lpa": lpa,
+        "current_lpa": _optional(fields.get("current_lpa"), "lpa"),
+        "budget_amount": _optional(
+            fields.get("budget_amount"),
+            "budget_usd" if _unit(fields.get("budget_unit")) == "usd" else "lpa"),
+        "budget_unit": _unit(fields.get("budget_unit")),
         "burden_override": _override(fields.get("burden_override")),
         "note": (fields.get("note") or "").strip(),
         "created": date.today().isoformat(),
@@ -146,6 +156,18 @@ def _override(raw):
     return _clamp(_float(raw), "burden_pct")
 
 
+def _optional(raw, key):
+    """Blank means "not given" and stays None; anything else is clamped."""
+    if raw is None or str(raw).strip() == "":
+        return None
+    return _clamp(_float(raw), key)
+
+
+def _unit(raw):
+    u = (str(raw or "")).strip().lower()
+    return u if u in BUDGET_UNITS else "lpa"
+
+
 def update(user, cid, fields):
     settings, cands = load(user)
     for c in cands:
@@ -161,6 +183,14 @@ def update(user, cid, fields):
             lpa = _clamp(_float(fields.get("lpa")), "lpa")
             if lpa > 0:
                 c["lpa"] = lpa
+        if "current_lpa" in fields:
+            c["current_lpa"] = _optional(fields.get("current_lpa"), "lpa")
+        if "budget_unit" in fields:
+            c["budget_unit"] = _unit(fields.get("budget_unit"))
+        if "budget_amount" in fields:
+            c["budget_amount"] = _optional(
+                fields.get("budget_amount"),
+                "budget_usd" if c.get("budget_unit") == "usd" else "lpa")
         if "burden_override" in fields:
             c["burden_override"] = _override(fields.get("burden_override"))
         if "note" in fields:
@@ -230,6 +260,83 @@ def compute_for(cand, settings):
                    settings["tp_pct"], settings["fx_rate"])
 
 
+def hike_of(cand):
+    """How much the offer raises the candidate's current CTC, in percent.
+
+    None when there is nothing to compare against — a missing current salary is
+    not a 0% raise."""
+    cur = cand.get("current_lpa")
+    lpa = _float(cand.get("lpa"))
+    if cur is None or _float(cur) <= 0 or lpa <= 0:
+        return None
+    return (lpa - _float(cur)) / _float(cur) * 100.0
+
+
+def room_of(cand, settings, m=None):
+    """What sits between this offer and its budget ceiling, on both axes.
+
+    The ceiling arrives in either unit — LPA caps the offer itself, USD caps
+    what the US entity pays — and is carried through the same chain as the
+    offer, so room in one unit always agrees with room in the other."""
+    amt = cand.get("budget_amount")
+    if amt is None or _float(amt) <= 0:
+        return None
+    m = m or compute_for(cand, settings)
+    factor = (1 + m["burden_pct"] / 100.0) * (1 + m["tp_pct"] / 100.0)
+    if _unit(cand.get("budget_unit")) == "usd":
+        budget_usd = _float(amt)
+        budget_lpa = budget_usd * m["fx_rate"] / factor / LAKH
+    else:
+        budget_lpa = _float(amt)
+        budget_usd = budget_lpa * LAKH * factor / m["fx_rate"]
+    return {
+        "unit": _unit(cand.get("budget_unit")),
+        "budget_lpa": budget_lpa, "budget_usd": budget_usd,
+        "room_lpa": budget_lpa - _float(cand.get("lpa")),
+        "room_usd": budget_usd - m["usd_yr"],
+    }
+
+
+# The market rate is a reference the reviewer compares their entered rate
+# against — the entered rate stays the one the page computes with, so a rate
+# nobody approved never changes a saved number on its own.
+FX_MARKET_URL = "https://open.er-api.com/v6/latest/USD"   # keyless, daily data
+FX_MARKET_CACHE_H = 12
+
+
+def _market_file():
+    d = os.path.join(DATA_ROOT, "indiacomp")
+    os.makedirs(d, exist_ok=True)
+    return os.path.join(d, "_market_fx.json")
+
+
+def market_fx():
+    """The latest ₹/USD the internet knows, cached half a day; None offline.
+
+    Shared across users — the market has one rate. Under pytest it never
+    fetches: a unit test that reaches for the internet is a flaky test.
+    """
+    try:
+        with open(_market_file()) as f:
+            cached = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        cached = None
+    fresh = cached and (time.time() - _float(cached.get("at"))) < FX_MARKET_CACHE_H * 3600
+    if fresh or "PYTEST_CURRENT_TEST" in os.environ:
+        return cached
+    try:
+        with urllib.request.urlopen(FX_MARKET_URL, timeout=4) as r:
+            data = json.load(r)
+        rate = float(data["rates"]["INR"])
+        cached = {"rate": rate, "at": time.time(),
+                  "as_of": str(data.get("time_last_update_utc", ""))[:16]}
+        with open(_market_file(), "w") as f:
+            json.dump(cached, f)
+    except Exception:
+        pass          # offline keeps the stale answer; a reference can be old
+    return cached
+
+
 def fx_age_days(settings):
     """How old the rate is, or None if it has never been stamped."""
     stamp = settings.get("fx_updated") or ""
@@ -266,7 +373,8 @@ def _esc(s):
 # --- rendering ----------------------------------------------------------------
 
 STYLE = """
-.ic-wrap{max-width:1100px;margin:0 auto;padding:20px 16px 90px}
+/* 1400px is the one width every tab shares (강프로 2026-08-07, cardconv). */
+.ic-wrap{max-width:1400px;margin:0 auto;padding:20px 16px 90px}
 .ic-head{margin-bottom:18px}
 .ic-title{font-size:1.5rem;font-weight:var(--fw-extrabold);color:var(--text);
   letter-spacing:-.02em}
@@ -294,12 +402,61 @@ STYLE = """
 .ic-form{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;
   align-items:stretch}
 .ic-form .wf-field{justify-content:flex-start}
-.ic-submit{justify-content:flex-end}
+.ic-submit{flex-direction:row;justify-content:flex-end;align-items:flex-end;
+  gap:8px;flex-wrap:wrap}
 .ic-form--wide{grid-template-columns:1.4fr 1.4fr 1fr 1fr}
 .ic-form .ic-span2{grid-column:span 2}
 .ic-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
 .ic-hint{font-size:var(--text-xs);color:var(--text-muted);margin-top:4px}
 .ic-warn{color:var(--warn);font-weight:var(--fw-bold)}
+
+/* ⓘ — a term explained where it is used. A <details> so it works with a tap and
+   no script; the glyph is small but its hit area is padded out to 44px. */
+.ic-label-row{display:flex;align-items:center;gap:2px;min-height:24px}
+.ic-info{position:relative;display:inline-flex}
+.ic-info>summary{list-style:none;cursor:pointer;display:inline-flex;
+  align-items:center;justify-content:center;min-width:24px;min-height:24px;
+  padding:10px;margin:-10px;border-radius:var(--radius-full);
+  color:var(--text-muted);font-size:var(--text-xs);font-weight:var(--fw-bold)}
+.ic-info>summary::-webkit-details-marker{display:none}
+.ic-info>summary:hover{color:var(--accent)}
+.ic-info[open]>summary{color:var(--accent)}
+.ic-info-i{display:inline-flex;align-items:center;justify-content:center;
+  width:15px;height:15px;border:1px solid currentColor;border-radius:var(--radius-full);
+  font-size:10px;font-style:italic;font-weight:var(--fw-bold);line-height:1;
+  font-family:Georgia,serif}
+.ic-info-pop{position:absolute;left:0;top:calc(100% + 8px);z-index:40;
+  width:min(320px,78vw);background:var(--surface);border:1px solid var(--border-bright);
+  border-radius:var(--radius-md);box-shadow:var(--shadow-lg);padding:10px 12px;
+  font-size:var(--text-xs);font-weight:var(--fw-medium);color:var(--text);
+  line-height:1.5;text-transform:none;letter-spacing:0}
+.ic-info--right .ic-info-pop{left:auto;right:0}
+
+/* The glossary — every term on this page in plain words, one fold. */
+.ic-gloss{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:2px 28px}
+.ic-gloss>div{padding:9px 0;border-bottom:1px solid var(--border)}
+.ic-gloss dt{font-size:var(--text-sm);font-weight:var(--fw-bold);color:var(--text)}
+.ic-gloss dd{margin:3px 0 0;font-size:var(--text-sm);color:var(--text-muted);
+  line-height:1.5}
+
+/* Budget & room. Green means the offer fits under the ceiling, red means it
+   does not — the one judgement this page is asked to support. */
+.ic-room-pos{color:var(--success)}
+.ic-room-neg{color:var(--danger)}
+.ic-budget{display:flex;gap:14px;align-items:baseline;padding:13px 16px;
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius-lg);margin:-12px 0 22px;flex-wrap:wrap}
+.ic-budget-name{font-size:var(--text-sm);font-weight:var(--fw-bold);color:var(--text)}
+.ic-budget-math{font-size:var(--text-sm);color:var(--text-muted);
+  font-variant-numeric:tabular-nums;flex:1;min-width:0}
+.ic-budget-out{font-size:var(--text-md);font-weight:var(--fw-bold);
+  font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* An amount and its unit in one cell. minmax(0,..) so the pair can shrink. */
+.ic-money-pair{display:grid;grid-template-columns:minmax(0,1fr) 92px;gap:8px}
+.ic-money-pair select{min-height:44px;background:var(--surface);
+  color:var(--text);border:1px solid var(--border);border-radius:var(--radius-md);
+  padding:0 10px;font-size:var(--text-sm);font-weight:var(--fw-semibold)}
 
 /* Stage cards. The shared .wf-stat shape, with the value dialled down: a full
    rupee figure is ten characters, and 2.2rem breaks it across two lines. */
@@ -382,6 +539,14 @@ STYLE = """
   .ic-rung{flex-wrap:wrap;gap:8px}
   .ic-rung-out{flex-basis:100%;text-align:left}
   .ic-form,.ic-form--wide{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .ic-gloss{grid-template-columns:1fr}
+  /* On a phone the popover pins to the viewport, not the ⓘ: anchored to a
+     left-column label it left the screen on the left, to a right-column one on
+     the right. Fixed with auto top keeps it beside the mark vertically. */
+  /* top:auto, not the desktop calc(100%+8px): a fixed element resolves that
+     100% against the viewport and lands one screen below the tap. auto keeps
+     it at its flow position — right under the ⓘ that was just tapped. */
+  .ic-info-pop{position:fixed;left:12px;right:12px;width:auto;top:auto}
   .ic-sheet-grid{grid-template-columns:1fr}
   /* A span-2 child in a one-column grid does not stop spanning — it makes grid
      invent a second implicit column, and the sheet goes back to two cramped
@@ -402,27 +567,124 @@ STYLE = """
 """
 
 
+def _info(text, right=False):
+    """A tap-open ⓘ beside a label. Plain <details>, so it needs no script and
+    closes the way it opened; the hit area is padded out to 44px."""
+    # A styled letter, not U+24D8: the circled-i glyph is a font lottery (it
+    # rendered as tofu in headless QA), and the flag emoji already taught us
+    # not to gamble app chrome on glyph coverage.
+    cls = "ic-info" + (" ic-info--right" if right else "")
+    return (f'<details class="{cls}"><summary aria-label="What this means">'
+            f'<span class="ic-info-i">i</span>'
+            f'</summary><div class="ic-info-pop">{text}</div></details>')
+
+
 def _field(scope, label, name, value, *, kind="text", placeholder="", span=False,
-           hint="", step="", required=False):
+           hint="", step="", required=False, info="", control=""):
     """One labelled input. `scope` keeps the id unique per form on the page.
 
     Three forms here carry the same field names (burden_override appears in the
     assumptions, the intake and the edit sheet), and a duplicated id sends every
     label to whichever input the browser found first — the label in the edit
     sheet would focus the intake's box.
+
+    `info` puts a ⓘ beside the label; `control` swaps the default input for
+    custom markup (the budget field is an amount and a unit in one cell).
     """
     cls = "wf-field" + (" ic-span2" if span else "")
     extra = f' step="{step}"' if step else ""
     num = " wf-num" if kind == "number" else ""
     eid = f"ic-{scope}-{name}"
+    label_html = f'<label class="wf-label" for="{eid}">{label}</label>'
+    if info:
+        label_html = f'<div class="ic-label-row">{label_html}{_info(info)}</div>'
+    if not control:
+        control = (
+            f'<input class="wf-input{num}" id="{eid}" name="{name}" type="{kind}"'
+            f'{extra} value="{_esc(value)}" placeholder="{_esc(placeholder)}"'
+            f'{" required" if required else ""} autocomplete="off">')
+    return (f'<div class="{cls}">' + label_html + control
+            + (f'<div class="ic-hint">{hint}</div>' if hint else "")
+            + '</div>')
+
+
+def _budget_control(scope, amount, unit):
+    """The ceiling and the unit it is written in, side by side."""
+    eid = f"ic-{scope}-budget_amount"
+    amount_s = "" if amount is None else f"{_float(amount):g}"
+    opts = "".join(
+        f'<option value="{u}"{" selected" if _unit(unit) == u else ""}>'
+        f'{"LPA (offer)" if u == "lpa" else "USD (US pays)"}</option>'
+        for u in BUDGET_UNITS)
+    return (f'<div class="ic-money-pair">'
+            f'<input class="wf-input wf-num" id="{eid}" name="budget_amount"'
+            f' type="number" step="0.1" value="{amount_s}" placeholder="none set"'
+            f' autocomplete="off">'
+            f'<select name="budget_unit" aria-label="Budget unit">{opts}</select>'
+            f'</div>')
+
+
+# Every term this page uses, in plain words. One place, linkable, and the same
+# copy the ⓘ marks lean on — two wordings of one concept drift apart.
+GLOSSARY = [
+    ("LPA", "Lakh Per Annum. One lakh is ₹100,000, so 24 LPA means "
+            "₹2,400,000 a year. The unit every India offer is quoted in."),
+    ("CTC", "Cost To Company — the offer number. It already includes benefits "
+            "the employer pays, so it is bigger than take-home salary."),
+    ("Employer burden", "Insurance and extras the India entity pays on top of "
+                        "CTC. An approximate percentage until a real payroll "
+                        "gives the measured number."),
+    ("TP markup", "Transfer pricing. The US entity must reimburse the India "
+                  "entity at cost plus a markup — a cross-border tax rule, not "
+                  "a fee anyone pockets. 18% here."),
+    ("FX rate", "Rupees per dollar, entered by hand for internal review. The "
+                "page flags the rate once it is a month old."),
+    ("Hike", "How much the offer raises the candidate's current CTC. India "
+             "offers are negotiated as a hike percentage, so this is the "
+             "number the candidate hears."),
+    ("Budget & room", "The most this hire may cost — written in LPA to cap "
+                      "the offer, or in USD to cap what the US entity pays. "
+                      "Room is what is left under that ceiling."),
+]
+
+
+def _glossary():
+    items = "".join(f'<div><dt>{t}</dt><dd>{d}</dd></div>' for t, d in GLOSSARY)
     return (
-        f'<div class="{cls}">'
-        f'<label class="wf-label" for="{eid}">{label}</label>'
-        f'<input class="wf-input{num}" id="{eid}" name="{name}" type="{kind}"'
-        f'{extra} value="{_esc(value)}" placeholder="{_esc(placeholder)}"'
-        f'{" required" if required else ""} autocomplete="off">'
-        + (f'<div class="ic-hint">{hint}</div>' if hint else "")
-        + '</div>')
+        '<details class="ic-fold">'
+        '<summary>📖 What the terms mean'
+        '<span class="ic-fold-note">LPA, CTC, burden, TP, FX, hike, room</span>'
+        '</summary>'
+        f'<div class="ic-fold-body"><dl class="ic-gloss">{items}</dl></div>'
+        '</details>')
+
+
+def _market_hint(settings):
+    """What the market says next to what you entered, so "should I update?"
+    answers itself at a glance."""
+    mkt = market_fx()
+    if not mkt or not _float(mkt.get("rate")):
+        return "Entered by hand; last value is kept"
+    rate = _float(mkt["rate"])
+    diff = (settings["fx_rate"] - rate) / rate * 100.0
+    note = "matches the market" if abs(diff) < 0.5 else \
+        f'yours is {diff:+.1f}% vs market'
+    return (f'Market now ₹{_rate(rate)}'
+            + (f' (as of {_esc(mkt.get("as_of", ""))})' if mkt.get("as_of") else "")
+            + f' — {note}')
+
+
+def _market_button(settings):
+    """One tap writes the market rate into the assumption — through the same
+    POST as typing it, so it stamps the date like any other rate change."""
+    mkt = market_fx()
+    if not mkt or not _float(mkt.get("rate")):
+        return ""
+    rate = _float(mkt["rate"])
+    if abs(settings["fx_rate"] - rate) < 0.005:
+        return ""
+    return (f'<button class="btn btn-secondary" type="submit" '
+            f'name="use_market" value="{rate:.2f}">Use ₹{_rate(rate)}</button>')
 
 
 def _assumptions(settings, open_it):
@@ -446,14 +708,18 @@ def _assumptions(settings, open_it):
         f'<form method="POST" action="/indiacomp/settings" class="ic-form">'
         + _field("set", "TP markup %", "tp_pct", f'{settings["tp_pct"]:g}',
                  kind="number", step="0.1",
-                 hint="What the US entity pays the India entity on top of cost")
+                 hint="What the US entity pays the India entity on top of cost",
+                 info=dict(GLOSSARY)["TP markup"])
         + _field("set", "Employer burden %", "burden_pct", f'{settings["burden_pct"]:g}',
                  kind="number", step="0.1",
-                 hint="Insurance &amp; extras above CTC — approximate until measured")
+                 hint="Insurance &amp; extras above CTC — approximate until measured",
+                 info=dict(GLOSSARY)["Employer burden"])
         + _field("set", "FX rate ₹/USD", "fx_rate", f'{settings["fx_rate"]:g}',
-                 kind="number", step="0.01", hint="Entered by hand; last value is kept")
+                 kind="number", step="0.01", hint=_market_hint(settings),
+                 info=dict(GLOSSARY)["FX rate"])
         + '<div class="wf-field ic-submit">'
-          '<button class="btn btn-primary" type="submit">Save assumptions</button></div>'
+        + _market_button(settings)
+        + '<button class="btn btn-primary" type="submit">Save assumptions</button></div>'
         + '</form>'
         + '<div class="ic-hint">These apply to every saved candidate — change one '
           'and the whole list is recalculated.</div>'
@@ -471,12 +737,21 @@ def _intake(open_it, settings):
         + _field("add", "Role", "role", "", placeholder="e.g. Senior Analyst")
         + _field("add", "Offer LPA", "lpa", "", kind="number", step="0.1",
                  placeholder="24", required=True,
-                 hint="Lakh per annum, taken as CTC")
+                 hint="Lakh per annum, taken as CTC",
+                 info=dict(GLOSSARY)["LPA"] + " " + dict(GLOSSARY)["CTC"])
         + _field("add", "Location", "location", DEFAULT_LOCATION)
+        + _field("add", "Current CTC (LPA)", "current_lpa", "", kind="number",
+                 step="0.1", placeholder="what they earn now",
+                 hint="Optional — shows the hike % the offer represents",
+                 info=dict(GLOSSARY)["Hike"])
+        + _field("add", "Max budget", "budget_amount", "",
+                 control=_budget_control("add", None, "lpa"),
+                 hint="Optional ceiling — shows the room left under it",
+                 info=dict(GLOSSARY)["Budget & room"])
         + _field("add", "Burden % override", "burden_override", "", kind="number",
                  step="0.1", placeholder=f'{settings["burden_pct"]:g}',
                  hint="Blank uses the shared assumption")
-        + _field("add", "Note", "note", "", span=True, placeholder="Anything worth remembering")
+        + _field("add", "Note", "note", "", placeholder="Anything worth remembering")
         + '<div class="ic-actions ic-span2">'
           '<button class="btn btn-primary" type="submit">Add candidate</button>'
           '</div>'
@@ -506,10 +781,15 @@ def _stage_cards(m):
 
 def _ladder(c, m):
     lpa = _float(c.get("lpa"))
+    hike = hike_of(c)
+    offer_why = "One lakh is ₹100,000. Taken as CTC, the India convention."
+    if hike is not None:
+        offer_why += (f' A {hike:+.0f}% hike on the current '
+                      f'{_float(c.get("current_lpa")):g} LPA.')
     rungs = [
         ("step-1", "1", "Offer (CTC)",
          f'{lpa:g} LPA × {_inr(LAKH)} = {_inr(m["offer_yr"])} / yr',
-         "One lakh is ₹100,000. Taken as CTC, the India convention.",
+         offer_why,
          _inr(m["offer_yr"])),
         ("step-2", "2", "India entity cost",
          f'{_inr(m["offer_yr"])} × {1 + m["burden_pct"] / 100:.4g} '
@@ -539,9 +819,33 @@ def _ladder(c, m):
         for anchor, n, name, math, why, out in rungs) + '</div>'
 
 
+def _budget_line(c, m, room):
+    """The one judgement under the ladder: does this offer fit its ceiling?
+
+    Written as arithmetic like every rung above it, with the room on both axes
+    — the LPA figure is what you negotiate with, the USD figure is what you
+    answer for."""
+    if not room:
+        return ""
+    fits = room["room_usd"] >= 0
+    cls = "ic-room-pos" if fits else "ic-room-neg"
+    stated = (f'{_float(c.get("budget_amount")):g} LPA'
+              if room["unit"] == "lpa"
+              else f'{_usd(_float(c.get("budget_amount")))} / yr (US pays)')
+    return (
+        f'<div class="ic-budget">'
+        f'<div class="ic-budget-name">Budget</div>'
+        f'<div class="ic-budget-math">{stated} → {_usd(room["budget_usd"])} / yr '
+        f'US charge − {_usd(m["usd_yr"])} this offer</div>'
+        f'<div class="ic-budget-out {cls}">'
+        f'{"room " if fits else "over by "}{_usd(abs(room["room_usd"]))}'
+        f' · {abs(room["room_lpa"]):.1f} LPA</div>'
+        f'</div>')
+
+
 def _table(cands, settings, focus_id):
     head = ('<tr><th>Candidate</th><th>Offer</th><th>India cost</th>'
-            '<th>US charge</th><th>USD / yr</th><th>USD / mo</th><th></th></tr>')
+            '<th>US charge</th><th>USD / yr</th><th>Room</th><th></th></tr>')
     rows = ""
     for c in cands:
         m = compute_for(c, settings)
@@ -552,6 +856,21 @@ def _table(cands, settings, focus_id):
         ov = c.get("burden_override")
         if ov is not None:
             bits += f' · burden {_pct(_float(ov))}'
+        hike = hike_of(c)
+        offer_sub = _inr(m["offer_yr"])
+        if hike is not None:
+            offer_sub += f' · {hike:+.0f}% hike'
+        room = room_of(c, settings, m)
+        if room is None:
+            room_td = '<td data-label="Room" class="ic-num ic-sub">—</td>'
+        else:
+            fits = room["room_usd"] >= 0
+            cls = "ic-room-pos" if fits else "ic-room-neg"
+            room_td = (
+                f'<td data-label="Room" class="ic-num"><div class="{cls}">'
+                f'{"+" if fits else "−"}{_usd(abs(room["room_usd"]))[1:]}'
+                f'<div class="ic-sub">of {_usd(room["budget_usd"])}</div>'
+                f'</div></td>')
         rows += (
             f'<tr class="{"ic-row--on" if on else ""}">'
             f'<td data-label="Candidate"><div>'
@@ -562,12 +881,13 @@ def _table(cands, settings, focus_id):
             # the middle of the card instead of against the right edge.
             f'<td data-label="Offer" class="ic-num"><div>'
             f'{_float(c.get("lpa")):g} LPA'
-            f'<div class="ic-sub">{_inr(m["offer_yr"])}</div></div></td>'
+            f'<div class="ic-sub">{offer_sub}</div></div></td>'
             f'<td data-label="India cost" class="ic-num">{_inr(m["india_yr"])}</td>'
             f'<td data-label="US charge" class="ic-num">{_inr(m["us_yr"])}</td>'
-            f'<td data-label="USD / yr" class="ic-num">{_usd(m["usd_yr"])}</td>'
-            f'<td data-label="USD / mo" class="ic-num">{_usd(m["usd_mo"])}</td>'
-            f'<td data-label=""><div class="ic-acts">'
+            f'<td data-label="USD / yr" class="ic-num"><div>{_usd(m["usd_yr"])}'
+            f'<div class="ic-sub">{_usd(m["usd_mo"])} / mo</div></div></td>'
+            + room_td
+            + f'<td data-label=""><div class="ic-acts">'
             + ('' if on else
                f'<a class="btn btn-sm btn-ghost" href="/indiacomp?focus={c["id"]}">'
                f'Break down</a>')
@@ -594,6 +914,14 @@ def _edit_sheet(c, settings):
         + _field("edit", "Offer LPA", "lpa", f'{_float(c.get("lpa")):g}',
                  kind="number", step="0.1")
         + _field("edit", "Location", "location", c.get("location", DEFAULT_LOCATION))
+        + _field("edit", "Current CTC (LPA)", "current_lpa",
+                 "" if c.get("current_lpa") is None else f'{_float(c.get("current_lpa")):g}',
+                 kind="number", step="0.1",
+                 hint="Optional — shows the hike % the offer represents")
+        + _field("edit", "Max budget", "budget_amount", "",
+                 control=_budget_control("edit", c.get("budget_amount"),
+                                         c.get("budget_unit")),
+                 hint="Optional ceiling — shows the room left under it")
         + _field("edit", "Burden % override", "burden_override",
                  "" if ov is None else f"{_float(ov):g}", kind="number", step="0.1",
                  placeholder=f'{settings["burden_pct"]:g}',
@@ -629,6 +957,7 @@ def render(user, focus="", edit=""):
             f'<div class="ic-who">{who}{" — " + meta if meta else ""}</div></div>'
             + _stage_cards(m)
             + _ladder(focused, m)
+            + _budget_line(focused, m, room_of(focused, settings, m))
             + f'<div class="ic-section-head"><div class="ic-h2">'
               f'Candidates ({len(cands)})</div>'
               f'<div class="ic-who">Every row uses the assumptions above</div></div>'
@@ -663,6 +992,7 @@ def render(user, focus="", edit=""):
       and the transfer-pricing markup to the dollar figure a review actually
       needs. The arithmetic is written out at every step.</div>
   </div>
+  {_glossary()}
   {_assumptions(settings, not cands)}
   {_intake(not cands, settings)}
   {body}
@@ -677,21 +1007,28 @@ def handle(method, path, body, ctx=None):
     if method == "POST":
         if path == "/indiacomp/add":
             cid = add(user, {k: _first(body, k) for k in
-                             ("name", "role", "location", "lpa",
+                             ("name", "role", "location", "lpa", "current_lpa",
+                              "budget_amount", "budget_unit",
                               "burden_override", "note")})
             return ("redirect", f"/indiacomp?focus={cid}" if cid else "/indiacomp")
         if path == "/indiacomp/update":
             cid = _first(body, "id")
             update(user, cid, {k: _first(body, k) for k in
-                               ("name", "role", "location", "lpa",
+                               ("name", "role", "location", "lpa", "current_lpa",
+                                "budget_amount", "budget_unit",
                                 "burden_override", "note")})
             return ("redirect", f"/indiacomp?focus={cid}")
         if path == "/indiacomp/delete":
             delete(user, _first(body, "id"))
             return ("redirect", "/indiacomp")
         if path == "/indiacomp/settings":
-            save_settings(user, {k: _first(body, k)
-                                 for k in ("tp_pct", "burden_pct", "fx_rate")})
+            fields = {k: _first(body, k)
+                      for k in ("tp_pct", "burden_pct", "fx_rate")}
+            # The "Use ₹xx" button submits the market rate as its own value,
+            # outranking whatever sat in the input beside it.
+            if _first(body, "use_market"):
+                fields["fx_rate"] = _first(body, "use_market")
+            save_settings(user, fields)
             return ("redirect", "/indiacomp")
         return ("redirect", "/indiacomp")
 
